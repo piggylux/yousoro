@@ -2,6 +2,12 @@
   import type { Anime } from '$lib/types/anime';
 
   export let anime: Anime;
+
+  let modal: HTMLDialogElement;
+
+  function openModal() {
+    modal.showModal();
+  }
 </script>
 
 <div class="indicator">
@@ -10,18 +16,30 @@
       {anime.numberAiredEpisodes - anime.currentEpisode}
     </span>
   {/if}
-  <a class="card shadow-xl" href={`https://myanimelist.net/anime/${anime.id}/`} target="_blank">
-    <figure>
-      <img
-        src={anime.thumbnailUrl}
-        alt={anime.title}
-        class:up-to-date={!anime.numberAiredEpisodes ||
-          anime.numberAiredEpisodes - anime.currentEpisode === 0}
-      />
-    </figure>
+  <button class="card shadow-xl" on:click={openModal}>
+    <img
+      src={anime.thumbnailUrl}
+      alt={anime.title}
+      class:up-to-date={!anime.numberAiredEpisodes ||
+        anime.numberAiredEpisodes - anime.currentEpisode === 0}
+    />
     <span class="text-center font-bold">{anime.title}</span>
-  </a>
+  </button>
 </div>
+
+<dialog bind:this={modal} class="modal">
+  <form method="dialog" class="modal-box">
+    <a
+      class="font-bold text-lg link link-hover"
+      href={`https://myanimelist.net/anime/${anime.id}/`}
+      target="_blank">{anime.title}</a
+    >
+    <p class="py-4">Progression: {anime.currentEpisode} / {anime.numberEpisodes}</p>
+  </form>
+  <form method="dialog" class="modal-backdrop">
+    <button>close</button>
+  </form>
+</dialog>
 
 <style>
   .card {
@@ -47,10 +65,6 @@
     border-radius: var(--rounded-box, 1rem) var(--rounded-box, 1rem) 0 0;
     max-height: 400px;
     max-width: 300px;
-  }
-
-  .up-to-date {
-    /*filter: grayscale(1);*/
   }
 
   @keyframes pulse {
