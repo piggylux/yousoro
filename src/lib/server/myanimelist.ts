@@ -80,7 +80,6 @@ export class MyAnimeListApi implements Api {
   }
 
   private async getAnimeNumberAiredEpisodes(animeTitle: string): Promise<number | null> {
-    return Promise.resolve(0);
     try {
       await this.rateLimit();
       const response = await this.anilist.searchEntry.anime(animeTitle);
@@ -100,7 +99,9 @@ export class MyAnimeListApi implements Api {
         return null;
       }
 
-      return (anime.nextAiringEpisode as unknown as AiringEntry).episode - 1;
+      const airingEntry = anime.nextAiringEpisode as unknown as AiringEntry;
+
+      return airingEntry.episode - 1;
     } catch (error) {
       console.error(error);
       return null;

@@ -14,7 +14,7 @@
 <section>
   <div class="username flex justify-center">
     <a
-      class="link link-hover font-bold"
+      class="btn btn-outline glass"
       href={`https://myanimelist.net/animelist/${data.username}?status=1`}
       target="_blank">{data.username}'s profile</a
     >

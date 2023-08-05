@@ -6,13 +6,18 @@
 
 <div class="indicator">
   {#if anime.numberAiredEpisodes && anime.numberAiredEpisodes - anime.currentEpisode > 0}
-    <span class="indicator-item badge badge-primary">
+    <span class="indicator-item badge badge-secondary">
       {anime.numberAiredEpisodes - anime.currentEpisode}
     </span>
   {/if}
   <a class="card shadow-xl" href={`https://myanimelist.net/anime/${anime.id}/`} target="_blank">
     <figure>
-      <img src={anime.thumbnailUrl} alt={anime.title} />
+      <img
+        src={anime.thumbnailUrl}
+        alt={anime.title}
+        class:up-to-date={!anime.numberAiredEpisodes ||
+          anime.numberAiredEpisodes - anime.currentEpisode === 0}
+      />
     </figure>
     <span class="text-center font-bold">{anime.title}</span>
   </a>
@@ -31,9 +36,7 @@
   }
 
   .indicator-item {
-    height: 30px;
-    top: 20px;
-    right: 20px;
+    font-weight: bold;
   }
 
   .indicator:hover {
@@ -44,6 +47,10 @@
     border-radius: var(--rounded-box, 1rem) var(--rounded-box, 1rem) 0 0;
     max-height: 400px;
     max-width: 300px;
+  }
+
+  .up-to-date {
+    /*filter: grayscale(1);*/
   }
 
   @keyframes pulse {
