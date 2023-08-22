@@ -5,7 +5,7 @@
 
   const domainOptions: UserDomain[] = [
     { label: 'MyAnimeList', value: 'myanimelist' },
-    { label: 'AniList', value: 'anilist', disabled: true },
+    { label: 'AniList', value: 'anilist' },
   ];
 
   let username = '';

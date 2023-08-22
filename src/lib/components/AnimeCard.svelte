@@ -2,6 +2,7 @@
   import type { Anime } from '$lib/types/anime';
 
   export let anime: Anime;
+  export let animeLinkFn: (animeId: number) => string;
 
   let modal: HTMLDialogElement;
 
@@ -29,10 +30,8 @@
 
 <dialog bind:this={modal} class="modal">
   <form method="dialog" class="modal-box">
-    <a
-      class="font-bold text-lg link link-hover"
-      href={`https://myanimelist.net/anime/${anime.id}/`}
-      target="_blank">{anime.title}</a
+    <a class="font-bold text-lg link link-hover" href={animeLinkFn(anime.id)} target="_blank"
+      >{anime.title}</a
     >
     <p class="py-4">Progression: {anime.currentEpisode} / {anime.numberEpisodes}</p>
   </form>

@@ -1,9 +1,21 @@
 <script lang="ts">
   import AnimeCard from '$lib/components/AnimeCard.svelte';
-  import type { Anime } from '$lib/types/anime';
+  import type { AnimePageData } from '$lib/types/api';
 
   /** @type {import('./$types').PageData} */
-  export let data: { username: string; watchingList: Anime[] };
+  export let data: AnimePageData;
+
+  let animeLinkFn: (animeId: number) => string;
+  switch (data.domain) {
+    case 'myanimelist':
+      animeLinkFn = (animeId: number) => `https://myanimelist.net/anime/${animeId}/`;
+      break;
+    case 'anilist':
+      animeLinkFn = (animeId: number) => `https://anilist.co/anime/${animeId}/`;
+      break;
+    default:
+      animeLinkFn = () => '';
+  }
 </script>
 
 <svelte:head>
@@ -13,16 +25,14 @@
 
 <section>
   <div class="username flex justify-center">
-    <a
-      class="btn btn-outline glass"
-      href={`https://myanimelist.net/animelist/${data.username}?status=1`}
-      target="_blank">{data.username}'s profile</a
+    <a class="btn btn-outline glass" href={data.userProfileLink} target="_blank"
+      >{data.username}'s profile</a
     >
   </div>
 
   <div class="anime-grid">
     {#each data?.watchingList as anime}
-      <AnimeCard bind:anime />
+      <AnimeCard bind:anime bind:animeLinkFn />
     {/each}
   </div>
 </section>
