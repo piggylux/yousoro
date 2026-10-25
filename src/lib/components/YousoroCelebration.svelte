@@ -13,7 +13,7 @@
   let { kind, title, onDone }: Props = $props();
 
   /** Matches the CSS timeline below */
-  const DURATION_MS = 3000;
+  const DURATION_MS = 5000;
 
   onMount(() => {
     const timer = setTimeout(() => onDone?.(), DURATION_MS);
@@ -71,7 +71,7 @@
     width: 280px;
     pointer-events: none;
     /* The whole scene fades away at the very end */
-    animation: scene-out 0.4s ease-in 2.6s forwards;
+    animation: scene-out 0.4s ease-in 4.6s forwards;
   }
 
   .scene {
@@ -90,8 +90,8 @@
     /* Rises in with a little overshoot, bobs on the water, then sinks back down */
     animation:
       sail-in 0.7s cubic-bezier(0.2, 1.4, 0.4, 1) both,
-      bob 1.6s ease-in-out 0.7s,
-      sail-out 0.45s ease-in 2.3s forwards;
+      bob 1.6s ease-in-out 0.7s 2,
+      sail-out 0.45s ease-in 4.3s forwards;
   }
 
   .bubble {
@@ -110,7 +110,7 @@
     transform-origin: bottom left;
     animation:
       bubble-pop 0.4s cubic-bezier(0.2, 1.6, 0.4, 1) 0.45s both,
-      bubble-out 0.25s ease-in 2.2s forwards;
+      bubble-out 0.25s ease-in 4.2s forwards;
   }
 
   .bubble strong {
@@ -288,7 +288,7 @@
     .celebration {
       animation:
         fade-in 0.3s ease-out both,
-        scene-out 0.4s ease-in 2.6s forwards;
+        scene-out 0.4s ease-in 4.6s forwards;
     }
   }
 
