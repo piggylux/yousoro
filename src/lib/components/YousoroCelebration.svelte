@@ -21,7 +21,44 @@
   });
 
   const message = $derived(kind === 'completed' ? `Completed ${title}!` : `Caught up on ${title}!`);
+
+  // You's sailor colours, with a bit of sunshine
+  const CONFETTI_COLORS = ['#49b9f9', '#145f9c', '#ffffff', '#ffd23f', '#9fdcff'];
+
+  /**
+   * Confetti pieces, each falling from a random place above the screen with its own colour, size,
+   * speed, sideways drift and spin. More for finishing an anime than for catching up
+   */
+  const confetti = $derived(
+    Array.from({ length: kind === 'completed' ? 80 : 45 }, (_, i) => ({
+      x: Math.random() * 100,
+      color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+      round: Math.random() < 0.3,
+      size: 6 + Math.random() * 6,
+      delay: Math.random() * 1.2,
+      duration: 2.6 + Math.random() * 1.6,
+      drift: (Math.random() - 0.5) * 160,
+      spin: (Math.random() < 0.5 ? -1 : 1) * (360 + Math.random() * 720),
+    }))
+  );
 </script>
+
+<!-- A shower of confetti over the whole screen, which never blocks clicks either -->
+<div class="confetti" aria-hidden="true">
+  {#each confetti as piece, i (i)}
+    <span
+      class="piece"
+      class:round={piece.round}
+      style:left="{piece.x}%"
+      style:--size="{piece.size}px"
+      style:--color={piece.color}
+      style:--delay="{piece.delay}s"
+      style:--duration="{piece.duration}s"
+      style:--drift="{piece.drift}px"
+      style:--spin="{piece.spin}deg"
+    ></span>
+  {/each}
+</div>
 
 <!--
   You Watanabe sails in on the waves with her "Yousoro!" salute when a show is caught up on or
@@ -270,6 +307,49 @@
     }
   }
 
+  .confetti {
+    position: fixed;
+    inset: 0;
+    z-index: 49;
+    overflow: hidden;
+    pointer-events: none;
+    animation: scene-out 0.4s ease-in 4.6s forwards;
+  }
+
+  /* Paper strips, and some dots, that tumble as they fall */
+  .piece {
+    position: absolute;
+    top: -20px;
+    width: var(--size);
+    height: calc(var(--size) * 1.6);
+    border-radius: 2px;
+    background: var(--color);
+    box-shadow: 0 0 0 1px rgb(15 61 110 / 0.08);
+    opacity: 0;
+    animation: fall var(--duration) cubic-bezier(0.25, 0.4, 0.55, 1) var(--delay) forwards;
+  }
+
+  .piece.round {
+    height: var(--size);
+    border-radius: 50%;
+  }
+
+  @keyframes fall {
+    0% {
+      opacity: 1;
+      translate: 0 0;
+      rotate: 0deg;
+    }
+    85% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+      translate: var(--drift) 105vh;
+      rotate: var(--spin);
+    }
+  }
+
   /* Without motion: the same message and picture, simply fading in and out */
   @media (prefers-reduced-motion: reduce) {
     .you,
@@ -281,7 +361,8 @@
     }
 
     .sea-bubble,
-    .sparkle {
+    .sparkle,
+    .confetti {
       display: none;
     }
 
