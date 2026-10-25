@@ -1,26 +1,24 @@
 <script lang="ts">
-  import AnimeCard from '$lib/components/AnimeCard.svelte';
-  import type { AnimePageData } from '$lib/types/api';
+  import AnimeCard from '#lib/components/AnimeCard.svelte';
+  import type { AnimePageData } from '#lib/types/api.js';
 
-  /** @type {import('./$types').PageData} */
-  export let data: AnimePageData;
+  let { data }: { data: AnimePageData } = $props();
 
-  let animeLinkFn: (animeId: number) => string;
-  switch (data.domain) {
-    case 'myanimelist':
-      animeLinkFn = (animeId: number) => `https://myanimelist.net/anime/${animeId}/`;
-      break;
-    case 'anilist':
-      animeLinkFn = (animeId: number) => `https://anilist.co/anime/${animeId}/`;
-      break;
-    default:
-      animeLinkFn = () => '';
-  }
+  const animeLinkFn = $derived.by(() => {
+    switch (data.domain) {
+      case 'myanimelist':
+        return (animeId: number) => `https://myanimelist.net/anime/${animeId}/`;
+      case 'anilist':
+        return (animeId: number) => `https://anilist.co/anime/${animeId}/`;
+      default:
+        return () => '';
+    }
+  });
 </script>
 
 <svelte:head>
-  <title>{data?.username} - Yousoro</title>
-  <meta name="description" content={`${data?.username}'s watching list`} />
+  <title>{data.username} - Yousoro</title>
+  <meta name="description" content={`${data.username}'s watching list`} />
 </svelte:head>
 
 <section>
@@ -31,8 +29,8 @@
   </div>
 
   <div class="anime-grid">
-    {#each data?.watchingList as anime}
-      <AnimeCard bind:anime bind:animeLinkFn />
+    {#each data.watchingList as anime}
+      <AnimeCard {anime} {animeLinkFn} />
     {/each}
   </div>
 </section>

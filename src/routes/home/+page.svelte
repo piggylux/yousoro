@@ -1,6 +1,6 @@
 <script>
   import UserForm from './UserForm.svelte';
-  import YouSvg from '$lib/images/minimalist_you.svg';
+  import YouSvg from '#lib/images/minimalist_you.svg';
 </script>
 
 <svelte:head>

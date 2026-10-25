@@ -1,18 +1,21 @@
-<script>
+<script lang="ts">
   import Header from './Header.svelte';
+  import type { LayoutProps } from './$types';
   import './styles.css';
   import '../app.css';
+
+  let { children }: LayoutProps = $props();
 </script>
 
 <div class="app">
   <Header />
 
   <main>
-    <slot />
+    {@render children()}
   </main>
 
   <footer>
-    <button on:click={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>⚓</button>
+    <button onclick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>⚓</button>
   </footer>
 </div>
 

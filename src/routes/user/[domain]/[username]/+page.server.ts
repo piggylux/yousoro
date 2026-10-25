@@ -1,6 +1,7 @@
-import { AniListApi } from '$lib/server/anilist';
-import { MyAnimeListApi } from '$lib/server/myanimelist';
-import type { Domain } from '$lib/types/domain';
+import { AniListApi } from '#lib/server/anilist.js';
+import { MyAnimeListApi } from '#lib/server/myanimelist.js';
+import type { Domain } from '#lib/types/domain.js';
+import { error } from '@sveltejs/kit';
 
 /** @type {import('./$types').PageServerLoad} */
 export async function load({ params }: { params: { username: string; domain: Domain } }) {
@@ -17,7 +18,7 @@ export async function load({ params }: { params: { username: string; domain: Dom
   }
 
   if (!apiClass) {
-    throw TypeError(`Unknown domain: ${params.domain}`);
+    error(404, `Unknown domain: ${params.domain}`);
   }
 
   let userProfileLink: string;
@@ -35,7 +36,7 @@ export async function load({ params }: { params: { username: string; domain: Dom
   return {
     domain: params.domain,
     username: params.username,
-    watchingList: apiClass.getAnimeList(params.username),
+    watchingList: await apiClass.getAnimeList(params.username),
     userProfileLink,
   };
 }

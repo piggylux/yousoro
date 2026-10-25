@@ -1,13 +1,17 @@
 <script lang="ts">
-  import type { Anime } from '$lib/types/anime';
+  import type { Anime } from '#lib/types/anime.js';
 
-  export let anime: Anime;
-  export let animeLinkFn: (animeId: number) => string;
+  type Props = {
+    anime: Anime;
+    animeLinkFn: (animeId: number) => string;
+  };
 
-  let modal: HTMLDialogElement;
+  let { anime, animeLinkFn }: Props = $props();
+
+  let modal = $state<HTMLDialogElement>();
 
   function openModal() {
-    modal.showModal();
+    modal?.showModal();
   }
 </script>
 
@@ -17,7 +21,7 @@
       {anime.numberAiredEpisodes - anime.currentEpisode}
     </span>
   {/if}
-  <button class="card shadow-xl" on:click={openModal}>
+  <button class="card shadow-xl" onclick={openModal}>
     <img
       src={anime.thumbnailUrl}
       alt={anime.title}

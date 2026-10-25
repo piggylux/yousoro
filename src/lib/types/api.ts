@@ -1,5 +1,5 @@
-import type { Anime } from '$lib/types/anime';
-import type { Domain } from '$lib/types/domain';
+import type { Anime } from '#lib/types/anime.js';
+import type { Domain } from '#lib/types/domain.js';
 import type Anilist from 'anilist-node';
 
 export interface Api {

@@ -1,5 +1,5 @@
 <section class="loading-container">
-  <span class="loading loading-ring loading-lg" />
+  <span class="loading loading-ring loading-lg"></span>
 </section>
 
 <style>

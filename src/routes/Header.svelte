@@ -3,7 +3,7 @@
     <div class="navbar">
       <div class="navbar-start">
         <div class="dropdown">
-          <a class="btn btn-ghost btn-circle" href="/home">
+          <a class="btn btn-ghost btn-circle" href="/home" aria-label="Home">
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
               <path
                 d="M20 7.093l-3-3v-2.093h3v5.093zm4 5.907h-3v10h-18v-10h-3l12-12 12 12zm-10 2h-4v6h4v-6z"
@@ -13,10 +13,15 @@
         </div>
       </div>
 
-      <div class="navbar-center" />
+      <div class="navbar-center"></div>
 
       <div class="navbar-end">
-        <a class="btn btn-ghost btn-circle" href="https://x.com/sylux6" target="_blank">
+        <a
+          class="btn btn-ghost btn-circle"
+          href="https://x.com/sylux6"
+          target="_blank"
+          aria-label="X profile"
+        >
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300" class="h-5 w-5">
             <path
               d="M178.57 127.15 290.27 0h-26.46l-97.03 110.38L89.34 0H0l117.13 166.93L0 300.25h26.46l102.4-116.59 81.8 116.59h89.34M36.01 19.54H76.66l187.13 262.13h-40.66"
@@ -27,6 +32,7 @@
         <a
           class="btn btn-ghost btn-circle"
           href="https://github.com/Sylux6/yousoro"
+          aria-label="GitHub repository"
           target="_blank"
         >
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
