@@ -94,6 +94,11 @@ export type Backlog = {
   biggest: { anime: Anime; episodes: number } | null;
 };
 
+/** The anime to list: all of them, or without those AniList marks as adult when they're hidden */
+export function withoutHiddenMature(animeList: Anime[], showMature: boolean): Anime[] {
+  return showMature ? animeList : animeList.filter((anime) => !anime.isAdult);
+}
+
 /**
  * New episodes the user has fallen behind on. Rewatches are left out: their episodes aired long
  * ago, and the user watches them at their own pace.

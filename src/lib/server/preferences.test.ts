@@ -20,8 +20,9 @@ function cookiesWith(value?: string) {
 const cookie = (data: object) => JSON.stringify({ v: 1, data });
 
 describe('getPreferences', () => {
-  it('blurs mature covers and searches every release by default', () => {
+  it('shows mature anime blurred and searches every release by default', () => {
     expect(getPreferences(cookiesWith())).toEqual({
+      showMature: true,
       blurMature: true,
       cardSize: 'medium',
       downloadLanguage: 'any',
@@ -31,6 +32,7 @@ describe('getPreferences', () => {
 
   it('reads saved choices', () => {
     const saved = {
+      showMature: false,
       blurMature: false,
       cardSize: 'small',
       downloadLanguage: 'french',
@@ -41,10 +43,8 @@ describe('getPreferences', () => {
 
   it('gives settings added later their default, keeping the others', () => {
     expect(getPreferences(cookiesWith(cookie({ blurMature: false })))).toEqual({
+      ...DEFAULT_PREFERENCES,
       blurMature: false,
-      cardSize: 'medium',
-      downloadLanguage: 'any',
-      downloadVersion: 'any',
     });
   });
 
@@ -56,22 +56,22 @@ describe('getPreferences', () => {
     [
       'the wrong type',
       { blurMature: 'no', downloadLanguage: 'english', downloadVersion: 'subbed' },
-      {
-        blurMature: true,
-        cardSize: 'medium',
-        downloadLanguage: 'english',
-        downloadVersion: 'subbed',
-      },
+      { ...DEFAULT_PREFERENCES, downloadLanguage: 'english', downloadVersion: 'subbed' },
     ],
     [
       'an unknown language',
       { blurMature: false, downloadLanguage: 'klingon', downloadVersion: 'dubbed' },
-      { blurMature: false, cardSize: 'medium', downloadLanguage: 'any', downloadVersion: 'dubbed' },
+      { ...DEFAULT_PREFERENCES, blurMature: false, downloadVersion: 'dubbed' },
     ],
     [
       'an unknown version',
       { blurMature: false, downloadLanguage: 'french', downloadVersion: 'raw' },
-      { blurMature: false, cardSize: 'medium', downloadLanguage: 'french', downloadVersion: 'any' },
+      { ...DEFAULT_PREFERENCES, blurMature: false, downloadLanguage: 'french' },
+    ],
+    [
+      'a show-mature setting that isn’t a yes or no',
+      { showMature: 'nope', blurMature: false },
+      { ...DEFAULT_PREFERENCES, blurMature: false },
     ],
   ])('falls back to the default for just the setting with %s', (_, data, expected) => {
     expect(getPreferences(cookiesWith(cookie(data)))).toEqual(expected);
@@ -87,14 +87,22 @@ describe('getPreferences', () => {
 
 describe('setPreferences', () => {
   it('round-trips every combination', () => {
-    for (const blurMature of [true, false]) {
-      for (const downloadLanguage of DOWNLOAD_LANGUAGES) {
-        for (const downloadVersion of DOWNLOAD_VERSIONS) {
-          for (const cardSize of CARD_SIZES) {
-            const preferences = { blurMature, cardSize, downloadLanguage, downloadVersion };
-            const cookies = cookiesWith();
-            setPreferences(cookies, preferences);
-            expect(getPreferences(cookies)).toEqual(preferences);
+    for (const showMature of [true, false]) {
+      for (const blurMature of [true, false]) {
+        for (const downloadLanguage of DOWNLOAD_LANGUAGES) {
+          for (const downloadVersion of DOWNLOAD_VERSIONS) {
+            for (const cardSize of CARD_SIZES) {
+              const preferences = {
+                showMature,
+                blurMature,
+                cardSize,
+                downloadLanguage,
+                downloadVersion,
+              };
+              const cookies = cookiesWith();
+              setPreferences(cookies, preferences);
+              expect(getPreferences(cookies)).toEqual(preferences);
+            }
           }
         }
       }

@@ -24,7 +24,9 @@ export function isDownloadVersion(value: unknown): value is DownloadVersion {
 
 /** Display settings a visitor picks on the settings page, remembered in their browser. */
 export type Preferences = {
-  /** Blur covers of anime AniList marks as adult (18+) */
+  /** List anime AniList marks as adult (18+); when off, they're left out of every list */
+  showMature: boolean;
+  /** Blur covers of anime AniList marks as adult, when they're shown */
   blurMature: boolean;
   /** How big the anime cards are, and so how many fit in a row */
   cardSize: CardSize;
@@ -36,6 +38,7 @@ export type Preferences = {
 
 /** What a visitor gets before choosing anything: the safe choice for lists others may see */
 export const DEFAULT_PREFERENCES: Preferences = {
+  showMature: true,
   blurMature: true,
   cardSize: 'medium',
   downloadLanguage: 'any',

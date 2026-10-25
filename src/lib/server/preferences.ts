@@ -19,6 +19,8 @@ const ONE_YEAR_SECONDS = 365 * 24 * 60 * 60;
  */
 export function toPreferences(values: Partial<Record<keyof Preferences, unknown>>): Preferences {
   return {
+    showMature:
+      typeof values.showMature === 'boolean' ? values.showMature : DEFAULT_PREFERENCES.showMature,
     blurMature:
       typeof values.blurMature === 'boolean' ? values.blurMature : DEFAULT_PREFERENCES.blurMature,
     cardSize: isCardSize(values.cardSize) ? values.cardSize : DEFAULT_PREFERENCES.cardSize,

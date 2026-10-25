@@ -1,5 +1,6 @@
 import { type Cookies, error, fail, type RequestEvent } from '@sveltejs/kit';
 
+import { withoutHiddenMature } from '#lib/anime.js';
 import { AniListNotFoundError, AniListTokenError, saveEntry } from '#lib/server/anilist-client.js';
 import { AniListApi } from '#lib/server/anilist.js';
 import { parseEntryUpdate } from '#lib/server/entry-update.js';
@@ -43,7 +44,8 @@ export async function load({
     username,
     avatarUrl,
     canEdit: userId !== null && locals.session?.user.id === userId,
-    watchingList: animeList,
+    // Anime AniList marks as adult are left out entirely when the viewer chose not to see them
+    watchingList: withoutHiddenMature(animeList, locals.preferences.showMature),
     scoreFormat,
     userProfileLink: `https://anilist.co/user/${encodeURIComponent(username)}/animelist/Watching`,
   };

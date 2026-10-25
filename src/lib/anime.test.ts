@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { getBacklog, getNextUp, getWatchState, sortWatchingList } from '#lib/anime.js';
+import {
+  getBacklog,
+  getNextUp,
+  getWatchState,
+  sortWatchingList,
+  withoutHiddenMature,
+} from '#lib/anime.js';
 import type { Anime } from '#lib/types/anime.js';
 
 function anime(overrides: Partial<Anime>): Anime {
@@ -182,5 +188,17 @@ describe('getNextUp', () => {
 
   it('is null when nothing is scheduled', () => {
     expect(getNextUp([anime({ id: 1 })])).toBeNull();
+  });
+});
+
+describe('withoutHiddenMature', () => {
+  const list = [anime({ id: 1 }), anime({ id: 2, isAdult: true }), anime({ id: 3 })];
+
+  it('lists every anime when mature anime are shown', () => {
+    expect(withoutHiddenMature(list, true).map((a) => a.id)).toEqual([1, 2, 3]);
+  });
+
+  it('leaves out the anime AniList marks as adult when they are hidden', () => {
+    expect(withoutHiddenMature(list, false).map((a) => a.id)).toEqual([1, 3]);
   });
 });
