@@ -32,30 +32,11 @@ format can change later: bump its version and add a migration from the old one.
 
 ## Development
 
-Requires [Bun](https://bun.sh) and Node.js 22.17 or later.
+Requires [Bun](https://bun.sh). Create an [AniList API client](https://anilist.co/settings/developer)
+with the redirect URL `http://localhost:5173/auth/anilist/callback`, and put its ID in `.env` as
+`ANILIST_CLIENT_ID` (see `.env.example`). Then:
 
-1. Create an AniList API client at <https://anilist.co/settings/developer> with the redirect URL
-   `http://localhost:5173/auth/anilist/callback`.
-2. Copy `.env.example` to `.env` and set `ANILIST_CLIENT_ID` to the client's ID (a number). It
-   isn't a secret, and no other configuration is needed.
-3. Install and start:
-
-   ```bash
-   bun install
-   bun run dev
-   ```
-
-| Command          | What it does                                     |
-| ---------------- | ------------------------------------------------ |
-| `bun run dev`    | Start the dev server                             |
-| `bun run build`  | Build for production                             |
-| `bun run check`  | Type-check with `svelte-check`                   |
-| `bun run test`   | Run the tests in watch mode                      |
-| `bun run lint`   | Check formatting with oxfmt and lint with oxlint |
-| `bun run format` | Format the code with oxfmt                       |
-
-A deployed site needs its own AniList client, with the redirect URL
-`<site origin>/auth/anilist/callback`, since each client allows a single redirect URL.
-
-Built with SvelteKit, Svelte 5, Tailwind CSS and daisyUI. Formatting and linting use the
-[oxc](https://oxc.rs) tools, oxfmt and oxlint; for format-on-save, use the oxc editor extension.
+```bash
+bun install
+bun run dev
+```

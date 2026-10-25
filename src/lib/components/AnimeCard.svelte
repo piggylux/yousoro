@@ -41,6 +41,12 @@
     downloadVersion?: DownloadVersion;
     /** How the list owner scores anime on AniList, which `anime.userScore` is in */
     scoreFormat?: ScoreFormat;
+    /** Where the card is in the list, counting from 0 */
+    position?: number;
+    /** Called once a save is done and the list reloaded, with where the card was before */
+    onSaved?: (animeId: number, positionBefore: number) => void;
+    /** Glows for a moment, so the eye finds the card in its new place after a save */
+    highlighted?: boolean;
   };
 
   let {
@@ -52,6 +58,9 @@
     downloadLanguage = 'any',
     downloadVersion = 'any',
     scoreFormat = DEFAULT_SCORE_FORMAT,
+    position = 0,
+    onSaved,
+    highlighted = false,
   }: Props = $props();
 
   const coverBlurred = $derived(anime.isAdult && blurMature);
@@ -176,6 +185,7 @@
     errorMessage = null;
     const stateBefore = watchState;
     const progressBefore = anime.currentEpisode;
+    const positionBefore = position;
     const scored = formData.has('score') && scoreChanged;
 
     return async ({ result, update }) => {
@@ -202,6 +212,7 @@
       }
       // Reloads the list, so the card shows what AniList saved
       await update({ reset: false });
+      if (result.type === 'success') onSaved?.(anime.id, positionBefore);
     };
   };
 </script>
@@ -220,7 +231,7 @@
   }}
 />
 
-<div class="card-slot tw:indicator tw:h-full">
+<div class="card-slot tw:indicator tw:h-full" class:highlight={highlighted}>
   <!-- Every badge sits in the same place, centered on top of the card, so they're easy to scan -->
   {#if watchState === 'completed'}
     <span class="card-badge tw:indicator-item tw:indicator-center tw:badge tw:badge-success"
@@ -563,6 +574,20 @@
    * Sea glow: on hover, or when a keyboard user is on the card, a sky-blue glow rings it, the cover
    * brightens and a wave rolls along its bottom edge. Nothing moves or scales, so it stays sharp
    */
+  /* After a save moves the card, a sky-blue ring that fades out, so the eye finds it again */
+  .highlight .face {
+    animation: found 2s ease-out;
+  }
+
+  @keyframes found {
+    0%,
+    40% {
+      box-shadow:
+        0 0 0 4px var(--you-blue),
+        0 0 28px 6px rgb(73 185 249 / 0.6);
+    }
+  }
+
   .card-slot:hover .face,
   .card-slot:has(:focus-visible) .face {
     box-shadow:

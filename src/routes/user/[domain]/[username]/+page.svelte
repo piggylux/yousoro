@@ -1,6 +1,6 @@
 <script lang="ts">
   import { beforeNavigate } from '$app/navigation';
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { flip } from 'svelte/animate';
   import { prefersReducedMotion } from 'svelte/motion';
   import { fade } from 'svelte/transition';
@@ -45,15 +45,30 @@
   const shownList = $derived(animeList.slice(range.start, range.end));
   const listIds = $derived(new Set(animeList.map((anime) => anime.id)));
 
+  // The grid's columns and row height as last measured, which also place cards not rendered
+  let gridShape: { columns: number; rowStride: number; rowGap: number } | null = null;
+
   // Every card is the same size, so the first one gives the columns and the row height
-  function measure() {
+  function measureShape() {
     const first = grid?.firstElementChild;
-    if (!grid || !(first instanceof HTMLElement)) return;
+    if (!grid || !(first instanceof HTMLElement)) return null;
     const style = getComputedStyle(grid);
+    const rowGap = parseFloat(style.rowGap) || 0;
+    gridShape = {
+      columns: countColumns(grid.clientWidth, first.offsetWidth, parseFloat(style.columnGap) || 0),
+      rowStride: first.offsetHeight + rowGap,
+      rowGap,
+    };
+    return gridShape;
+  }
+
+  function measure() {
+    const shape = measureShape();
+    if (!grid || !shape) return;
     const next = getVisibleRange({
       itemCount: animeList.length,
-      columns: countColumns(grid.clientWidth, first.offsetWidth, parseFloat(style.columnGap) || 0),
-      rowStride: first.offsetHeight + (parseFloat(style.rowGap) || 0),
+      columns: shape.columns,
+      rowStride: shape.rowStride,
       gridTop: grid.getBoundingClientRect().top,
       viewportHeight: window.innerHeight,
     });
@@ -78,7 +93,10 @@
     // Cards resize with the window, not only with the grid's width, so both are watched
     const observer = new ResizeObserver(remeasure);
     if (grid) observer.observe(grid);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      clearTimeout(highlightTimer);
+    };
   });
 
   // Measured again when the list becomes long enough, changes length, or the keyboard leaves it,
@@ -97,6 +115,41 @@
     if (!(event.relatedTarget instanceof Node && grid?.contains(event.relatedTarget))) {
       keyboardInGrid = false;
     }
+  }
+
+  /*
+   * After a save, the list re-sorts and the card may move far away, especially in a long list. The
+   * page follows it there, scrolling only if it's not already in view, and it glows for a moment
+   */
+  let highlightId = $state<number | null>(null);
+  let highlightTimer: ReturnType<typeof setTimeout> | undefined;
+
+  async function followCard(animeId: number, positionBefore: number) {
+    await tick();
+    const index = animeList.findIndex((anime) => anime.id === animeId);
+    if (index === -1 || index === positionBefore) return;
+
+    // Off for a moment first, so a card saved again before the glow ends glows anew
+    clearTimeout(highlightTimer);
+    highlightId = null;
+    await tick();
+    highlightId = animeId;
+    highlightTimer = setTimeout(() => (highlightId = null), 2200);
+
+    // Where the card's row is in the grid, whether or not it's rendered: rows are all the same
+    // height, and the padding of a virtual list stands in for the rows not rendered. Its badge
+    // sticks out into the gap above, so that counts as part of the card
+    const shape = measureShape();
+    if (!grid || !shape) return;
+    const top = grid.getBoundingClientRect().top + window.scrollY;
+    const cardTop = top + Math.floor(index / shape.columns) * shape.rowStride;
+    const fromBadge = cardTop - shape.rowGap;
+    const toBottom = cardTop + shape.rowStride - shape.rowGap;
+    if (fromBadge >= window.scrollY && toBottom <= window.scrollY + window.innerHeight) return;
+    window.scrollTo({
+      top: Math.max(0, fromBadge - (window.innerHeight - (toBottom - fromBadge)) / 2),
+      behavior: prefersReducedMotion.current ? 'instant' : 'smooth',
+    });
   }
 
   const animeLinkFn = (animeId: number) => `https://anilist.co/anime/${animeId}/`;
@@ -181,7 +234,7 @@
     style:padding-top="{range.paddingTop}px"
     style:padding-bottom="{range.paddingBottom}px"
   >
-    {#each shownList as anime (anime.id)}
+    {#each shownList as anime, i (anime.id)}
       <!--
         Fades out a show that leaves the Watching list, e.g. once AniList marks it completed. A card
         that only scrolled out of view is removed at once, so the rows around it never shift
@@ -199,6 +252,9 @@
           downloadLanguage={data.preferences.downloadLanguage}
           downloadVersion={data.preferences.downloadVersion}
           scoreFormat={data.scoreFormat}
+          position={range.start + i}
+          onSaved={followCard}
+          highlighted={highlightId === anime.id}
         />
       </div>
     {/each}
