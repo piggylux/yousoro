@@ -12,6 +12,8 @@ function anime(overrides: Partial<Anime>): Anime {
     thumbnailUrl: '',
     status: 'RELEASING',
     isAdult: false,
+    meanScore: null,
+    userScore: null,
     currentEpisode: 0,
     rewatching: false,
     lastUpdatedAt: null,

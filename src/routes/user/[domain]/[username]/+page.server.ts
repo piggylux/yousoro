@@ -1,12 +1,9 @@
-import { type Cookies, error, fail } from '@sveltejs/kit';
+import { type Cookies, error, fail, type RequestEvent } from '@sveltejs/kit';
 
-import {
-  AniListNotFoundError,
-  AniListTokenError,
-  saveProgress,
-} from '#lib/server/anilist-client.js';
+import { AniListNotFoundError, AniListTokenError, saveEntry } from '#lib/server/anilist-client.js';
 import { AniListApi } from '#lib/server/anilist.js';
-import { clearSession } from '#lib/server/session.js';
+import { parseEntryUpdate } from '#lib/server/entry-update.js';
+import { clearSession, type Session } from '#lib/server/session.js';
 import { isDomain } from '#lib/types/domain.js';
 
 import type { Actions } from './$types';
@@ -39,7 +36,7 @@ export async function load({
     locals.session = null;
     userAnimeList = await new AniListApi().getUserAnimeList(params.username);
   }
-  const { userId, username, avatarUrl, animeList } = userAnimeList;
+  const { userId, username, avatarUrl, scoreFormat, animeList } = userAnimeList;
 
   return {
     domain: params.domain,
@@ -47,36 +44,49 @@ export async function load({
     avatarUrl,
     canEdit: userId !== null && locals.session?.user.id === userId,
     watchingList: animeList,
+    scoreFormat,
     userProfileLink: `https://anilist.co/user/${encodeURIComponent(username)}/animelist/Watching`,
   };
 }
 
+/**
+ * Runs an update on the signed-in user's own AniList list, whatever list the page shows, and
+ * turns what can go wrong into a message for the card
+ */
+async function updateOwnList<T>(
+  { params, locals, cookies }: Pick<RequestEvent, 'params' | 'locals' | 'cookies'>,
+  update: (session: Session) => Promise<T>
+) {
+  if (params.domain !== 'anilist') {
+    return fail(400, { message: 'Only AniList lists can be updated' });
+  }
+  if (!locals.session) {
+    return fail(401, { message: 'Sign in with AniList to update your list' });
+  }
+  try {
+    return await update(locals.session);
+  } catch (err) {
+    console.error(err);
+    if (err instanceof AniListTokenError) {
+      clearSession(cookies);
+      return fail(401, { message: 'Your AniList sign-in expired, please sign in again' });
+    }
+    return fail(502, { message: 'AniList rejected the update, please try again' });
+  }
+}
+
 export const actions: Actions = {
-  updateProgress: async ({ request, params, locals, cookies }) => {
-    if (params.domain !== 'anilist') {
-      return fail(400, { message: 'Only AniList lists can be updated' });
-    }
-    if (!locals.session) {
-      return fail(401, { message: 'Sign in with AniList to update your progress' });
-    }
-
-    const form = await request.formData();
-    const mediaId = Number(form.get('mediaId'));
-    const progress = Number(form.get('progress'));
-    if (!Number.isInteger(mediaId) || mediaId <= 0 || !Number.isInteger(progress) || progress < 0) {
-      return fail(400, { message: 'Invalid episode count' });
-    }
-
-    // The update always goes to the token owner's own list, whatever list the page shows
-    try {
-      return { mediaId, progress: await saveProgress(locals.session.token, mediaId, progress) };
-    } catch (err) {
-      console.error(err);
-      if (err instanceof AniListTokenError) {
-        clearSession(cookies);
-        return fail(401, { message: 'Your AniList sign-in expired, please sign in again' });
-      }
-      return fail(502, { message: 'AniList rejected the update, please try again' });
-    }
+  /**
+   * Saves the watched episode count, the score, or both, from the card's +1 button, the card's
+   * back, or the score prompt after completing an anime. A field that isn't sent stays as it is
+   */
+  updateEntry: async (event) => {
+    const update = parseEntryUpdate(await event.request.formData());
+    if ('message' in update) return fail(400, { message: update.message });
+    const { mediaId, changes } = update;
+    return updateOwnList(event, async (session) => ({
+      mediaId,
+      ...(await saveEntry(session.token, mediaId, changes)),
+    }));
   },
 };

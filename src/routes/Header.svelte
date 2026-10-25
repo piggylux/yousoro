@@ -35,11 +35,24 @@
     <div class="tw:navbar">
       <div class="tw:navbar-start">
         <div class="tw:dropdown">
-          <a class="tw:btn tw:btn-ghost tw:btn-circle" href="/home" aria-label="Home">
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
-              <path
-                d="M20 7.093l-3-3v-2.093h3v5.093zm4 5.907h-3v10h-18v-10h-3l12-12 12 12zm-10 2h-4v6h4v-6z"
-              />
+          <a class="home-link tw:btn tw:btn-ghost tw:btn-circle" href="/home" aria-label="Home">
+            <!-- An anchor, You Watanabe's sailor emblem, drawn like the gear beside it -->
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              width="24"
+              height="24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="5" r="3" />
+              <path d="M12 22V8" />
+              <path d="M8 11h8" />
+              <path d="M5 12H2a10 10 0 0 0 20 0h-3" />
             </svg>
           </a>
         </div>
@@ -129,3 +142,10 @@
 </header>
 
 <SettingsDrawer {preferences} bind:open={settingsOpen} />
+
+<style>
+  /* The anchor in the theme's sea blue */
+  .home-link {
+    color: var(--sea-blue);
+  }
+</style>

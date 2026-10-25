@@ -1,3 +1,4 @@
+import { DEFAULT_SCORE_FORMAT, isScoreFormat, type ScoreFormat } from '#lib/score.js';
 import type { AiringStatus } from '#lib/types/anime.js';
 
 const ANILIST_URL = 'https://graphql.anilist.co';
@@ -12,6 +13,7 @@ const MEDIA_FIELDS = `
   endDate { year month day }
   nextAiringEpisode { episode airingAt }
   isAdult
+  meanScore
 `;
 
 export type AniListMedia = {
@@ -27,12 +29,16 @@ export type AniListMedia = {
   nextAiringEpisode: { episode: number; airingAt: number } | null;
   /** AniList's flag for adult (18+) titles */
   isAdult: boolean;
+  /** The average of all AniList users' scores, out of 100; null until enough have scored it */
+  meanScore: number | null;
 };
 
 export type AniListEntry = {
   /** CURRENT is "Watching"; REPEATING is "Rewatching" */
   status: 'CURRENT' | 'REPEATING';
   progress: number;
+  /** The user's score, in their own score format; 0 when they haven't scored it */
+  score: number;
   /** Unix time in seconds of the last change to the entry, or 0 when AniList doesn't know */
   updatedAt: number;
   media: AniListMedia;
@@ -91,18 +97,34 @@ export async function getWatchingEntries(
   userId: number;
   userName: string;
   avatarUrl: string | null;
+  /** How the user scores anime, which their entries' scores are in */
+  scoreFormat: ScoreFormat;
   entries: AniListEntry[];
 }> {
   const data = await query<{
     MediaListCollection: {
-      user: { id: number; name: string; avatar: { large: string | null } | null };
+      user: {
+        id: number;
+        name: string;
+        avatar: { large: string | null } | null;
+        mediaListOptions: { scoreFormat: string | null } | null;
+      };
       lists: { isCustomList: boolean; entries: AniListEntry[] }[];
     };
   }>(
     `query ($userName: String) {
       MediaListCollection(userName: $userName, type: ANIME, status_in: [CURRENT, REPEATING]) {
-        user { id name avatar { large } }
-        lists { isCustomList entries { status progress updatedAt media { ${MEDIA_FIELDS} } } }
+        user { id name avatar { large } mediaListOptions { scoreFormat } }
+        lists {
+          isCustomList
+          entries {
+            status
+            progress
+            score
+            updatedAt
+            media { ${MEDIA_FIELDS} }
+          }
+        }
       }
     }`,
     { userName },
@@ -113,6 +135,9 @@ export async function getWatchingEntries(
     userId: data.MediaListCollection.user.id,
     userName: data.MediaListCollection.user.name,
     avatarUrl: data.MediaListCollection.user.avatar?.large ?? null,
+    scoreFormat: isScoreFormat(data.MediaListCollection.user.mediaListOptions?.scoreFormat)
+      ? data.MediaListCollection.user.mediaListOptions.scoreFormat
+      : DEFAULT_SCORE_FORMAT,
     // Custom lists repeat entries that already appear in the status list
     entries: data.MediaListCollection.lists
       .filter((list) => !list.isCustomList)
@@ -185,23 +210,27 @@ export async function getViewer(token: string): Promise<AniListUser> {
   return toUser(data.Viewer);
 }
 
-/** Sets the watched episode count on the token owner's own list entry. */
-export async function saveProgress(
+/**
+ * Updates the token owner's own list entry: the watched episode count, the score (in their own
+ * score format, 0 clearing it), or both. What isn't given is left as it is.
+ */
+export async function saveEntry(
   token: string,
   mediaId: number,
-  progress: number
-): Promise<number> {
-  if (!token) throw new AniListTokenError('An access token is required to update progress');
+  changes: { progress?: number; score?: number }
+): Promise<{ progress: number; score: number }> {
+  if (!token) throw new AniListTokenError('An access token is required to update a list');
 
-  const data = await query<{ SaveMediaListEntry: { progress: number } }>(
-    `mutation ($mediaId: Int, $progress: Int) {
-      SaveMediaListEntry(mediaId: $mediaId, progress: $progress) { progress }
+  const data = await query<{ SaveMediaListEntry: { progress: number; score: number } }>(
+    `mutation ($mediaId: Int, $progress: Int, $score: Float) {
+      SaveMediaListEntry(mediaId: $mediaId, progress: $progress, score: $score) { progress score }
     }`,
-    { mediaId, progress },
+    // Left out of the JSON when undefined, so AniList keeps the current value
+    { mediaId, progress: changes.progress, score: changes.score },
     token
   );
 
-  return data.SaveMediaListEntry.progress;
+  return data.SaveMediaListEntry;
 }
 
 export function getAiredEpisodes(media: AniListMedia): number | null {

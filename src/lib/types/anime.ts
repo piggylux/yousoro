@@ -12,6 +12,10 @@ export type Anime = {
   status: AiringStatus;
   /** Marked as adult (18+) on AniList */
   isAdult: boolean;
+  /** The average of all AniList users' scores, out of 100; null until enough have scored it */
+  meanScore: number | null;
+  /** The list owner's score, in their own score format; null when they haven't scored it */
+  userScore: number | null;
   currentEpisode: number;
   /** On the user's "Rewatching" list rather than "Watching"; `currentEpisode` is then the rewatch's */
   rewatching: boolean;

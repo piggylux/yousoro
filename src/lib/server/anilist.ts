@@ -6,13 +6,17 @@ export class AniListApi implements Api {
   constructor(private token?: string) {}
 
   async getUserAnimeList(username: string): Promise<UserAnimeList> {
-    const { userId, userName, avatarUrl, entries } = await getWatchingEntries(username, this.token);
+    const { userId, userName, avatarUrl, scoreFormat, entries } = await getWatchingEntries(
+      username,
+      this.token
+    );
 
     return {
       userId,
       username: userName,
       avatarUrl,
-      animeList: entries.map(({ media, status, progress, updatedAt }) => ({
+      scoreFormat,
+      animeList: entries.map(({ media, status, progress, score, updatedAt }) => ({
         id: media.id,
         title: media.title.romaji,
         englishTitle: media.title.english,
@@ -22,6 +26,8 @@ export class AniListApi implements Api {
         thumbnailUrl: media.coverImage.extraLarge,
         status: media.status,
         isAdult: media.isAdult,
+        meanScore: media.meanScore,
+        userScore: score || null,
         currentEpisode: progress,
         rewatching: status === 'REPEATING',
         lastUpdatedAt: updatedAt ? updatedAt * 1000 : null,

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { beforeNavigate } from '$app/navigation';
   import { onMount } from 'svelte';
   import { flip } from 'svelte/animate';
   import { prefersReducedMotion } from 'svelte/motion';
@@ -7,6 +8,7 @@
   import { sortWatchingList } from '#lib/anime.js';
   import AnimeCard from '#lib/components/AnimeCard.svelte';
   import BacklogBanner from '#lib/components/BacklogBanner.svelte';
+  import ScorePrompt from '#lib/components/ScorePrompt.svelte';
   import YousoroCelebration from '#lib/components/YousoroCelebration.svelte';
   import type { Anime } from '#lib/types/anime.js';
   import type { AnimePageData } from '#lib/types/api.js';
@@ -104,9 +106,39 @@
     null
   );
 
-  function celebrate(kind: 'caught-up' | 'completed', anime: Anime) {
+  /*
+   * A completed anime leaves the Watching list, so its owner is asked for a score right away, while
+   * the celebration plays and it can still be set here: one anime after another when several were
+   * completed. An update that already set the score isn't asked again
+   */
+  let toScore = $state<Anime[]>([]);
+  let scoring = $state<Anime | null>(null);
+
+  function celebrate(
+    kind: 'caught-up' | 'completed',
+    anime: Anime,
+    { scored }: { scored: boolean }
+  ) {
     celebration = { kind, title: anime.title, key: Date.now() };
+    if (kind === 'completed' && data.canEdit && !scored) {
+      toScore = [...toScore, anime];
+      if (!scoring) askNextScore();
+    }
   }
+
+  function askNextScore() {
+    scoring = null;
+    const [next, ...rest] = toScore;
+    if (next) {
+      scoring = next;
+      toScore = rest;
+    }
+  }
+
+  // The prompt covers the page, but Back could still leave it with a score unasked
+  beforeNavigate(({ cancel, willUnload }) => {
+    if (!willUnload && scoring) cancel();
+  });
 </script>
 
 <svelte:window onscroll={remeasure} onresize={remeasure} />
@@ -166,6 +198,7 @@
           blurMature={data.preferences.blurMature}
           downloadLanguage={data.preferences.downloadLanguage}
           downloadVersion={data.preferences.downloadVersion}
+          scoreFormat={data.scoreFormat}
         />
       </div>
     {/each}
@@ -178,6 +211,17 @@
       kind={celebration.kind}
       title={celebration.title}
       onDone={() => (celebration = null)}
+    />
+  {/key}
+{/if}
+
+{#if scoring}
+  {#key scoring.id}
+    <ScorePrompt
+      anime={scoring}
+      format={data.scoreFormat}
+      blurMature={data.preferences.blurMature}
+      onClose={askNextScore}
     />
   {/key}
 {/if}

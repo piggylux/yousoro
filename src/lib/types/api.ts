@@ -1,3 +1,4 @@
+import type { ScoreFormat } from '#lib/score.js';
 import type { Anime } from '#lib/types/anime.js';
 import type { Domain } from '#lib/types/domain.js';
 import type { Preferences } from '#lib/types/preferences.js';
@@ -8,6 +9,8 @@ export type UserAnimeList = {
   /** The username as the service spells it, which may differ in case from the one requested */
   username: string;
   avatarUrl: string | null;
+  /** How the list owner scores anime, which the anime's `userScore` is in */
+  scoreFormat: ScoreFormat;
   animeList: Anime[];
 };
 
@@ -22,6 +25,8 @@ export type AnimePageData = {
   /** Whether the signed-in user owns this list and can update its progress */
   canEdit: boolean;
   watchingList: Anime[];
+  /** How the list owner scores anime */
+  scoreFormat: ScoreFormat;
   userProfileLink: string;
   /** The viewer's display settings, from the root layout */
   preferences: Preferences;

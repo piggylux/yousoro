@@ -4,8 +4,17 @@
 
   import { getEpisodesToWatch, getWatchState, type WatchState } from '#lib/anime.js';
   import { clock } from '#lib/clock.js';
+  import ScoreInput from '#lib/components/ScoreInput.svelte';
   import { formatAirDate, formatAirsIn } from '#lib/countdown.js';
   import { nyaaSearchUrl, nyaaSite } from '#lib/nyaa.js';
+  import {
+    DEFAULT_SCORE_FORMAT,
+    describeScore,
+    formatMeanScore,
+    formatScore,
+    scoreChoices,
+    type ScoreFormat,
+  } from '#lib/score.js';
   import type { Anime } from '#lib/types/anime.js';
   import type { DownloadLanguage, DownloadVersion } from '#lib/types/preferences.js';
 
@@ -14,14 +23,23 @@
     animeLinkFn: (animeId: number) => string;
     /** Whether the signed-in user can update this anime's progress */
     canEdit?: boolean;
-    /** Called when a progress update catches the user up on this anime, or finishes it */
-    onCaughtUp?: (kind: 'caught-up' | 'completed', anime: Anime) => void;
+    /**
+     * Called when an update catches the user up on this anime, or finishes it, with the anime as
+     * AniList saved it; `scored` says the same update also set its score
+     */
+    onCaughtUp?: (
+      kind: 'caught-up' | 'completed',
+      anime: Anime,
+      update: { scored: boolean }
+    ) => void;
     /** The viewer's setting: blur covers of anime AniList marks as adult */
     blurMature?: boolean;
     /** The viewer's setting: which releases the nyaa.si search looks for */
     downloadLanguage?: DownloadLanguage;
     /** The viewer's setting: subbed, dubbed or dual-audio releases for that search */
     downloadVersion?: DownloadVersion;
+    /** How the list owner scores anime on AniList, which `anime.userScore` is in */
+    scoreFormat?: ScoreFormat;
   };
 
   let {
@@ -32,6 +50,7 @@
     blurMature = true,
     downloadLanguage = 'any',
     downloadVersion = 'any',
+    scoreFormat = DEFAULT_SCORE_FORMAT,
   }: Props = $props();
 
   const coverBlurred = $derived(anime.isAdult && blurMature);
@@ -54,6 +73,12 @@
   // Both services report 0 episodes while the total isn't known yet
   const totalEpisodes = $derived(anime.numberEpisodes || null);
   const progressLabel = $derived(`${anime.currentEpisode} / ${totalEpisodes ?? '?'}`);
+  // How many episodes have aired, on the card's back, unless that's all of them
+  const airedNote = $derived(
+    anime.numberAiredEpisodes && anime.numberAiredEpisodes !== totalEpisodes
+      ? `${anime.numberAiredEpisodes.toLocaleString()} aired`
+      : null
+  );
   const episodesToWatch = $derived(getEpisodesToWatch(anime));
   const watchState = $derived(getWatchState(anime));
   // The next episode to watch, when it has already aired; only offered on the viewer's own list
@@ -90,6 +115,24 @@
   // The episode count typed on the card's back; it resets to the saved count whenever that changes
   let watchedDraft = $derived<number | null>(anime.currentEpisode);
   const watchedChanged = $derived(watchedDraft !== null && watchedDraft !== anime.currentEpisode);
+
+  // The score picked on the card's back, which resets to the saved score whenever that changes.
+  // Star and smiley choices start on "No score"; a number field starts empty
+  const savedScore = $derived(anime.userScore ?? (scoreChoices(scoreFormat) ? 0 : null));
+  let scoreDraft = $derived<number | null>(savedScore);
+  // 0 is no score, the same as an unscored anime
+  const scoreChanged = $derived((scoreDraft ?? 0) !== (anime.userScore ?? 0));
+  const entryChanged = $derived(watchedChanged || scoreChanged);
+  // The fields sit in the facts list, outside their form, so they point to it by an id unique
+  // to this card
+  const uid = $props.id();
+  const entryFormId = `entry-${uid}`;
+
+  // Back to what's saved on AniList, dropping unsaved edits
+  function revertDrafts() {
+    watchedDraft = anime.currentEpisode;
+    scoreDraft = savedScore;
+  }
   let errorMessage = $state<string | null>(null);
 
   // The card flips over to show its details, instead of opening a popup
@@ -102,7 +145,7 @@
     flipped = showBack;
     if (!showBack) {
       // Turning back over discards an unsaved edit and any error, so the next flip starts fresh
-      watchedDraft = anime.currentEpisode;
+      revertDrafts();
       errorMessage = null;
     }
     await tick();
@@ -112,10 +155,12 @@
     else coverButton?.focus(options);
   }
 
-  const submitProgress: SubmitFunction = () => {
+  const submitEntry: SubmitFunction = ({ formData }) => {
     saving = true;
     errorMessage = null;
     const stateBefore = watchState;
+    const progressBefore = anime.currentEpisode;
+    const scored = formData.has('score') && scoreChanged;
 
     return async ({ result, update }) => {
       saving = false;
@@ -124,14 +169,19 @@
         return;
       }
       if (result.type === 'success') {
-        if (flipped) await flip(false);
+        const saved = {
+          ...anime,
+          currentEpisode: Number(result.data?.progress),
+          userScore: Number(result.data?.score) || null,
+        };
+        // A new episode count shows on the front; a score alone stays in view on the back
+        if (flipped && saved.currentEpisode !== progressBefore) await flip(false);
 
         // Celebrate only the moment the user catches up or finishes, judged by what AniList saved
-        const saved = Number(result.data?.progress);
-        const stateAfter = getWatchState({ ...anime, currentEpisode: saved });
+        const stateAfter = getWatchState(saved);
         const wasDone = stateBefore === 'caught-up' || stateBefore === 'completed';
         if (!wasDone && (stateAfter === 'caught-up' || stateAfter === 'completed')) {
-          onCaughtUp?.(stateAfter, anime);
+          onCaughtUp?.(stateAfter, saved, { scored });
         }
       }
       // Reloads the list, so the card shows what AniList saved
@@ -140,10 +190,16 @@
   };
 </script>
 
-<!-- Esc turns the card back over while focus is on its back -->
+<!-- Esc turns the card back over while focus is on its back; in a dropdown, it only closes the list -->
 <svelte:window
   onkeydown={(event) => {
-    if (event.key === 'Escape' && flipped && backFace?.contains(document.activeElement))
+    if (
+      event.key === 'Escape' &&
+      !event.defaultPrevented &&
+      !(event.target instanceof HTMLSelectElement) &&
+      flipped &&
+      backFace?.contains(document.activeElement)
+    )
       flip(false);
   }}
 />
@@ -188,7 +244,7 @@
   {/if}
   <div class="anime-card" class:flipped>
     <!--
-      A click anywhere on the card turns it over, except on its links, buttons and forms. It's
+      A click anywhere on the card turns it over, except on its links, buttons and form fields. It's
       handled here rather than on each side, so it works mid-turn too: the side being left is
       already inert. Keyboard users have the cover button, so the click needs no key equivalent.
     -->
@@ -197,7 +253,7 @@
       class="flipper"
       onclick={(event) => {
         const target = event.target as Element;
-        if (!target.closest('a, button, input, label, form')) flip(!flipped);
+        if (!target.closest('a, button, input, select, textarea, label, form')) flip(!flipped);
       }}
     >
       <!-- Only the side facing the viewer can be focused or read by a screen reader -->
@@ -244,7 +300,7 @@
           {/if}
           <span class="tw:text-sm tw:opacity-70">{progressLabel}</span>
           {#if canEdit}
-            <form method="POST" action="?/updateProgress" use:enhance={submitProgress}>
+            <form method="POST" action="?/updateEntry" use:enhance={submitEntry}>
               <input type="hidden" name="mediaId" value={anime.id} />
               <input type="hidden" name="progress" value={anime.currentEpisode + 1} />
               <button
@@ -277,7 +333,7 @@
         aria-keyshortcuts="Escape"
       >
         <!--
-          Always three lines tall, so the details sit at the same height on every card. Only the
+          Always two lines tall, so the details sit at the same height on every card. Only the
           title's own text is the link; the space around a short title turns the card back over
         -->
         <p class="back-title">
@@ -286,56 +342,97 @@
           </a>
         </p>
 
-        <dl class="facts">
-          <dt>Watched</dt>
-          <dd>
+        <!-- When a small card runs short of room, only the details scroll; the actions stay put -->
+        <div class="facts-area">
+          <dl class="facts">
+            <dt>Watched</dt>
+            <dd>
+              {#if canEdit}
+                <!-- Its form, with the one Save button for the count and the score, is below -->
+                <span class="field-form">
+                  <input
+                    class="tw:input tw:input-xs tw:w-16"
+                    type="number"
+                    name="progress"
+                    form={entryFormId}
+                    min="0"
+                    max={totalEpisodes ?? undefined}
+                    bind:value={watchedDraft}
+                    aria-label="Episodes watched"
+                    required
+                  />
+                  <span>/ {totalEpisodes ?? '?'}</span>
+                </span>
+              {:else}
+                {progressLabel}
+              {/if}
+              {#if airedNote}<span class="aired-note">({airedNote})</span>{/if}
+            </dd>
             {#if canEdit}
-              <!-- The count itself is the field: change it and Save, or press Enter -->
-              <form
-                class="watched-form"
-                method="POST"
-                action="?/updateProgress"
-                use:enhance={submitProgress}
-              >
-                <input type="hidden" name="mediaId" value={anime.id} />
-                <input
-                  class="tw:input tw:input-xs tw:w-16"
-                  type="number"
-                  name="progress"
-                  min="0"
-                  max={totalEpisodes ?? undefined}
-                  bind:value={watchedDraft}
-                  aria-label="Episodes watched"
-                  required
-                />
-                <span>/ {totalEpisodes ?? '?'}</span>
-                <button
-                  class="tw:btn tw:btn-primary tw:btn-xs"
-                  disabled={saving || !watchedChanged}
-                >
-                  Save
-                </button>
-              </form>
-            {:else}
-              {progressLabel}
+              <dt>Score</dt>
+              <dd>
+                <!-- In the owner's AniList scoring system; "No score" or an empty field clears it -->
+                <span class="field-form">
+                  <ScoreInput
+                    format={scoreFormat}
+                    bind:value={scoreDraft}
+                    label="Your score"
+                    form={entryFormId}
+                  />
+                </span>
+              </dd>
+            {:else if anime.userScore}
+              <dt>Score</dt>
+              <dd>
+                <span aria-hidden="true">{formatScore(anime.userScore, scoreFormat)}</span>
+                <span class="tw:sr-only">{describeScore(anime.userScore, scoreFormat)}</span>
+              </dd>
             {/if}
-          </dd>
-          {#if anime.numberAiredEpisodes}
-            <dt>Aired</dt>
-            <dd>{anime.numberAiredEpisodes.toLocaleString()}</dd>
-          {/if}
-          {#if anime.rewatching}
-            <dt>Status</dt>
-            <dd>Rewatching</dd>
-          {/if}
-          {#if mounted && anime.nextEpisode}
-            <dt>Next</dt>
-            <dd>Ep {anime.nextEpisode.number}, {formatAirDate(anime.nextEpisode.airsAt)}</dd>
-          {/if}
-        </dl>
+            {#if anime.meanScore}
+              <!-- AniList's mean score: the average of everyone's scores there -->
+              <dt>Average</dt>
+              <dd>{formatMeanScore(anime.meanScore)}</dd>
+            {/if}
+            {#if anime.rewatching}
+              <dt>Status</dt>
+              <dd>Rewatching</dd>
+            {/if}
+            {#if mounted && anime.nextEpisode}
+              <dt>Next</dt>
+              <dd>Ep {anime.nextEpisode.number}, {formatAirDate(anime.nextEpisode.airsAt)}</dd>
+            {/if}
+          </dl>
+        </div>
 
-        <!-- Pinned to the bottom, so errors line up across cards too -->
+        <!-- Pinned to the bottom, so the buttons and errors line up across cards too -->
         <div class="back-actions">
+          {#if canEdit}
+            <!--
+              Saves the watched count and the score together; Enter in either field saves too. Revert
+              puts both back to what's saved on AniList
+            -->
+            <form
+              id={entryFormId}
+              class="entry-actions"
+              method="POST"
+              action="?/updateEntry"
+              use:enhance={submitEntry}
+            >
+              <input type="hidden" name="mediaId" value={anime.id} />
+              <input type="hidden" name="scoreFormat" value={scoreFormat} />
+              <button
+                type="button"
+                class="tw:btn tw:btn-ghost tw:btn-xs"
+                disabled={saving || !entryChanged}
+                onclick={revertDrafts}
+              >
+                Revert
+              </button>
+              <button class="tw:btn tw:btn-primary tw:btn-xs" disabled={saving || !entryChanged}>
+                Save
+              </button>
+            </form>
+          {/if}
           {#if nextToWatch}
             <a
               class="download-link"
@@ -394,11 +491,12 @@
   }
 
   /*
-   * As a hint that the card turns over, hovering it starts to turn it and lets it settle back, as a
-   * light gleam sweeps across. The turn uses `rotate`, separate from the flip's `transform`, so a
-   * click mid-hint still flips the card smoothly. It ends flat, so the text ends sharp
+   * As a hint that the card turns over, hovering its front starts to turn it and lets it settle
+   * back, as a light gleam sweeps across. The turn uses `rotate`, separate from the flip's
+   * `transform`, so a click mid-hint still flips the card smoothly. It ends flat, so the text ends
+   * sharp. The back doesn't move on hover, so its fields stay still while being used
    */
-  .card-slot:hover .flipper {
+  .card-slot:hover .anime-card:not(.flipped) .flipper {
     animation: peek 0.6s ease-in-out;
   }
 
@@ -461,8 +559,8 @@
     position: absolute;
     inset: 0;
     justify-content: flex-start;
-    gap: 16px;
-    padding: 20px 16px;
+    gap: 12px;
+    padding: 16px 14px;
     overflow-y: auto;
     text-align: center;
     transform: rotateY(180deg);
@@ -485,11 +583,11 @@
   .back-title {
     display: -webkit-box;
     flex: none;
-    height: 3lh;
+    height: 2lh;
     overflow: hidden;
     -webkit-box-orient: vertical;
-    -webkit-line-clamp: 3;
-    line-clamp: 3;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
     color: var(--navy);
     font-size: 1.05rem;
     font-weight: 800;
@@ -502,8 +600,27 @@
     text-decoration: underline;
   }
 
+  /* As wide as the card's back, not its widest field, which then fits inside it */
+  .facts-area {
+    align-self: stretch;
+    display: flex;
+    /* The details keep together at the top, whatever room is left below them */
+    align-items: flex-start;
+    justify-content: center;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    /* Room for the fields' focus rings, which the scrolling would otherwise clip */
+    padding: 3px;
+  }
+
   .facts {
+    min-width: 0;
+    max-width: 100%;
     display: grid;
+    align-content: start;
     grid-template-columns: auto auto;
     gap: 4px 12px;
     font-size: 0.9rem;
@@ -519,14 +636,17 @@
     text-align: left;
   }
 
-  .watched-form {
+  .field-form {
     display: inline-flex;
     align-items: center;
     gap: 6px;
+    /* Never wider than the card, so a long score choice is cut short instead */
+    max-width: 100%;
+    min-width: 0;
   }
 
   /* "/ 224" stays in one piece */
-  .watched-form span {
+  .field-form span {
     white-space: nowrap;
   }
 
@@ -538,25 +658,47 @@
     .facts {
       grid-template-columns: 1fr;
       justify-items: center;
-      gap: 2px;
+      gap: 0;
+      line-height: 1.25;
     }
 
     .facts dt,
     .facts dd {
+      max-width: 100%;
       text-align: center;
     }
 
-    .facts dd + dt {
-      margin-top: 8px;
+    /* Smaller labels, so more of the details fit before they have to scroll */
+    .facts dt {
+      font-size: 0.75rem;
     }
+
+    .facts dd + dt {
+      margin-top: 6px;
+    }
+  }
+
+  /* Revert and Save, at the bottom with the other actions */
+  .entry-actions {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
   }
 
   .back-actions {
     display: flex;
+    flex: none;
     flex-direction: column;
     align-items: center;
     gap: 8px;
     margin-top: auto;
+  }
+
+  .aired-note {
+    margin-left: 4px;
+    color: var(--sea-blue);
+    font-size: 0.8rem;
+    white-space: nowrap;
   }
 
   .download-link {

@@ -13,6 +13,7 @@ function media(title: { romaji: string; english: string | null }, synonyms: stri
     endDate: { year: null, month: null, day: null },
     nextAiringEpisode: { episode: 5, airingAt: 0 },
     isAdult: false,
+    meanScore: 78,
   };
 }
 
@@ -24,11 +25,18 @@ function answerWith(entryMedia: ReturnType<typeof media>) {
       Response.json({
         data: {
           MediaListCollection: {
-            user: { id: 7, name: 'Piggylux', avatar: null },
+            user: {
+              id: 7,
+              name: 'Piggylux',
+              avatar: null,
+              mediaListOptions: { scoreFormat: 'POINT_10_DECIMAL' },
+            },
             lists: [
               {
                 isCustomList: false,
-                entries: [{ status: 'CURRENT', progress: 2, updatedAt: 0, media: entryMedia }],
+                entries: [
+                  { status: 'CURRENT', progress: 2, score: 8.5, updatedAt: 0, media: entryMedia },
+                ],
               },
             ],
           },
@@ -53,6 +61,14 @@ describe('AniListApi.getUserAnimeList', () => {
     expect(animeList[0].title).toBe('Kanojo no Tomodachi');
     expect(animeList[0].englishTitle).toBe("My Girlfriend's Friend");
     expect(animeList[0].otherTitles).toEqual(['KanoTomo']);
+  });
+
+  it("gives the mean score, and the owner's score in their own score format", async () => {
+    answerWith(media({ romaji: 'Koupen-chan', english: null }, []));
+    const { scoreFormat, animeList } = await new AniListApi().getUserAnimeList('Piggylux');
+    expect(scoreFormat).toBe('POINT_10_DECIMAL');
+    expect(animeList[0].meanScore).toBe(78);
+    expect(animeList[0].userScore).toBe(8.5);
   });
 
   it('copes with no English title and no synonyms', async () => {
