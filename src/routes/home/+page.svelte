@@ -1,5 +1,5 @@
-<script>
-  import UserForm from './UserForm.svelte';
+<script lang="ts">
+  import SignInButton from '#lib/components/SignInButton.svelte';
   import YouSvg from '#lib/images/minimalist_you.svg';
 </script>
 
@@ -13,7 +13,8 @@
     <img src={YouSvg} alt="minimalist_you" />
   </h1>
 
-  <UserForm />
+  <!-- Back to /home after signing in, which then redirects to the user's own list -->
+  <SignInButton class="tw:btn tw:btn-primary tw:w-70" redirectTo="/home" />
 </section>
 
 <style>

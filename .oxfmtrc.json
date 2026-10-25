@@ -1,0 +1,29 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "useTabs": false,
+  "tabWidth": 2,
+  "singleQuote": true,
+  "trailingComma": "es5",
+  "printWidth": 100,
+  "sortPackageJson": false,
+  "sortImports": {},
+  "svelte": {},
+  "associations": [
+    {
+      "files": ["*.svelte"],
+      "language": "svelte"
+    }
+  ],
+  "ignorePatterns": [
+    ".DS_Store",
+    "node_modules",
+    "/build",
+    "/.svelte-kit",
+    "/package",
+    ".env",
+    ".env.*",
+    "!.env.example",
+    "bun.lock",
+    "bun.lockb"
+  ]
+}

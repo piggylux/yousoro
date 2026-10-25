@@ -1,13 +1,18 @@
 import { defineEnvVars } from '@sveltejs/kit/env';
 
-function required(name: string) {
-  return (value: string | undefined) => {
-    if (!value) throw new Error(`${name} is required`);
-    return value;
-  };
-}
-
 export const variables = defineEnvVars({
-  ANILIST_TOKEN: { schema: required('ANILIST_TOKEN') },
-  MAL_CLIENT_ID: { schema: required('MAL_CLIENT_ID') },
+  // Client IDs aren't secret: AniList's implicit grant sends it from the browser
+  ANILIST_CLIENT_ID: {
+    public: true,
+    schema: (value) => {
+      if (!value) {
+        throw new Error(
+          'ANILIST_CLIENT_ID is required: create a client at https://anilist.co/settings/developer'
+        );
+      }
+      return value;
+    },
+    description:
+      'ID of the AniList API client used for signing in. Its redirect URL must be <origin>/auth/anilist/callback',
+  },
 });

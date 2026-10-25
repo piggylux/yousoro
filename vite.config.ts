@@ -1,4 +1,4 @@
-import adapter from '@sveltejs/adapter-auto';
+import adapter from '@sveltejs/adapter-vercel';
 import { sveltekit } from '@sveltejs/kit/vite';
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vitest/config';
@@ -12,10 +12,29 @@ export default defineConfig({
         runes: ({ filename }) => (filename.includes('node_modules') ? undefined : true),
       },
 
-      // adapter-auto only supports some environments, see https://svelte.dev/docs/kit/adapter-auto
-      // for a list. If your environment is not supported or you settled on a specific environment,
-      // switch out the adapter. See https://svelte.dev/docs/kit/adapters for more information.
-      adapter: adapter(),
+      // Deployed on Vercel. The runtime is pinned rather than taken from the Node version that runs
+      // the build, so local builds on a newer Node still target a runtime Vercel supports.
+      adapter: adapter({ runtime: 'nodejs24.x' }),
+
+      // Only this site's own scripts may run, so an injected script can't read the sign-in token
+      // on the callback page. SvelteKit adds hashes or nonces for its own inline scripts.
+      csp: {
+        mode: 'auto',
+        directives: {
+          'default-src': ['self'],
+          'script-src': ['self'],
+          // Svelte writes inline styles for transitions and the progress bar widths
+          'style-src': ['self', 'unsafe-inline'],
+          // Anime covers and avatars come from AniList's CDN
+          'img-src': ['self', 'data:', 'https://s4.anilist.co'],
+          // The browser only talks to this site; AniList's API is called from the server
+          'connect-src': ['self'],
+          'form-action': ['self'],
+          'base-uri': ['self'],
+          'object-src': ['none'],
+          'frame-ancestors': ['none'],
+        },
+      },
     }),
   ],
   test: {
