@@ -1,20 +1,37 @@
 import type { Cookies } from '@sveltejs/kit';
 
 import { type CookieFormat, readVersioned, writeVersioned } from '#lib/server/versioned-cookie.js';
-import { DEFAULT_PREFERENCES, type Preferences } from '#lib/types/preferences.js';
+import {
+  DEFAULT_PREFERENCES,
+  isDownloadLanguage,
+  isDownloadVersion,
+  type Preferences,
+} from '#lib/types/preferences.js';
 
 const PREFERENCES_COOKIE = 'preferences';
 const ONE_YEAR_SECONDS = 365 * 24 * 60 * 60;
 
+/**
+ * Settings from saved or submitted values. Each setting falls back to its default on its own when
+ * it's missing or invalid, so adding a setting needs no new cookie format version: cookies saved
+ * before it simply don't have it yet
+ */
+export function toPreferences(values: Partial<Record<keyof Preferences, unknown>>): Preferences {
+  return {
+    blurMature:
+      typeof values.blurMature === 'boolean' ? values.blurMature : DEFAULT_PREFERENCES.blurMature,
+    downloadLanguage: isDownloadLanguage(values.downloadLanguage)
+      ? values.downloadLanguage
+      : DEFAULT_PREFERENCES.downloadLanguage,
+    downloadVersion: isDownloadVersion(values.downloadVersion)
+      ? values.downloadVersion
+      : DEFAULT_PREFERENCES.downloadVersion,
+  };
+}
+
 const PREFERENCES_FORMAT: CookieFormat<Preferences> = {
   version: 1,
-  parse: (data) =>
-    typeof data === 'object' &&
-    data !== null &&
-    'blurMature' in data &&
-    typeof data.blurMature === 'boolean'
-      ? { blurMature: data.blurMature }
-      : null,
+  parse: (data) => (typeof data === 'object' && data !== null ? toPreferences(data) : null),
 };
 
 // A cookie rather than localStorage, so the server renders mature covers already blurred instead

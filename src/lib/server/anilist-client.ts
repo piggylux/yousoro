@@ -4,7 +4,8 @@ const ANILIST_URL = 'https://graphql.anilist.co';
 
 const MEDIA_FIELDS = `
   id
-  title { romaji }
+  title { romaji english }
+  synonyms
   status
   episodes
   coverImage { extraLarge }
@@ -15,7 +16,9 @@ const MEDIA_FIELDS = `
 
 export type AniListMedia = {
   id: number;
-  title: { romaji: string };
+  title: { romaji: string; english: string | null };
+  /** Other names the anime goes by, in any language; AniList may send null instead of a list */
+  synonyms: string[] | null;
   status: AiringStatus;
   episodes: number | null;
   coverImage: { extraLarge: string };

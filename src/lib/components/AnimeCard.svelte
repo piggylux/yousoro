@@ -5,7 +5,9 @@
   import { getEpisodesToWatch, getWatchState, type WatchState } from '#lib/anime.js';
   import { clock } from '#lib/clock.js';
   import { formatAirDate, formatAirsIn } from '#lib/countdown.js';
+  import { nyaaSearchUrl, nyaaSite } from '#lib/nyaa.js';
   import type { Anime } from '#lib/types/anime.js';
+  import type { DownloadLanguage, DownloadVersion } from '#lib/types/preferences.js';
 
   type Props = {
     anime: Anime;
@@ -16,9 +18,21 @@
     onCaughtUp?: (kind: 'caught-up' | 'completed', anime: Anime) => void;
     /** The viewer's setting: blur covers of anime AniList marks as adult */
     blurMature?: boolean;
+    /** The viewer's setting: which releases the nyaa.si search looks for */
+    downloadLanguage?: DownloadLanguage;
+    /** The viewer's setting: subbed, dubbed or dual-audio releases for that search */
+    downloadVersion?: DownloadVersion;
   };
 
-  let { anime, animeLinkFn, canEdit = false, onCaughtUp, blurMature = true }: Props = $props();
+  let {
+    anime,
+    animeLinkFn,
+    canEdit = false,
+    onCaughtUp,
+    blurMature = true,
+    downloadLanguage = 'any',
+    downloadVersion = 'any',
+  }: Props = $props();
 
   const coverBlurred = $derived(anime.isAdult && blurMature);
 
@@ -42,6 +56,8 @@
   const progressLabel = $derived(`${anime.currentEpisode} / ${totalEpisodes ?? '?'}`);
   const episodesToWatch = $derived(getEpisodesToWatch(anime));
   const watchState = $derived(getWatchState(anime));
+  // The next episode to watch, when it has already aired; only offered on the viewer's own list
+  const nextToWatch = $derived(canEdit && episodesToWatch > 0 ? anime.currentEpisode + 1 : null);
 
   // Badges for anime whose aired episode count isn't known
   const NO_EPISODE_INFO: Partial<Record<WatchState, { label: string; title: string }>> = {
@@ -315,6 +331,25 @@
 
         <!-- Pinned to the bottom, so errors line up across cards too -->
         <div class="back-actions">
+          {#if nextToWatch}
+            <a
+              class="download-link"
+              href={nyaaSearchUrl({
+                title: anime.title,
+                otherTitles: anime.otherTitles,
+                episode: nextToWatch,
+                language: downloadLanguage,
+                version: downloadVersion,
+                adult: anime.isAdult,
+              })}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Find episode {nextToWatch} on {nyaaSite(anime.isAdult)}<span class="tw:sr-only"
+                >, opens in a new tab</span
+              >
+            </a>
+          {/if}
           {#if errorMessage && flipped}
             <p class="tw:text-error tw:text-sm" role="alert">{errorMessage}</p>
           {/if}
@@ -488,6 +523,19 @@
     align-items: center;
     gap: 8px;
     margin-top: auto;
+  }
+
+  .download-link {
+    color: var(--sea-blue);
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  .download-link:hover,
+  .download-link:focus-visible {
+    color: var(--navy);
   }
 
   /* Without motion, the card simply switches sides */

@@ -2,6 +2,11 @@ import type { Cookies } from '@sveltejs/kit';
 import { describe, expect, it } from 'vitest';
 
 import { getPreferences, setPreferences } from '#lib/server/preferences.js';
+import {
+  DEFAULT_PREFERENCES,
+  DOWNLOAD_LANGUAGES,
+  DOWNLOAD_VERSIONS,
+} from '#lib/types/preferences.js';
 
 function cookiesWith(value?: string) {
   const jar = new Map<string, string>(value === undefined ? [] : [['preferences', value]]);
@@ -11,32 +16,69 @@ function cookiesWith(value?: string) {
   } as unknown as Cookies;
 }
 
+const cookie = (data: object) => JSON.stringify({ v: 1, data });
+
 describe('getPreferences', () => {
-  it('blurs mature covers by default', () => {
-    expect(getPreferences(cookiesWith())).toEqual({ blurMature: true });
+  it('blurs mature covers and searches every release by default', () => {
+    expect(getPreferences(cookiesWith())).toEqual({
+      blurMature: true,
+      downloadLanguage: 'any',
+      downloadVersion: 'any',
+    });
   });
 
-  it('reads a saved choice', () => {
-    expect(getPreferences(cookiesWith('{"v":1,"data":{"blurMature":false}}'))).toEqual({
+  it('reads saved choices', () => {
+    const saved = { blurMature: false, downloadLanguage: 'french', downloadVersion: 'dubbed' };
+    expect(getPreferences(cookiesWith(cookie(saved)))).toEqual(saved);
+  });
+
+  it('gives settings added later their default, keeping the others', () => {
+    expect(getPreferences(cookiesWith(cookie({ blurMature: false })))).toEqual({
       blurMature: false,
+      downloadLanguage: 'any',
+      downloadVersion: 'any',
     });
   });
 
   it.each([
+    [
+      'the wrong type',
+      { blurMature: 'no', downloadLanguage: 'english', downloadVersion: 'subbed' },
+      { blurMature: true, downloadLanguage: 'english', downloadVersion: 'subbed' },
+    ],
+    [
+      'an unknown language',
+      { blurMature: false, downloadLanguage: 'klingon', downloadVersion: 'dubbed' },
+      { blurMature: false, downloadLanguage: 'any', downloadVersion: 'dubbed' },
+    ],
+    [
+      'an unknown version',
+      { blurMature: false, downloadLanguage: 'french', downloadVersion: 'raw' },
+      { blurMature: false, downloadLanguage: 'french', downloadVersion: 'any' },
+    ],
+  ])('falls back to the default for just the setting with %s', (_, data, expected) => {
+    expect(getPreferences(cookiesWith(cookie(data)))).toEqual(expected);
+  });
+
+  it.each([
     ['a garbled cookie', 'maybe'],
-    ['the wrong type', '{"v":1,"data":{"blurMature":"no"}}'],
     ['a newer format', '{"v":2,"data":{"blurMature":false}}'],
-  ])('stays on the safe side with %s', (_, value) => {
-    expect(getPreferences(cookiesWith(value)).blurMature).toBe(true);
+  ])('falls back to the defaults with %s', (_, value) => {
+    expect(getPreferences(cookiesWith(value))).toEqual(DEFAULT_PREFERENCES);
   });
 });
 
 describe('setPreferences', () => {
-  it('round-trips both choices', () => {
+  it('round-trips every combination', () => {
     for (const blurMature of [true, false]) {
-      const cookies = cookiesWith();
-      setPreferences(cookies, { blurMature });
-      expect(getPreferences(cookies)).toEqual({ blurMature });
+      for (const downloadLanguage of DOWNLOAD_LANGUAGES) {
+        for (const downloadVersion of DOWNLOAD_VERSIONS) {
+          const preferences = { blurMature, downloadLanguage, downloadVersion };
+          const cookies = cookiesWith();
+          setPreferences(cookies, preferences);
+          expect(getPreferences(cookies)).toEqual(preferences);
+        }
+      }
     }
   });
 });

@@ -4,6 +4,8 @@ export type AiringStatus = 'FINISHED' | 'RELEASING' | 'NOT_YET_RELEASED' | 'CANC
 export type Anime = {
   id: number;
   title: string;
+  /** The English title and other names the anime goes by, besides `title` */
+  otherTitles: string[];
   thumbnailUrl: string;
   status: AiringStatus;
   /** Marked as adult (18+) on AniList */

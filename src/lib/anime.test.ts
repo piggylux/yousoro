@@ -7,6 +7,7 @@ function anime(overrides: Partial<Anime>): Anime {
   return {
     id: 1,
     title: 'Anime',
+    otherTitles: [],
     thumbnailUrl: '',
     status: 'RELEASING',
     isAdult: false,

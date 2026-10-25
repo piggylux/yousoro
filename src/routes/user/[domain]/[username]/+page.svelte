@@ -161,6 +161,8 @@
           canEdit={data.canEdit}
           onCaughtUp={celebrate}
           blurMature={data.preferences.blurMature}
+          downloadLanguage={data.preferences.downloadLanguage}
+          downloadVersion={data.preferences.downloadVersion}
         />
       </div>
     {/each}

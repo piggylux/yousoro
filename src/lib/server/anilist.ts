@@ -15,6 +15,9 @@ export class AniListApi implements Api {
       animeList: entries.map(({ media, status, progress, updatedAt }) => ({
         id: media.id,
         title: media.title.romaji,
+        otherTitles: [media.title.english, ...(media.synonyms ?? [])].filter(
+          (title): title is string => !!title && title !== media.title.romaji
+        ),
         thumbnailUrl: media.coverImage.extraLarge,
         status: media.status,
         isAdult: media.isAdult,
