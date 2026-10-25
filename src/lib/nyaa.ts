@@ -70,8 +70,12 @@ const ROMAN_NUMERALS: Record<string, number> = {
   VIII: 8,
   IX: 9,
 };
-// Enough phrases to find a release, without an endless URL; the most likely come first
-const MAX_PHRASES = 40;
+// The search stops growing at this many characters of phrases, as they're sent in the link, where
+// quotes, "|" and accented letters take several characters each: much longer, and nyaa.si can take
+// too long to answer
+const MAX_ENCODED_CHARS = 600;
+
+const encodedLength = (text: string) => new URLSearchParams([['q', text]]).toString().length - 2;
 
 function ordinal(n: number) {
   const suffix = n % 100 >= 11 && n % 100 <= 13 ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] ?? 'th');
@@ -114,81 +118,111 @@ function cleanTitle(title: string) {
 const withoutPunctuation = (title: string) => title.replace(/['’`:;,.!?()[\]{}]/g, '');
 
 /*
- * The phrases come in tiers, most likely first, so the cap only ever cuts the least likely. The
- * main titles (the romaji and the English one) get all their phrases before the other titles get
- * any: an anime can have many other titles, as Pokémon Horizons has one per arc, and those must
- * not push out a main title's less usual layouts.
+ * Every phrase that could name the episode is ranked by how likely release names are to use it,
+ * and the search keeps the most likely ones that fit in MAX_ENCODED_CHARS. The main titles are the
+ * romaji and the English one; an anime can have many other titles, as Pokémon Horizons has one
+ * per arc, and those come last
  */
-const enum Group {
-  Main,
+const enum Rank {
+  /**
+   * A main title as written, with the episode number: "Title - 05", "Title 05", and with its
+   * season as "S3", as SubsPlease, one of the most common groups, names seasons: "Title S3 - 05"
+   */
+  Number,
+  /** The same with an episode code: "Title - S02E05", "Title S02E05" */
+  Code,
+  /** A main title in brackets after another title: "Pokémon Horizons (Pocket Monsters 2023) - 152" */
+  Bracketed,
+  /** A main title without punctuation, which release names often drop: "My Girlfriends Friend" */
+  Unpunctuated,
+  /** The other ways of writing a season ("Season 2", "2nd Season"), and guessed seasons */
+  Season,
+  /** Another title, with the episode number */
   Other,
 }
-const enum Tier {
-  /** A title, as written and without punctuation, with the episode number and code */
-  Title,
-  /** The other ways of writing its season ("S2", "Season 2", "2nd Season"), and guessed seasons */
-  Season,
-  /** All of these in brackets after another title */
-  Bracketed,
-}
-const TIERS_PER_GROUP = 3;
 
 /**
- * The exact phrases that name one episode, most likely first. Each title is spelled as written,
- * then without punctuation, which release names often drop ("My Girlfriends Friend", "Title
- * Subtitle" for "Title: Subtitle", "Pocket Monsters 2023" for "Pocket Monsters (2023)"); a
- * season, if any, is also spelled the usual ways ("S2", "Season 2", "2nd Season"). Each spelling
- * is followed by the episode number ("05") and, from the title without its season, by an episode
- * code ("Title S02E05"), laid out the ways release names write them: with or without a dash
- * ("Title - 05", "Title 05"), and in brackets after another title, as in "Pokémon Horizons
- * (Pocket Monsters 2023) - 152".
+ * The exact phrases that name one episode, most likely first, as many as fit in the budget. Each
+ * ends with the episode number or code, with or without a dash, as release names write it
  */
 function episodePhrases(titles: { main: string[]; other: string[] }, episode: number): string[] {
-  // Main titles' tiers, then the other titles' tiers
-  const tiers = Array.from({ length: 2 * TIERS_PER_GROUP }, () => new Map<string, string>());
-  const add = (group: Group, tier: Tier, phrase: string) => {
+  /*
+   * By lowercase phrase, so each phrase is kept once, at its best rank. Within a rank, the forms
+   * with a dash come before the ones without, for every title in turn, so a long title can't use
+   * up the budget before the other title gets its most likely form
+   */
+  const candidates = new Map<
+    string,
+    { phrase: string; rank: Rank; dashless: boolean; order: number }
+  >();
+  const add = (rank: Rank, phrase: string, dashless = false) => {
     const key = phrase.toLowerCase();
-    if (tiers.some((phrases) => phrases.has(key))) return;
-    tiers[group * TIERS_PER_GROUP + tier].set(key, phrase);
+    const known = candidates.get(key);
+    if (known && known.rank <= rank) return;
+    candidates.set(key, { phrase, rank, dashless, order: known?.order ?? candidates.size });
   };
-  const addLayouts = (group: Group, tier: Tier, name: string, number: string) => {
-    add(group, tier, `"${name} ${number}"`);
-    add(group, tier, `"${name} - ${number}"`);
-    // A title with brackets of its own is also spelled without them, for this layout
-    if (!/[()]/.test(name)) add(group, Tier.Bracketed, `"(${name}) - ${number}"`);
+  const withNumber = (rank: Rank, name: string) => {
+    add(rank, `"${name} - ${pad(episode)}"`);
+    add(rank, `"${name} ${pad(episode)}"`, true);
   };
-  const code = (season: number) => `S${pad(season)}E${pad(episode)}`;
+  const withCode = (rank: Rank, name: string, season: number) => {
+    const code = `S${pad(season)}E${pad(episode)}`;
+    add(rank, `"${name} - ${code}"`);
+    add(rank, `"${name} ${code}"`, true);
+  };
 
-  const spellings = [
-    ...titles.main.map((title) => ({ title, group: Group.Main })),
-    ...titles.other.map((title) => ({ title, group: Group.Other })),
-  ].flatMap(({ title, group }) => {
-    const clean = cleanTitle(title);
-    return [clean, cleanTitle(withoutPunctuation(clean))].map((spelling) => ({ spelling, group }));
-  });
-  for (const { spelling: title, group } of spellings) {
-    if (!title || !LATIN_TITLE.test(title)) continue;
+  for (const title of titles.main.map(cleanTitle)) {
+    for (const [spelling, asWritten] of [
+      [title, true],
+      [cleanTitle(withoutPunctuation(title)), false],
+    ] as const) {
+      if (!spelling || !LATIN_TITLE.test(spelling)) continue;
 
-    addLayouts(group, Tier.Title, title, pad(episode));
-    const season = splitSeason(title);
-    if (!season) {
-      addLayouts(group, Tier.Title, title, code(1));
-      continue;
-    }
-    const { base, season: number, guessed } = season;
-    for (const name of [`${base} S${number}`, `${base} Season ${number}`]) {
-      addLayouts(group, Tier.Season, name, pad(episode));
-    }
-    addLayouts(group, Tier.Season, `${base} ${ordinal(number)} Season`, pad(episode));
-    if (guessed) {
-      // The number may be part of the name ("Kaiju No. 8"), so the title stays a season 1
-      addLayouts(group, Tier.Title, title, code(1));
-      addLayouts(group, Tier.Season, base, code(number));
-    } else {
-      addLayouts(group, Tier.Title, base, code(number));
+      withNumber(asWritten ? Rank.Number : Rank.Unpunctuated, spelling);
+      // A title with brackets of its own is put in brackets without them
+      if (!/[()]/.test(spelling)) add(Rank.Bracketed, `"(${spelling}) - ${pad(episode)}"`);
+
+      const codeRank = asWritten ? Rank.Code : Rank.Unpunctuated;
+      const season = splitSeason(spelling);
+      if (!season) {
+        withCode(codeRank, spelling, 1);
+        continue;
+      }
+      const { base, season: number, guessed } = season;
+      // "S3" ranks with the title itself, unless the number may just be part of the name
+      withNumber(asWritten && !guessed ? Rank.Number : Rank.Season, `${base} S${number}`);
+      for (const name of [`${base} Season ${number}`, `${base} ${ordinal(number)} Season`]) {
+        withNumber(Rank.Season, name);
+      }
+      if (guessed) {
+        // The number may be part of the name ("Kaiju No. 8"), so the title stays a season 1
+        withCode(codeRank, spelling, 1);
+        withCode(Rank.Season, base, number);
+      } else {
+        withCode(codeRank, base, number);
+      }
     }
   }
-  return tiers.flatMap((phrases) => [...phrases.values()]).slice(0, MAX_PHRASES);
+  for (const title of titles.other.map(cleanTitle)) {
+    for (const spelling of [title, cleanTitle(withoutPunctuation(title))]) {
+      if (spelling && LATIN_TITLE.test(spelling)) withNumber(Rank.Other, spelling);
+    }
+  }
+
+  const ranked = [...candidates.values()].sort(
+    (a, b) => a.rank - b.rank || Number(a.dashless) - Number(b.dashless) || a.order - b.order
+  );
+  const kept: string[] = [];
+  let length = 0;
+  for (const { phrase } of ranked) {
+    // Counting the "|" between phrases. A phrase too long for what's left is skipped, so shorter
+    // ones after it still get in; the most likely phrase is always kept
+    const cost = encodedLength(phrase) + encodedLength('|');
+    if (kept.length > 0 && length + cost > MAX_ENCODED_CHARS) continue;
+    kept.push(phrase);
+    length += cost;
+  }
+  return kept;
 }
 
 export type NyaaSearch = {
@@ -241,14 +275,11 @@ export function nyaaQuery({
   return { category: adult ? SUKEBEI_ANIME : CATEGORIES[language], query };
 }
 
-/** A nyaa.si, or sukebei.nyaa.si, search for one episode, with the best-seeded releases first */
+/** A nyaa.si, or sukebei.nyaa.si, search for one episode, in nyaa.si's own order (newest first) */
 export function nyaaSearchUrl(search: NyaaSearch): string {
   const { category, query } = nyaaQuery(search);
   const url = new URL(`https://${nyaaSite(search.adult ?? false)}/`);
-  url.searchParams.set('f', '0');
   url.searchParams.set('c', category);
   url.searchParams.set('q', query);
-  url.searchParams.set('s', 'seeders');
-  url.searchParams.set('o', 'desc');
   return url.href;
 }

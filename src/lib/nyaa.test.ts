@@ -4,13 +4,12 @@ import { nyaaQuery, nyaaSearchUrl, nyaaSite } from '#lib/nyaa.js';
 import { DOWNLOAD_LANGUAGES, DOWNLOAD_VERSIONS } from '#lib/types/preferences.js';
 
 // Every search for episode 1 of "Show" starts with these phrases
-const SHOW_PHRASES =
-  '("Show 01"|"Show - 01"|"Show S01E01"|"Show - S01E01"|"(Show) - 01"|"(Show) - S01E01")';
+const SHOW_PHRASES = '("Show - 01"|"Show 01"|"Show - S01E01"|"Show S01E01"|"(Show) - 01")';
 
 describe('nyaaQuery', () => {
   it('looks for the title followed right away by the episode number, with or without a dash', () => {
     expect(nyaaQuery({ title: 'Natsu to Hako', episode: 5 }).query).toBe(
-      '("Natsu to Hako 05"|"Natsu to Hako - 05"|"Natsu to Hako S01E05"|"Natsu to Hako - S01E05"|"(Natsu to Hako) - 05"|"(Natsu to Hako) - S01E05") -batch'
+      '("Natsu to Hako - 05"|"Natsu to Hako 05"|"Natsu to Hako - S01E05"|"Natsu to Hako S01E05"|"(Natsu to Hako) - 05") -batch'
     );
   });
 
@@ -29,7 +28,7 @@ describe('nyaaQuery', () => {
   it('keeps a season 1 code when a number ending the title may be part of the name', () => {
     const { query } = nyaaQuery({ title: 'Kaiju No. 8', episode: 5 });
     expect(query).toContain('"Kaiju No. 8 S01E05"');
-    expect(query).toContain('"Kaiju No. S08E05"');
+    expect(query).toContain('"Kaiju No. - S08E05"');
   });
 
   it.each([
@@ -41,19 +40,55 @@ describe('nyaaQuery', () => {
     expect(query).toContain(spelling);
   });
 
-  it('keeps every title ahead of the extra spellings when the search is capped', () => {
+  it('keeps the most likely phrases of both main titles when a long title fills the search', () => {
     const { query } = nyaaQuery({
       title: 'Re:Zero kara Hajimeru Isekai Seikatsu 3rd Season',
       englishTitle: 'Re:ZERO -Starting Life in Another World- Season 3',
       episode: 5,
     });
     for (const phrase of [
+      '"Re:Zero kara Hajimeru Isekai Seikatsu 3rd Season - 05"',
       '"Re:ZERO -Starting Life in Another World- Season 3 - 05"',
-      '"ReZERO -Starting Life in Another World- Season 3 - 05"',
-      '"ReZERO -Starting Life in Another World- - S03E05"',
+      '"Re:Zero kara Hajimeru Isekai Seikatsu - S03E05"',
+      '"Re:ZERO -Starting Life in Another World- - S03E05"',
     ]) {
       expect(query).toContain(phrase);
     }
+    // The less likely spellings, without punctuation or with other season words, don't fit
+    expect(query).not.toContain('ReZERO');
+    expect(query).not.toContain('Season 3 - S03E05');
+  });
+
+  it('ranks the "S3" season spelling with the title, as SubsPlease names seasons', () => {
+    const phrases =
+      nyaaQuery({
+        title: 'Tensei shitara Slime Datta Ken 3rd Season',
+        englishTitle: 'That Time I Got Reincarnated as a Slime Season 3',
+        episode: 5,
+      }).query.match(/"[^"]*"/g) ?? [];
+    expect(phrases.slice(0, 2)).toEqual([
+      '"Tensei shitara Slime Datta Ken 3rd Season - 05"',
+      '"Tensei shitara Slime Datta Ken S3 - 05"',
+    ]);
+  });
+
+  it('still fits short phrases after a long one that no longer does', () => {
+    const { query } = nyaaQuery({
+      title:
+        'Ore dake Level Up na Ken: Isekai de Saikyou no Mahou Tsukai ni Natta Ore ga Mitsuketa Kagi no Himitsu to Sono Saki',
+      englishTitle: 'Solo Leveling',
+      episode: 5,
+    });
+    expect(query).toContain('"Solo Leveling - S01E05"');
+    expect(query).toContain('"Solo Leveling S01E05"');
+  });
+
+  it('gives both main titles their dash form before either gets the rest', () => {
+    const phrases =
+      nyaaQuery({ title: 'Romaji Title', englishTitle: 'English Title', episode: 2 }).query.match(
+        /"[^"]*"/g
+      ) ?? [];
+    expect(phrases.slice(0, 2)).toEqual(['"Romaji Title - 02"', '"English Title - 02"']);
   });
 
   it('gives the main titles every layout before other titles get any', () => {
@@ -131,12 +166,20 @@ describe('nyaaQuery', () => {
     expect(query).not.toContain('S100');
   });
 
-  it('keeps the search to 40 phrases, the main title first', () => {
+  it('keeps the search short, the main title first, so nyaa.si answers in time', () => {
     const otherTitles = Array.from({ length: 30 }, (_, i) => `Alternative Name ${i + 10}`);
     const { query } = nyaaQuery({ title: 'Main Title', otherTitles, episode: 1 });
     const phrases = query.match(/"[^"]*"/g) ?? [];
-    expect(phrases).toHaveLength(40);
-    expect(phrases[0]).toBe('"Main Title 01"');
+    // Measured as it's sent in the link, where quotes and "|" take several characters each
+    const encoded = new URLSearchParams([['q', phrases.join('|')]]).toString().length - 2;
+    expect(encoded).toBeLessThanOrEqual(600);
+    expect(phrases[0]).toBe('"Main Title - 01"');
+  });
+
+  it('keeps one phrase even for a title longer than the whole budget', () => {
+    const title = 'A Very Long Title '.repeat(40).trim();
+    const phrases = nyaaQuery({ title, episode: 1 }).query.match(/"[^"]*"/g) ?? [];
+    expect(phrases).toEqual([`"${title} - 01"`]);
   });
 
   it('keeps the dash release names put between the title and the episode', () => {
@@ -257,17 +300,14 @@ describe('nyaaQuery', () => {
 });
 
 describe('nyaaSearchUrl', () => {
-  it('opens the search on nyaa.si, most seeders first', () => {
+  it('opens the search on nyaa.si, with only the category and the query', () => {
     const url = new URL(
       nyaaSearchUrl({ title: 'Show & Friends', episode: 1, language: 'english', version: 'subbed' })
     );
     expect(url.origin).toBe('https://nyaa.si');
     expect(Object.fromEntries(url.searchParams)).toEqual({
-      f: '0',
       c: '1_2',
-      q: '("Show & Friends 01"|"Show & Friends - 01"|"Show & Friends S01E01"|"Show & Friends - S01E01"|"(Show & Friends) - 01"|"(Show & Friends) - S01E01") -dub -dubbed -batch',
-      s: 'seeders',
-      o: 'desc',
+      q: '("Show & Friends - 01"|"Show & Friends 01"|"Show & Friends - S01E01"|"Show & Friends S01E01"|"(Show & Friends) - 01") -dub -dubbed -batch',
     });
   });
 });
