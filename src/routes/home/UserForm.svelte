@@ -1,22 +1,23 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
-  import type { Domain } from '$lib/types/domain';
-  import type { UserDomain } from '$lib/types/user-domain';
+  import type { Domain } from '#lib/types/domain.js';
+  import type { UserDomain } from '#lib/types/user-domain.js';
 
   const domainOptions: UserDomain[] = [
     { label: 'MyAnimeList', value: 'myanimelist' },
     { label: 'AniList', value: 'anilist' },
   ];
 
-  let username = '';
-  let domain: Domain = 'myanimelist';
+  let username = $state('');
+  let domain = $state<Domain>('myanimelist');
 
-  function submit() {
+  function submit(event: SubmitEvent) {
+    event.preventDefault();
     goto(`/user/${domain}/${username}`);
   }
 </script>
 
-<form class="flex flex-row justify-center" on:submit|preventDefault={submit}>
+<form class="flex flex-row justify-center" onsubmit={submit}>
   <div class="join">
     <div>
       <input

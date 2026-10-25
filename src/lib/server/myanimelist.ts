@@ -1,5 +1,6 @@
-import type { Anime } from '$lib/types/anime';
-import type { Api } from '$lib/types/api';
+import type { Anime } from '#lib/types/anime.js';
+import type { Api } from '#lib/types/api.js';
+import { ANILIST_TOKEN, MAL_CLIENT_ID } from '$app/env/private';
 import type { AiringEntry } from 'anilist-node';
 import anilist from 'anilist-node';
 import { RateLimit } from 'async-sema';
@@ -26,8 +27,8 @@ type AnimeListResponseData = {
 
 export class MyAnimeListApi implements Api {
   apiUrl = 'https://api.myanimelist.net/v2';
-  malSecret = import.meta.env.VITE_MAL_CLIENT_ID;
-  anilistSecret = import.meta.env.VITE_ANILIST_TOKEN;
+  malSecret = MAL_CLIENT_ID;
+  anilistSecret = ANILIST_TOKEN;
 
   anilist = new anilist(this.anilistSecret);
   rateLimit = RateLimit(3);
