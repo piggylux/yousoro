@@ -6,6 +6,7 @@
   import { clock } from '#lib/clock.js';
   import ScoreInput from '#lib/components/ScoreInput.svelte';
   import { formatAirDate, formatAirsIn } from '#lib/countdown.js';
+  import { flippedCard } from '#lib/flipped-card.svelte.js';
   import { nyaaSearchUrl, nyaaSite } from '#lib/nyaa.js';
   import {
     DEFAULT_SCORE_FORMAT,
@@ -140,20 +141,35 @@
   let coverButton = $state<HTMLButtonElement>();
   let backFace = $state<HTMLElement>();
 
-  // Focus follows the side that's showing, so keyboard users land on what they can see
-  async function flip(showBack: boolean) {
+  /*
+   * Focus follows the side that's showing, so keyboard users land on what they can see, except when
+   * the card is turned back because another one was turned over
+   */
+  async function flip(showBack: boolean, { moveFocus = true } = {}) {
     flipped = showBack;
+    if (showBack) flippedCard.id = uid;
+    else if (flippedCard.id === uid) flippedCard.id = null;
     if (!showBack) {
       // Turning back over discards an unsaved edit and any error, so the next flip starts fresh
       revertDrafts();
       errorMessage = null;
     }
     await tick();
+    if (!moveFocus) return;
     // Without scrolling: the card is already where the user is looking, even if partly off screen
     const options = { preventScroll: true };
     if (showBack) backFace?.querySelector<HTMLElement>('a, button, input')?.focus(options);
     else coverButton?.focus(options);
   }
+
+  // Only one card shows its back at a time: this one turns back when another is turned over, a
+  // moment later, so the two turns follow each other rather than happen at once
+  const TURN_BACK_DELAY_MS = 100;
+  $effect(() => {
+    if (!flipped || flippedCard.id === uid) return;
+    const timer = setTimeout(() => flip(false, { moveFocus: false }), TURN_BACK_DELAY_MS);
+    return () => clearTimeout(timer);
+  });
 
   const submitEntry: SubmitFunction = ({ formData }) => {
     saving = true;
