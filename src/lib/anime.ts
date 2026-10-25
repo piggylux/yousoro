@@ -65,19 +65,40 @@ export function getWatchState(anime: Anime): WatchState {
 }
 
 /**
- * Lower comes first: new episodes to watch, then rewatches, which can wait as every episode has
- * aired, then caught up or completed, then those without episode info
+ * The sections of a list, in the order they're listed: new episodes to watch, then rewatches,
+ * which can wait as every episode has aired, then caught-up or completed anime, then those without
+ * episode info. The viewer can hide any of them
  */
-function getSortGroup(anime: Anime): number {
+export const LIST_SECTIONS = ['behind', 'rewatching', 'caught-up', 'other'] as const;
+export type ListSection = (typeof LIST_SECTIONS)[number];
+
+/** What each section is called, on its filter */
+export const LIST_SECTION_LABELS: Record<ListSection, string> = {
+  behind: 'Behind',
+  rewatching: 'Rewatching',
+  'caught-up': 'Caught up',
+  other: 'Other',
+};
+
+export function isListSection(value: unknown): value is ListSection {
+  return LIST_SECTIONS.includes(value as ListSection);
+}
+
+export function getListSection(anime: Anime): ListSection {
   switch (getWatchState(anime)) {
     case 'to-watch':
-      return anime.rewatching ? 1 : 0;
+      return anime.rewatching ? 'rewatching' : 'behind';
     case 'completed':
     case 'caught-up':
-      return 2;
+      return 'caught-up';
     default:
-      return 3;
+      return 'other';
   }
+}
+
+/** Lower comes first, in the order of LIST_SECTIONS */
+function getSortGroup(anime: Anime): number {
+  return LIST_SECTIONS.indexOf(getListSection(anime));
 }
 
 /**
@@ -130,6 +151,61 @@ export type Backlog = {
   /** The anime with the most episodes left, the first one listed on a tie */
   biggest: { anime: Anime; episodes: number } | null;
 };
+
+/*
+ * Text as the search compares it: lowercase, without accents ("pokemon" finds "Pokémon"), and with
+ * punctuation and symbols as spaces, as people rarely type them ("yu gi oh" finds "Yu☆Gi☆Oh!")
+ */
+const foldText = (text: string) =>
+  text
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ');
+
+/** An anime's titles, folded once so each search only compares them */
+export type SearchIndex = {
+  /** Every title, folded, one after another */
+  words: string;
+  /** The same without any spaces, so "yugioh" finds "Yu-Gi-Oh!" and "rezero" finds "Re:Zero" */
+  squashed: string;
+};
+
+export function searchIndex(anime: Anime): SearchIndex {
+  const words = foldText([anime.title, anime.englishTitle ?? '', ...anime.otherTitles].join(' '));
+  return { words, squashed: words.replaceAll(' ', '') };
+}
+
+/** The words of a search, folded like the titles; none for an empty search */
+export function searchWords(search: string): string[] {
+  return foldText(search).split(' ').filter(Boolean);
+}
+
+/**
+ * Whether an anime's titles, any of them, hold every word of the search, in any order and in part.
+ * Words match with or without the spaces and punctuation between them. No words match every anime
+ */
+export function matchesSearch(index: SearchIndex, words: string[]): boolean {
+  return words.every((word) => index.words.includes(word) || index.squashed.includes(word));
+}
+
+/** The anime in the sections the viewer shows, in the same order */
+export function inShownSections(animeList: Anime[], hiddenSections: ListSection[]): Anime[] {
+  if (hiddenSections.length === 0) return animeList;
+  return animeList.filter((anime) => !hiddenSections.includes(getListSection(anime)));
+}
+
+/** How many anime are in each section */
+export function countBySection(animeList: Anime[]): Record<ListSection, number> {
+  const counts: Record<ListSection, number> = {
+    behind: 0,
+    rewatching: 0,
+    'caught-up': 0,
+    other: 0,
+  };
+  for (const anime of animeList) counts[getListSection(anime)] += 1;
+  return counts;
+}
 
 /** The anime to list: all of them, or without those AniList marks as adult when they're hidden */
 export function withoutHiddenMature(animeList: Anime[], showMature: boolean): Anime[] {

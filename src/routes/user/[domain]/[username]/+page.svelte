@@ -5,12 +5,24 @@
   import { prefersReducedMotion } from 'svelte/motion';
   import { fade } from 'svelte/transition';
 
-  import { sortWatchingList } from '#lib/anime.js';
+  import {
+    countBySection,
+    getListSection,
+    inShownSections,
+    LIST_SECTION_LABELS,
+    type ListSection,
+    matchesSearch,
+    searchIndex,
+    searchWords,
+    sortWatchingList,
+  } from '#lib/anime.js';
   import AnimeCard from '#lib/components/AnimeCard.svelte';
   import BacklogBanner from '#lib/components/BacklogBanner.svelte';
+  import ListFilters from '#lib/components/ListFilters.svelte';
   import ScorePrompt from '#lib/components/ScorePrompt.svelte';
   import YousoroCelebration from '#lib/components/YousoroCelebration.svelte';
   import { flippedCard } from '#lib/flipped-card.svelte.js';
+  import { hiddenSectionsCookie, toggleHidden } from '#lib/hidden-sections.js';
   import { nextAiringReloadDelay, planReload, reloadsOnReturn } from '#lib/live-updates.js';
   import type { Anime } from '#lib/types/anime.js';
   import type { AnimePageData } from '#lib/types/api.js';
@@ -18,7 +30,60 @@
 
   let { data }: { data: AnimePageData } = $props();
 
-  const animeList = $derived(sortWatchingList(data.watchingList));
+  const sortedList = $derived(sortWatchingList(data.watchingList));
+
+  /*
+   * The filters above the list show or hide its sections. The whole list is already here, so a
+   * change only filters it, and a cookie remembers it for the next visit: no request at all
+   */
+  let hiddenSections = $derived(data.hiddenSections);
+  const sectionCounts = $derived(countBySection(data.watchingList));
+  /*
+   * The search narrows the shown sections further; it's not remembered, unlike the filters. The
+   * titles are folded once per list, so each keystroke only compares them
+   */
+  let search = $state('');
+  const words = $derived(searchWords(search));
+  const searching = $derived(words.length > 0);
+  const searchIndexes = $derived(
+    new Map(data.watchingList.map((anime) => [anime.id, searchIndex(anime)]))
+  );
+  const matches = (anime: Anime) => {
+    const index = searchIndexes.get(anime.id);
+    return index !== undefined && matchesSearch(index, words);
+  };
+  const animeList = $derived.by(() => {
+    const shown = inShownSections(sortedList, hiddenSections);
+    return searching ? shown.filter(matches) : shown;
+  });
+  // Anime that match but are in hidden sections, for when nothing shown does: only counted then
+  const hiddenMatches = $derived(
+    searching && animeList.length === 0 ? sortedList.filter(matches).length : 0
+  );
+
+  function toggleSection(section: ListSection) {
+    hiddenSections = toggleHidden(hiddenSections, section);
+    document.cookie = hiddenSectionsCookie(hiddenSections);
+    if (movedNote?.section === section) dismissMovedNote();
+  }
+
+  /*
+   * A save can move a card into a section the filters hide, as when the viewer catches up with
+   * "Caught up" hidden. A note says where it went, with a button to show that section
+   */
+  let movedNote = $state<{ title: string; section: ListSection } | null>(null);
+  let movedNoteTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function noteMovedToHidden(anime: Anime) {
+    clearTimeout(movedNoteTimer);
+    movedNote = { title: anime.title, section: getListSection(anime) };
+    movedNoteTimer = setTimeout(dismissMovedNote, 6000);
+  }
+
+  function dismissMovedNote() {
+    clearTimeout(movedNoteTimer);
+    movedNote = null;
+  }
 
   // Cards slide to their new place when an update reorders the list, instead of jumping there
   const duration = $derived(prefersReducedMotion.current ? 0 : 500);
@@ -99,6 +164,7 @@
       observer.disconnect();
       clearTimeout(highlightTimer);
       clearTimeout(busyTimer);
+      clearTimeout(movedNoteTimer);
     };
   });
 
@@ -130,7 +196,13 @@
   async function followCard(animeId: number, positionBefore: number) {
     await tick();
     const index = animeList.findIndex((anime) => anime.id === animeId);
-    if (index === -1 || index === positionBefore) return;
+    if (index === -1) {
+      // Still on the list, but in a hidden section; an anime that left the list isn't
+      const moved = sortedList.find((anime) => anime.id === animeId);
+      if (moved) noteMovedToHidden(moved);
+      return;
+    }
+    if (index === positionBefore) return;
 
     // Off for a moment first, so a card saved again before the glow ends glows anew
     clearTimeout(highlightTimer);
@@ -269,6 +341,30 @@
     />
   </div>
 
+  {#if data.watchingList.length}
+    <ListFilters
+      counts={sectionCounts}
+      hidden={hiddenSections}
+      onToggle={toggleSection}
+      bind:search
+    />
+  {/if}
+  <!-- Tells screen readers how many anime match as the viewer types, as the grid changes silently -->
+  <p class="tw:sr-only" aria-live="polite">
+    {searching ? `${animeList.length} anime ${animeList.length === 1 ? 'matches' : 'match'}` : ''}
+  </p>
+  {#if data.watchingList.length && !animeList.length}
+    <p class="all-hidden">
+      {#if searching}
+        No anime {hiddenMatches ? 'in the shown sections' : 'here'} matches “{search.trim()}”{hiddenMatches
+          ? `, but ${hiddenMatches} in ${hiddenMatches === 1 ? 'a hidden section does' : 'hidden sections do'}`
+          : ''}.
+      {:else}
+        Every anime here is in a section the filters hide.
+      {/if}
+    </p>
+  {/if}
+
   <div
     class="anime-grid"
     data-size={data.preferences.cardSize}
@@ -305,6 +401,29 @@
   </div>
 </section>
 
+{#if movedNote}
+  <div class="moved-note" role="status">
+    <span>
+      {movedNote.title} moved to {LIST_SECTION_LABELS[movedNote.section]}, which the filters hide.
+    </span>
+    <button
+      type="button"
+      class="tw:btn tw:btn-xs show-section"
+      onclick={() => movedNote && toggleSection(movedNote.section)}
+    >
+      Show {LIST_SECTION_LABELS[movedNote.section]}
+    </button>
+    <button
+      type="button"
+      class="tw:btn tw:btn-xs tw:btn-ghost"
+      aria-label="Dismiss"
+      onclick={dismissMovedNote}
+    >
+      ✕
+    </button>
+  </div>
+{/if}
+
 {#if celebration}
   {#key celebration.key}
     <YousoroCelebration
@@ -327,14 +446,65 @@
 {/if}
 
 <style>
+  /* Floats just below the header, as the card that moved may have been anywhere down the list */
+  .moved-note {
+    position: fixed;
+    top: 72px;
+    left: 50%;
+    z-index: 40;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: max-content;
+    max-width: calc(100vw - 32px);
+    padding: 8px 8px 8px 14px;
+    border: 2px solid var(--you-blue);
+    border-radius: 12px;
+    background: var(--you-blue-pale);
+    box-shadow: 0 6px 18px rgb(15 61 110 / 0.2);
+    color: var(--navy);
+    font-size: 0.9rem;
+    translate: -50% 0;
+    animation: note-in 0.25s ease-out;
+  }
+
+  .show-section {
+    border-color: var(--sea-blue);
+    background: var(--sea-blue);
+    color: #ffffff;
+  }
+
+  .show-section:hover {
+    border-color: var(--navy);
+    background: var(--navy);
+  }
+
+  @keyframes note-in {
+    from {
+      opacity: 0;
+      translate: -50% -8px;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .moved-note {
+      animation: none;
+    }
+  }
+
+  .all-hidden {
+    margin: 24px 0;
+    color: var(--sea-blue);
+    text-align: center;
+  }
+
   .profile-bar {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     justify-content: center;
     gap: 16px 28px;
-    /* Clear space above the first row, whose badges stick out above the cards */
-    margin-bottom: 72px;
+    margin-bottom: 20px;
   }
 
   .profile {
@@ -397,13 +567,14 @@
   /*
    * On larger screens, large cards shrink with the window height (down to 200px wide) so two full
    * rows fit without scrolling. A card is its 3:4 cover plus 108px of title and progress, and the
-   * grid starts about 222px down the page; 262px also counts the gap between rows and a little slack.
+   * grid starts about 242px down the page, below the filters; 282px also counts the gap between rows
+   * and a little slack.
    * Medium cards are about seven eighths of that size and small ones three quarters, so more fit in
    * a row
    */
   @media (min-width: 768px) {
     .anime-grid {
-      --two-rows-width: calc(20px + 0.75 * ((100svh - 262px) / 2 - 108px));
+      --two-rows-width: calc(20px + 0.75 * ((100svh - 282px) / 2 - 108px));
       --card-width: clamp(175px, calc(0.87 * var(--two-rows-width)), 260px);
     }
 

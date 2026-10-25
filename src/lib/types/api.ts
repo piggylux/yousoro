@@ -1,3 +1,4 @@
+import type { ListSection } from '#lib/anime.js';
 import type { ScoreFormat } from '#lib/score.js';
 import type { Anime } from '#lib/types/anime.js';
 import type { Domain } from '#lib/types/domain.js';
@@ -27,6 +28,8 @@ export type AnimePageData = {
   watchingList: Anime[];
   /** How the list owner scores anime */
   scoreFormat: ScoreFormat;
+  /** The sections of the list the viewer hides with the filters above it */
+  hiddenSections: ListSection[];
   userProfileLink: string;
   /** The viewer's display settings, from the root layout */
   preferences: Preferences;

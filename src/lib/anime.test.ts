@@ -3,8 +3,14 @@ import { describe, expect, it } from 'vitest';
 import {
   getBacklog,
   getNextUp,
+  countBySection,
+  getListSection,
   getWatchState,
   hasNewEpisode,
+  inShownSections,
+  matchesSearch,
+  searchIndex,
+  searchWords,
   sortWatchingList,
   withoutHiddenMature,
 } from '#lib/anime.js';
@@ -259,5 +265,90 @@ describe('hasNewEpisode', () => {
 
   it('needs to know when the latest episode aired', () => {
     expect(hasNewEpisode(airing(hours(1), { recentEpisodeAiredAt: null }), now)).toBe(false);
+  });
+});
+
+describe('list sections', () => {
+  const list = [
+    anime({ id: 1, currentEpisode: 1, numberAiredEpisodes: 3 }),
+    anime({ id: 2, currentEpisode: 1, numberAiredEpisodes: 3, rewatching: true }),
+    anime({ id: 3, currentEpisode: 3, numberAiredEpisodes: 3 }),
+    anime({ id: 4, currentEpisode: 12, numberEpisodes: 12, numberAiredEpisodes: 12 }),
+    anime({ id: 5, status: 'HIATUS' }),
+  ];
+
+  it('puts each anime in the section its badge belongs to', () => {
+    expect(list.map(getListSection)).toEqual([
+      'behind',
+      'rewatching',
+      'caught-up',
+      'caught-up',
+      'other',
+    ]);
+  });
+
+  it('counts the anime in each section', () => {
+    expect(countBySection(list)).toEqual({ behind: 1, rewatching: 1, 'caught-up': 2, other: 1 });
+  });
+
+  it('leaves out the hidden sections, keeping the order', () => {
+    expect(inShownSections(list, ['caught-up', 'rewatching']).map((a) => a.id)).toEqual([1, 5]);
+  });
+
+  it('keeps the same list when nothing is hidden', () => {
+    expect(inShownSections(list, [])).toBe(list);
+  });
+});
+
+describe('matchesSearch', () => {
+  const matches = (anime: Anime, search: string) =>
+    matchesSearch(searchIndex(anime), searchWords(search));
+  const pokemon = anime({
+    title: 'Pocket Monsters (2023)',
+    englishTitle: 'Pokémon Horizons: The Series',
+    otherTitles: ['Pokémon Mezase'],
+  });
+  const yugioh = anime({ title: 'Yu☆Gi☆Oh! Duel Monsters' });
+
+  it('finds an anime by any of its titles, ignoring case', () => {
+    expect(matches(pokemon, 'pocket')).toBe(true);
+    expect(matches(pokemon, 'HORIZONS')).toBe(true);
+    expect(matches(pokemon, 'mezase')).toBe(true);
+  });
+
+  it('ignores accents, in the search and the titles', () => {
+    expect(matches(pokemon, 'pokemon')).toBe(true);
+    expect(matches(anime({ title: 'Pokemon' }), 'Pokémon')).toBe(true);
+  });
+
+  it('needs every word, in any order and any title', () => {
+    expect(matches(pokemon, 'horizons pocket')).toBe(true);
+    expect(matches(pokemon, 'pocket digimon')).toBe(false);
+  });
+
+  it('matches part of a word', () => {
+    expect(matches(pokemon, 'horiz')).toBe(true);
+  });
+
+  it.each([
+    ['without the punctuation', 'yugioh'],
+    ['with spaces for it', 'yu gi oh'],
+    ['with other punctuation', 'yu-gi-oh duel'],
+  ])('finds a title written with punctuation, searched %s', (_, search) => {
+    expect(matches(yugioh, search)).toBe(true);
+  });
+
+  it('finds a title whose words a colon joins, searched as one word', () => {
+    expect(matches(anime({ title: 'Re:Zero kara Hajimeru Isekai Seikatsu' }), 'rezero')).toBe(true);
+  });
+
+  it('matches every anime with an empty search, or one of only punctuation', () => {
+    expect(matches(pokemon, '')).toBe(true);
+    expect(matches(pokemon, '   ')).toBe(true);
+    expect(matches(pokemon, '!?')).toBe(true);
+  });
+
+  it('copes with an anime that has no English title', () => {
+    expect(matches(anime({ title: 'Koupen-chan' }), 'koupen')).toBe(true);
   });
 });

@@ -1,6 +1,7 @@
 import { type Cookies, error, fail, type RequestEvent } from '@sveltejs/kit';
 
 import { withoutHiddenMature } from '#lib/anime.js';
+import { HIDDEN_SECTIONS_COOKIE, parseHiddenSections } from '#lib/hidden-sections.js';
 import { AniListNotFoundError, AniListTokenError, saveEntry } from '#lib/server/anilist-client.js';
 import { AniListApi } from '#lib/server/anilist.js';
 import { parseEntryUpdate } from '#lib/server/entry-update.js';
@@ -25,6 +26,8 @@ export async function load({
   if (!isDomain(params.domain)) {
     error(404, `Unknown domain: ${params.domain}`);
   }
+  // Read on every load, so the list is rendered already filtered
+  const hiddenSections = parseHiddenSections(cookies.get(HIDDEN_SECTIONS_COOKIE));
 
   let userAnimeList;
   try {
@@ -37,7 +40,7 @@ export async function load({
     // save. It keeps showing it then (see +page.ts), rather than an error the viewer didn't ask for
     if (!isDataRequest) throw err;
     console.error(err);
-    return { unavailable: true as const, username: params.username };
+    return { unavailable: true as const, username: params.username, hiddenSections };
   }
   const { userId, username, avatarUrl, scoreFormat, animeList } = userAnimeList;
 
@@ -49,6 +52,7 @@ export async function load({
     // Anime AniList marks as adult are left out entirely when the viewer chose not to see them
     watchingList: withoutHiddenMature(animeList, locals.preferences.showMature),
     scoreFormat,
+    hiddenSections,
     userProfileLink: `https://anilist.co/user/${encodeURIComponent(username)}/animelist/Watching`,
   };
 }
