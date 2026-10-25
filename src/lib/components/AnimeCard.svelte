@@ -336,6 +336,7 @@
               class="download-link"
               href={nyaaSearchUrl({
                 title: anime.title,
+                englishTitle: anime.englishTitle,
                 otherTitles: anime.otherTitles,
                 episode: nextToWatch,
                 language: downloadLanguage,
@@ -460,6 +461,8 @@
     overflow-y: auto;
     text-align: center;
     transform: rotateY(180deg);
+    /* The details adapt to the card's own width, which the page grid sets */
+    container-type: inline-size;
   }
 
   /*
@@ -515,6 +518,32 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
+  }
+
+  /* "/ 224" stays in one piece */
+  .watched-form span {
+    white-space: nowrap;
+  }
+
+  /*
+   * On a narrow card, each label sits above its value instead of beside it, so the Watched field,
+   * the total and Save fit on one line
+   */
+  @container (max-width: 15rem) {
+    .facts {
+      grid-template-columns: 1fr;
+      justify-items: center;
+      gap: 2px;
+    }
+
+    .facts dt,
+    .facts dd {
+      text-align: center;
+    }
+
+    .facts dd + dt {
+      margin-top: 8px;
+    }
   }
 
   .back-actions {

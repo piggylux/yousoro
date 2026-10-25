@@ -41,21 +41,24 @@ function answerWith(entryMedia: ReturnType<typeof media>) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('AniListApi.getUserAnimeList', () => {
-  it('gives the English title and synonyms as other titles, leaving out the romaji', async () => {
+  it('gives the English title, and the synonyms other than the main titles', async () => {
     answerWith(
       media({ romaji: 'Kanojo no Tomodachi', english: "My Girlfriend's Friend" }, [
         'Kanojo no Tomodachi',
+        "My Girlfriend's Friend",
         'KanoTomo',
       ])
     );
     const { animeList } = await new AniListApi().getUserAnimeList('Piggylux');
     expect(animeList[0].title).toBe('Kanojo no Tomodachi');
-    expect(animeList[0].otherTitles).toEqual(["My Girlfriend's Friend", 'KanoTomo']);
+    expect(animeList[0].englishTitle).toBe("My Girlfriend's Friend");
+    expect(animeList[0].otherTitles).toEqual(['KanoTomo']);
   });
 
   it('copes with no English title and no synonyms', async () => {
     answerWith(media({ romaji: 'Koupen-chan', english: null }, null));
     const { animeList } = await new AniListApi().getUserAnimeList('Piggylux');
+    expect(animeList[0].englishTitle).toBeNull();
     expect(animeList[0].otherTitles).toEqual([]);
   });
 });

@@ -4,7 +4,9 @@ export type AiringStatus = 'FINISHED' | 'RELEASING' | 'NOT_YET_RELEASED' | 'CANC
 export type Anime = {
   id: number;
   title: string;
-  /** The English title and other names the anime goes by, besides `title` */
+  /** The English title, when AniList has one */
+  englishTitle: string | null;
+  /** Other names the anime goes by, in any language, besides `title` and `englishTitle` */
   otherTitles: string[];
   thumbnailUrl: string;
   status: AiringStatus;

@@ -98,15 +98,31 @@ function splitSeason(title: string): { base: string; season: number; guessed: bo
   return { base: bare[1], season: ROMAN_NUMERALS[bare[2]] ?? Number(bare[2]), guessed: true };
 }
 
+/**
+ * A title ready to go in a phrase: accents in one piece (as release names have them), without a
+ * part in another script, and without quotes, which would end the phrase early
+ */
+function cleanTitle(title: string) {
+  return title
+    .normalize('NFC')
+    .replace(NON_LATIN_BRACKETS, '')
+    .replace(/["\\]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 const withoutPunctuation = (title: string) => title.replace(/['’`:;,.!?()[\]{}]/g, '');
 
 /*
  * The phrases come in tiers, most likely first, so the cap only ever cuts the least likely. The
- * main titles (the romaji and, usually, the English one, which come first) get all their phrases
- * before the other titles get any: an anime can have many other titles, as Pokémon Horizons has
- * one per arc, and those must not push out a main title's less usual layouts.
+ * main titles (the romaji and the English one) get all their phrases before the other titles get
+ * any: an anime can have many other titles, as Pokémon Horizons has one per arc, and those must
+ * not push out a main title's less usual layouts.
  */
-const MAIN_TITLES = 2;
+const enum Group {
+  Main,
+  Other,
+}
 const enum Tier {
   /** A title, as written and without punctuation, with the episode number and code */
   Title,
@@ -127,53 +143,49 @@ const TIERS_PER_GROUP = 3;
  * ("Title - 05", "Title 05"), and in brackets after another title, as in "Pokémon Horizons
  * (Pocket Monsters 2023) - 152".
  */
-function episodePhrases(titles: string[], episode: number): string[] {
+function episodePhrases(titles: { main: string[]; other: string[] }, episode: number): string[] {
   // Main titles' tiers, then the other titles' tiers
   const tiers = Array.from({ length: 2 * TIERS_PER_GROUP }, () => new Map<string, string>());
-  let group = 0;
-  const add = (tier: Tier, phrase: string) => {
+  const add = (group: Group, tier: Tier, phrase: string) => {
     const key = phrase.toLowerCase();
     if (tiers.some((phrases) => phrases.has(key))) return;
     tiers[group * TIERS_PER_GROUP + tier].set(key, phrase);
   };
-  const addLayouts = (tier: Tier, name: string, number: string) => {
-    add(tier, `"${name} ${number}"`);
-    add(tier, `"${name} - ${number}"`);
+  const addLayouts = (group: Group, tier: Tier, name: string, number: string) => {
+    add(group, tier, `"${name} ${number}"`);
+    add(group, tier, `"${name} - ${number}"`);
     // A title with brackets of its own is also spelled without them, for this layout
-    if (!/[()]/.test(name)) add(Tier.Bracketed, `"(${name}) - ${number}"`);
+    if (!/[()]/.test(name)) add(group, Tier.Bracketed, `"(${name}) - ${number}"`);
   };
   const code = (season: number) => `S${pad(season)}E${pad(episode)}`;
 
-  const spellings = titles.flatMap((title, index) =>
-    [title, withoutPunctuation(title)].map((raw) => ({ raw, main: index < MAIN_TITLES }))
-  );
-  for (const { raw, main } of spellings) {
-    group = main ? 0 : 1;
-    // A quote would end the exact phrase early
-    const title = raw
-      .replace(NON_LATIN_BRACKETS, '')
-      .replace(/["\\]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
+  const spellings = [
+    ...titles.main.map((title) => ({ title, group: Group.Main })),
+    ...titles.other.map((title) => ({ title, group: Group.Other })),
+  ].flatMap(({ title, group }) => {
+    const clean = cleanTitle(title);
+    return [clean, cleanTitle(withoutPunctuation(clean))].map((spelling) => ({ spelling, group }));
+  });
+  for (const { spelling: title, group } of spellings) {
     if (!title || !LATIN_TITLE.test(title)) continue;
 
-    addLayouts(Tier.Title, title, pad(episode));
+    addLayouts(group, Tier.Title, title, pad(episode));
     const season = splitSeason(title);
     if (!season) {
-      addLayouts(Tier.Title, title, code(1));
+      addLayouts(group, Tier.Title, title, code(1));
       continue;
     }
     const { base, season: number, guessed } = season;
     for (const name of [`${base} S${number}`, `${base} Season ${number}`]) {
-      addLayouts(Tier.Season, name, pad(episode));
+      addLayouts(group, Tier.Season, name, pad(episode));
     }
-    addLayouts(Tier.Season, `${base} ${ordinal(number)} Season`, pad(episode));
+    addLayouts(group, Tier.Season, `${base} ${ordinal(number)} Season`, pad(episode));
     if (guessed) {
       // The number may be part of the name ("Kaiju No. 8"), so the title stays a season 1
-      addLayouts(Tier.Title, title, code(1));
-      addLayouts(Tier.Season, base, code(number));
+      addLayouts(group, Tier.Title, title, code(1));
+      addLayouts(group, Tier.Season, base, code(number));
     } else {
-      addLayouts(Tier.Title, base, code(number));
+      addLayouts(group, Tier.Title, base, code(number));
     }
   }
   return tiers.flatMap((phrases) => [...phrases.values()]).slice(0, MAX_PHRASES);
@@ -181,6 +193,9 @@ function episodePhrases(titles: string[], episode: number): string[] {
 
 export type NyaaSearch = {
   title: string;
+  /** The English title, searched as thoroughly as `title` */
+  englishTitle?: string | null;
+  /** Other names the anime goes by, searched once the main titles are covered */
   otherTitles?: string[];
   episode: number;
   language?: DownloadLanguage;
@@ -197,15 +212,26 @@ export type NyaaSearch = {
  */
 export function nyaaQuery({
   title,
+  englishTitle,
   otherTitles = [],
   episode,
   language = 'any',
   version = 'any',
   adult = false,
 }: NyaaSearch): { category: string; query: string } {
-  const phrases = episodePhrases([title, ...otherTitles], episode);
+  const main = englishTitle ? [title, englishTitle] : [title];
+  const phrases = episodePhrases({ main, other: otherTitles }, episode);
+  // When no title can be spelled in a phrase, its words and the episode number still narrow it
+  // down. Search operators are taken out of them, or "-Title-" would exclude a word
+  const titleQuery = phrases.length
+    ? `(${phrases.join('|')})`
+    : `${cleanTitle(title)
+        .replace(/[|()+~*]/g, ' ')
+        .replace(/(^|\s)-+/g, '$1')
+        .replace(/\s+/g, ' ')
+        .trim()} ${pad(episode)}`;
   const query = [
-    `(${phrases.join('|')})`,
+    titleQuery,
     adult ? SUKEBEI_LANGUAGE_TERMS[language] : '',
     TERMS[language][version],
     '-batch',

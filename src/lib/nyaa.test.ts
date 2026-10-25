@@ -44,7 +44,7 @@ describe('nyaaQuery', () => {
   it('keeps every title ahead of the extra spellings when the search is capped', () => {
     const { query } = nyaaQuery({
       title: 'Re:Zero kara Hajimeru Isekai Seikatsu 3rd Season',
-      otherTitles: ['Re:ZERO -Starting Life in Another World- Season 3'],
+      englishTitle: 'Re:ZERO -Starting Life in Another World- Season 3',
       episode: 5,
     });
     for (const phrase of [
@@ -60,8 +60,8 @@ describe('nyaaQuery', () => {
     // Pokémon Horizons' titles on AniList, one per arc
     const { query } = nyaaQuery({
       title: 'Pocket Monsters (2023)',
+      englishTitle: 'Pokémon Horizons: The Series',
       otherTitles: [
-        'Pokémon Horizons: The Series',
         'Pocket Monsters: Liko to Roy no Tabidachi (ポケットモンスター リコとロイの旅立ち)',
         'Pocket Monsters: Terapagos no Kagayaki (ポケットモンスター テラパゴスのかがやき)',
         'Pocket Monsters: Terastal Debut (ポケットモンスター テラスタルデビュー)',
@@ -75,6 +75,44 @@ describe('nyaaQuery', () => {
     // As in "[Pokémon Fansub] Pokémon Horizons (Pocket Monsters 2023) - 152 VOSTFR (FR)"
     expect(query).toContain('"(Pocket Monsters 2023) - 152"');
     expect(query).toContain('"(Pokémon Horizons The Series) - 152"');
+  });
+
+  it('ranks the English title as a main title, not the first other one', () => {
+    const otherTitles = Array.from({ length: 12 }, (_, i) => `Alternative Name ${i + 10}`);
+    const withEnglish = nyaaQuery({
+      title: 'Romaji',
+      englishTitle: 'English',
+      otherTitles,
+      episode: 1,
+    });
+    expect(withEnglish.query).toContain('"(English) - 01"');
+    // Without an English title, no other title gets a main title's place
+    const withoutEnglish = nyaaQuery({ title: 'Romaji', otherTitles, episode: 1 }).query;
+    expect(withoutEnglish).not.toContain('"(Alternative Name 10) - 01"');
+  });
+
+  it('also spells a title with a Japanese part in brackets without punctuation', () => {
+    const { query } = nyaaQuery({
+      title: 'Pocket Monsters (2023)',
+      otherTitles: ['Pocket Monsters: Mega Voltage (ポケットモンスター メガボルテージ)'],
+      episode: 5,
+    });
+    expect(query).toContain('"Pocket Monsters Mega Voltage 05"');
+  });
+
+  it('puts accents in one piece, as release names have them', () => {
+    const { query } = nyaaQuery({ title: 'Pokémon (2023)'.normalize('NFD'), episode: 5 });
+    expect(query).toContain('"Pokémon (2023) 05"');
+  });
+
+  it('falls back to the title words and episode when no title fits a phrase', () => {
+    expect(nyaaQuery({ title: '薬屋のひとりごと', episode: 5 }).query).toBe(
+      '薬屋のひとりごと 05 -batch'
+    );
+    // Without search operators, so "-ひとり" doesn't exclude a word and "|" doesn't mean "or"
+    expect(nyaaQuery({ title: '薬屋 -ひとり|ごと', episode: 5 }).query).toBe(
+      '薬屋 ひとり ごと 05 -batch'
+    );
   });
 
   it('keeps the Latin part of a title with a Japanese part in brackets', () => {
@@ -133,7 +171,8 @@ describe('nyaaQuery', () => {
   it('also tries the English and alternative titles, skipping non-Latin ones', () => {
     const { query } = nyaaQuery({
       title: 'Kusuriya no Hitorigoto',
-      otherTitles: ['The Apothecary Diaries', '薬屋のひとりごと'],
+      englishTitle: 'The Apothecary Diaries',
+      otherTitles: ['薬屋のひとりごと'],
       episode: 3,
     });
     expect(query).toContain('"Kusuriya no Hitorigoto 03"');
@@ -150,7 +189,7 @@ describe('nyaaQuery', () => {
   it('also looks for a title in brackets after another one, without its own brackets', () => {
     const { query } = nyaaQuery({
       title: 'Pocket Monsters (2023)',
-      otherTitles: ['Pokémon Horizons: The Series'],
+      englishTitle: 'Pokémon Horizons: The Series',
       episode: 152,
     });
     // As in "[Pokémon Fansub] Pokémon Horizons (Pocket Monsters 2023) - 152 VOSTFR (FR)"
@@ -162,7 +201,7 @@ describe('nyaaQuery', () => {
   it('also spells titles without apostrophes', () => {
     const { query } = nyaaQuery({
       title: 'Kanojo no Tomodachi',
-      otherTitles: ["My Girlfriend's Friend"],
+      englishTitle: "My Girlfriend's Friend",
       episode: 3,
     });
     // As in "My Girlfriends Friend S01E03 … (VOSTFR, Multi Subs, Kanojo no Tomodachi)"
