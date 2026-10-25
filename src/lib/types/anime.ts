@@ -26,6 +26,11 @@ export type Anime = {
   lastUpdatedAt: number | null;
   /** The next episode to air and when, as Unix time in ms; null when none is scheduled */
   nextEpisode: { number: number; airsAt: number } | null;
+  /**
+   * When the latest episode aired, as Unix time in ms, when that was recent enough to count as new
+   * as the list loaded (see NEW_EPISODE_MS); null otherwise, or when it isn't known
+   */
+  recentEpisodeAiredAt: number | null;
   numberAiredEpisodes: number | null;
   endDate: Date;
   numberEpisodes: number;

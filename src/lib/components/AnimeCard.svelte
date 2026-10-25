@@ -2,12 +2,20 @@
   import { enhance, type SubmitFunction } from '$app/forms';
   import { onMount, tick } from 'svelte';
 
-  import { getEpisodesToWatch, getWatchState, type WatchState } from '#lib/anime.js';
+  import {
+    BIG_BACKLOG,
+    getEpisodesToWatch,
+    getWatchState,
+    hasNewEpisode,
+    mayHaveNewEpisode,
+    type WatchState,
+  } from '#lib/anime.js';
   import { clock } from '#lib/clock.js';
   import ScoreInput from '#lib/components/ScoreInput.svelte';
   import { formatAirDate, formatAirsIn } from '#lib/countdown.js';
   import { flippedCard } from '#lib/flipped-card.svelte.js';
   import { nyaaSearchUrl, nyaaSite } from '#lib/nyaa.js';
+  import { countsBeforeSave } from '#lib/saved-counts.js';
   import {
     DEFAULT_SCORE_FORMAT,
     describeScore,
@@ -93,6 +101,27 @@
   const watchState = $derived(getWatchState(anime));
   // The next episode to watch, when it has already aired; only offered on the viewer's own list
   const nextToWatch = $derived(canEdit && episodesToWatch > 0 ? anime.currentEpisode + 1 : null);
+  // Only a just-aired episode makes the badge pulse, so the pulse means something. It depends on the
+  // viewer's clock, so like the countdowns it waits for the browser. Cards that can't have one
+  // don't read the clock, so they aren't updated as it ticks
+  const newEpisode = $derived(
+    mounted && mayHaveNewEpisode(anime) && hasNewEpisode(anime, clock.now)
+  );
+
+  /*
+   * Once the viewer's save lowers the count, as after +1, the number ticks into place, and
+   * reaching zero splashes the caught-up badge. This card may be new, if the save moved it, so the
+   * count before the save comes from outside it
+   */
+  let countTicks = $state(0);
+  let justCaughtUp = $state(false);
+  $effect(() => {
+    const before = countsBeforeSave.get(anime.id);
+    if (before === undefined || before === episodesToWatch) return;
+    countsBeforeSave.delete(anime.id);
+    if (episodesToWatch < before) countTicks += 1;
+    justCaughtUp = episodesToWatch === 0;
+  });
 
   // Badges for anime whose aired episode count isn't known
   const NO_EPISODE_INFO: Partial<Record<WatchState, { label: string; title: string }>> = {
@@ -209,6 +238,9 @@
         if (!wasDone && (stateAfter === 'caught-up' || stateAfter === 'completed')) {
           onCaughtUp?.(stateAfter, saved, { scored });
         }
+        // The card shows the new count once the list reloads, maybe as a new card if it moves
+        if (saved.currentEpisode !== progressBefore)
+          countsBeforeSave.set(anime.id, episodesToWatch);
       }
       // Reloads the list, so the card shows what AniList saved
       await update({ reset: false });
@@ -240,6 +272,7 @@
   {:else if watchState === 'caught-up'}
     <span
       class="card-badge tw:indicator-item tw:indicator-center tw:badge tw:badge-success"
+      class:splash={justCaughtUp}
       title={countdown?.date}
       aria-label={countdown?.spoken}
     >
@@ -264,9 +297,15 @@
   {:else if watchState === 'to-watch'}
     <span
       class="card-badge tw:indicator-item tw:indicator-center tw:badge behind-badge"
-      aria-label={`${episodesToWatch} episode${episodesToWatch === 1 ? '' : 's'} to watch`}
+      class:new-episode={newEpisode}
+      class:deep={episodesToWatch >= BIG_BACKLOG}
+      aria-label={`${newEpisode ? 'New episode. ' : ''}${episodesToWatch} episode${episodesToWatch === 1 ? '' : 's'} to watch`}
     >
-      {episodesToWatch.toLocaleString()} behind
+      {#if newEpisode}New ·{/if}
+      {#key countTicks}
+        <span class="count" class:ticked={countTicks > 0}>{episodesToWatch.toLocaleString()}</span>
+      {/key}
+      behind
     </span>
   {/if}
   <div class="anime-card" class:flipped>
@@ -836,13 +875,46 @@
 
   /* The badge to act on stands out most. White on these blues keeps at least 4.5:1 contrast */
   .behind-badge {
+    /* Its words are separate flex items, so a word's width apart rather than daisyUI's wide gap */
+    gap: 0.3em;
     background: linear-gradient(135deg, #1872b8, var(--sea-blue));
     color: #ffffff;
     box-shadow:
       0 4px 12px rgb(20 95 156 / 0.45),
       0 0 0 3px rgb(73 185 249 / 0.35);
-    /* Keeps the gleam inside the pill */
-    overflow: hidden;
+  }
+
+  /*
+   * A big backlog sinks into deeper water: navy, with faint diagonal stripes like light through
+   * waves. Still blue, so it reads as "a lot to catch up on", not as an alarm
+   */
+  .behind-badge.deep {
+    background:
+      repeating-linear-gradient(135deg, rgb(255 255 255 / 0.1) 0 4px, transparent 4px 9px),
+      linear-gradient(135deg, var(--sea-blue), var(--navy));
+    box-shadow:
+      0 4px 12px rgb(15 61 110 / 0.5),
+      0 0 0 3px rgb(20 95 156 / 0.35);
+  }
+
+  /* The count drops in from above and settles with a small bounce */
+  .count {
+    display: inline-block;
+  }
+
+  .count.ticked {
+    animation: count-tick 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  @keyframes count-tick {
+    0% {
+      translate: 0 -0.6em;
+      opacity: 0;
+    }
+    100% {
+      translate: 0 0;
+      opacity: 1;
+    }
   }
 
   /* Sea blue on white, outlined in You's sky blue: in the theme, but quieter than "behind" */
@@ -853,32 +925,50 @@
   }
 
   /*
-   * A light gleam sweeps across every few seconds. All badges sweep together, so the grid
-   * shimmers calmly instead of flickering
+   * A sky-blue ring pulses out from the badge and fades, like a gentle heartbeat, while an episode
+   * is new. Only the ring grows, so the badge and its text stay sharp. All new badges pulse together,
+   * so the grid breathes calmly instead of flickering
    */
-  .behind-badge::after {
+  .behind-badge.new-episode::after {
     content: '';
     position: absolute;
-    inset: 0;
-    background: linear-gradient(
-      110deg,
-      transparent 30%,
-      rgb(255 255 255 / 0.5) 50%,
-      transparent 70%
-    );
-    translate: -100% 0;
-    animation: gleam 4s ease-in-out 1s infinite;
+    /* Over the badge's white border too */
+    inset: -2px;
+    border-radius: inherit;
+    animation: pulse 2s ease-out 0.5s infinite;
     pointer-events: none;
   }
 
-  @keyframes gleam {
+  @keyframes pulse {
     0% {
-      translate: -100% 0;
+      box-shadow: 0 0 0 0 rgb(73 185 249 / 0.7);
     }
-    /* The sweep takes the first 30%; the rest of the cycle is a pause */
-    30%,
+    70%,
     100% {
-      translate: 100% 0;
+      box-shadow: 0 0 0 10px rgb(73 185 249 / 0);
+    }
+  }
+
+  /* Catching up splashes: a sky-blue ring bursts out of the caught-up badge, once */
+  .splash::after {
+    content: '';
+    position: absolute;
+    inset: -2px;
+    border-radius: inherit;
+    animation: splash 0.8s ease-out 0.15s both;
+    pointer-events: none;
+  }
+
+  @keyframes splash {
+    0% {
+      box-shadow:
+        0 0 0 0 rgb(73 185 249 / 0.9),
+        0 0 0 0 rgb(73 185 249 / 0.6);
+    }
+    100% {
+      box-shadow:
+        0 0 0 18px rgb(73 185 249 / 0),
+        0 0 0 30px rgb(73 185 249 / 0);
     }
   }
 
@@ -901,8 +991,13 @@
       animation: none;
     }
 
-    .behind-badge::after {
+    .behind-badge.new-episode::after,
+    .splash::after {
       display: none;
+    }
+
+    .count.ticked {
+      animation: none;
     }
 
     /* Without motion, the glow and the wave appear at once, the wave stays still and the card never turns */

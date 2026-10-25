@@ -1,4 +1,10 @@
-import { getAiredEpisodes, getWatchingEntries } from '#lib/server/anilist-client.js';
+import { NEW_EPISODE_MS } from '#lib/anime.js';
+import {
+  getAiredEpisodes,
+  getLatestAirings,
+  getWatchingEntries,
+  type AniListEntry,
+} from '#lib/server/anilist-client.js';
 import type { Api, UserAnimeList } from '#lib/types/api.js';
 
 export class AniListApi implements Api {
@@ -10,6 +16,8 @@ export class AniListApi implements Api {
       username,
       this.token
     );
+
+    const recentAirings = await getRecentAirings(entries);
 
     return {
       userId,
@@ -37,10 +45,33 @@ export class AniListApi implements Api {
               airsAt: media.nextAiringEpisode.airingAt * 1000,
             }
           : null,
+        recentEpisodeAiredAt: (recentAirings.get(media.id) ?? 0) * 1000 || null,
         numberAiredEpisodes: getAiredEpisodes(media),
         numberEpisodes: media.episodes ?? 0,
         endDate: new Date(`${media.endDate.year}-${media.endDate.month}-${media.endDate.day}`),
       })),
     };
+  }
+}
+
+/**
+ * When each anime that may have a new episode aired its latest one, by AniList id, as Unix time in
+ * seconds: only anime on "Watching" with an aired episode the user hasn't watched, and only airings
+ * recent enough to count as new. It only decides the "New" badge, so the list still shows without
+ * it when AniList fails to answer
+ */
+async function getRecentAirings(entries: AniListEntry[]): Promise<Map<number, number>> {
+  const mediaIds = entries
+    .filter(
+      ({ status, progress, media }) =>
+        status === 'CURRENT' && (getAiredEpisodes(media) ?? 0) > progress
+    )
+    .map(({ media }) => media.id);
+  if (mediaIds.length === 0) return new Map();
+  try {
+    return await getLatestAirings(mediaIds, Math.floor((Date.now() - NEW_EPISODE_MS) / 1000));
+  } catch (error) {
+    console.error('Could not get recent airings from AniList', error);
+    return new Map();
   }
 }

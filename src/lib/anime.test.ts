@@ -4,6 +4,7 @@ import {
   getBacklog,
   getNextUp,
   getWatchState,
+  hasNewEpisode,
   sortWatchingList,
   withoutHiddenMature,
 } from '#lib/anime.js';
@@ -24,6 +25,7 @@ function anime(overrides: Partial<Anime>): Anime {
     rewatching: false,
     lastUpdatedAt: null,
     nextEpisode: null,
+    recentEpisodeAiredAt: null,
     numberAiredEpisodes: null,
     endDate: new Date(0),
     numberEpisodes: 0,
@@ -69,6 +71,29 @@ describe('sortWatchingList', () => {
     ];
 
     expect(sortWatchingList(list).map((a) => a.id)).toEqual([3, 5, 2, 6, 1, 4]);
+  });
+
+  it('puts rewatches after new episodes, however recently updated, and before caught-up anime', () => {
+    const list = [
+      anime({ id: 1, currentEpisode: 4, numberAiredEpisodes: 4, lastUpdatedAt: 900 }),
+      anime({
+        id: 2,
+        currentEpisode: 1,
+        numberAiredEpisodes: 24,
+        rewatching: true,
+        lastUpdatedAt: 800,
+      }),
+      anime({ id: 3, currentEpisode: 1, numberAiredEpisodes: 3, lastUpdatedAt: 100 }),
+      anime({
+        id: 4,
+        currentEpisode: 1,
+        numberAiredEpisodes: 12,
+        rewatching: true,
+        lastUpdatedAt: 850,
+      }),
+    ];
+
+    expect(sortWatchingList(list).map((a) => a.id)).toEqual([3, 4, 2, 1]);
   });
 
   it('puts anime to watch with no update time after the ones that have one', () => {
@@ -157,24 +182,6 @@ describe('getBacklog', () => {
   });
 });
 
-describe('sortWatchingList with rewatches', () => {
-  it('puts a recently updated rewatch with the other anime being watched', () => {
-    const list = [
-      anime({ id: 1, currentEpisode: 4, numberAiredEpisodes: 4 }),
-      anime({
-        id: 2,
-        currentEpisode: 9,
-        numberAiredEpisodes: 276,
-        rewatching: true,
-        lastUpdatedAt: 50,
-      }),
-      anime({ id: 3, currentEpisode: 0, numberAiredEpisodes: 2, lastUpdatedAt: 10 }),
-    ];
-
-    expect(sortWatchingList(list).map((a) => a.id)).toEqual([2, 3, 1]);
-  });
-});
-
 describe('getNextUp', () => {
   it('finds the soonest scheduled episode across the list', () => {
     const list = [
@@ -200,5 +207,44 @@ describe('withoutHiddenMature', () => {
 
   it('leaves out the anime AniList marks as adult when they are hidden', () => {
     expect(withoutHiddenMature(list, false).map((a) => a.id)).toEqual([1, 3]);
+  });
+});
+
+describe('hasNewEpisode', () => {
+  const now = Date.UTC(2026, 9, 25, 12);
+  const hours = (n: number) => n * 60 * 60 * 1000;
+  // Episode 4 aired `ago` before now, and the user has watched up to episode 3
+  const airing = (ago: number, overrides: Partial<Anime> = {}) =>
+    anime({
+      currentEpisode: 3,
+      numberAiredEpisodes: 4,
+      recentEpisodeAiredAt: now - ago,
+      ...overrides,
+    });
+
+  it.each([
+    ['an hour ago', hours(1), true],
+    ['a day ago', hours(24), true],
+    ['exactly 36 hours ago', hours(36), true],
+    ['just over 36 hours ago', hours(36) + 1, false],
+    ['two days ago', hours(48), false],
+  ])('says whether an episode that aired %s is new: %s', (_, ago, expected) => {
+    expect(hasNewEpisode(airing(ago), now)).toBe(expected);
+  });
+
+  it('ignores an air time after now, from a clock that runs behind', () => {
+    expect(hasNewEpisode(airing(-hours(1)), now)).toBe(false);
+  });
+
+  it('ignores a new episode the user has already watched', () => {
+    expect(hasNewEpisode(airing(hours(1), { currentEpisode: 4 }), now)).toBe(false);
+  });
+
+  it('ignores rewatches, whose episodes aren’t new', () => {
+    expect(hasNewEpisode(airing(hours(1), { rewatching: true }), now)).toBe(false);
+  });
+
+  it('needs to know when the latest episode aired', () => {
+    expect(hasNewEpisode(airing(hours(1), { recentEpisodeAiredAt: null }), now)).toBe(false);
   });
 });

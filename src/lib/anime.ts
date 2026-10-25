@@ -7,6 +7,31 @@ export function getEpisodesToWatch(anime: Anime): number {
     : 0;
 }
 
+/** How long after it airs an episode counts as new: a day, and some slack for time zones */
+export const NEW_EPISODE_MS = 36 * 60 * 60 * 1000;
+
+/** From this many episodes behind, a backlog gets the deeper badge */
+export const BIG_BACKLOG = 10;
+
+/**
+ * Whether the anime could have a new episode for the user: a recent one they haven't watched.
+ * Rewatches don't count: their episodes aren't new
+ */
+export function mayHaveNewEpisode(anime: Anime): boolean {
+  return !anime.rewatching && anime.recentEpisodeAiredAt !== null && getEpisodesToWatch(anime) > 0;
+}
+
+/** Whether an episode the user hasn't watched yet aired just now (within NEW_EPISODE_MS) */
+export function hasNewEpisode(anime: Anime, now: number): boolean {
+  const airedAt = anime.recentEpisodeAiredAt;
+  return (
+    mayHaveNewEpisode(anime) &&
+    airedAt !== null &&
+    airedAt <= now &&
+    now - airedAt <= NEW_EPISODE_MS
+  );
+}
+
 /** What the user can do next with an anime, shown as its badge and used to sort the list. */
 export type WatchState =
   | 'to-watch'
@@ -39,32 +64,36 @@ export function getWatchState(anime: Anime): WatchState {
   }
 }
 
-/** Lower comes first: anime to watch, then caught up or completed, then those without episode info */
-function getSortGroup(state: WatchState): number {
-  switch (state) {
+/**
+ * Lower comes first: new episodes to watch, then rewatches, which can wait as every episode has
+ * aired, then caught up or completed, then those without episode info
+ */
+function getSortGroup(anime: Anime): number {
+  switch (getWatchState(anime)) {
     case 'to-watch':
-      return 0;
+      return anime.rewatching ? 1 : 0;
     case 'completed':
     case 'caught-up':
-      return 1;
-    default:
       return 2;
+    default:
+      return 3;
   }
 }
 
 /**
- * Anime with episodes to watch first, the ones the user updated most recently first, since those
- * are what they're actively watching. Then caught-up anime, the next episode to air first. Then
- * anime with no episode info. Anime in the same place keep their original order.
+ * Anime with new episodes to watch first, then rewatches, the ones the user updated most recently
+ * first in each, since those are what they're actively watching. Then caught-up anime, the next
+ * episode to air first. Then anime with no episode info. Anime in the same place keep their
+ * original order.
  */
 export function sortWatchingList(animeList: Anime[]): Anime[] {
   return animeList.toSorted((a, b) => {
-    const groupA = getSortGroup(getWatchState(a));
-    const groupB = getSortGroup(getWatchState(b));
+    const groupA = getSortGroup(a);
+    const groupB = getSortGroup(b);
     if (groupA !== groupB) return groupA - groupB;
     // Within a group, anime with no update time or no scheduled episode go last
-    if (groupA === 0) return (b.lastUpdatedAt ?? 0) - (a.lastUpdatedAt ?? 0);
-    if (groupA === 1) {
+    if (groupA <= 1) return (b.lastUpdatedAt ?? 0) - (a.lastUpdatedAt ?? 0);
+    if (groupA === 2) {
       // `|| 0` because two unscheduled anime give Infinity - Infinity, which is NaN
       return (a.nextEpisode?.airsAt ?? Infinity) - (b.nextEpisode?.airsAt ?? Infinity) || 0;
     }

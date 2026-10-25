@@ -326,7 +326,7 @@
    * grid is centered as a block; a short last row stays left-aligned, so the order stays clear.
    */
   .anime-grid {
-    --card-width: 300px;
+    --card-width: 260px;
     display: grid;
     grid-template-columns: repeat(
       auto-fit,
@@ -347,20 +347,20 @@
   }
 
   .anime-grid[data-size='large'] {
-    --card-width: 400px;
+    --card-width: 300px;
   }
 
   /*
-   * On larger screens, medium cards shrink with the window height (down to 200px wide) so two full
+   * On larger screens, large cards shrink with the window height (down to 200px wide) so two full
    * rows fit without scrolling. A card is its 3:4 cover plus 108px of title and progress, and the
    * grid starts about 222px down the page; 262px also counts the gap between rows and a little slack.
-   * Small cards are about three quarters of that size, so more fit in a row, and large ones about
-   * a third bigger, so fewer do
+   * Medium cards are about seven eighths of that size and small ones three quarters, so more fit in
+   * a row
    */
   @media (min-width: 768px) {
     .anime-grid {
       --two-rows-width: calc(20px + 0.75 * ((100svh - 262px) / 2 - 108px));
-      --card-width: clamp(200px, var(--two-rows-width), 300px);
+      --card-width: clamp(175px, calc(0.87 * var(--two-rows-width)), 260px);
     }
 
     .anime-grid[data-size='small'] {
@@ -368,7 +368,7 @@
     }
 
     .anime-grid[data-size='large'] {
-      --card-width: clamp(260px, calc(1.35 * var(--two-rows-width)), 400px);
+      --card-width: clamp(200px, var(--two-rows-width), 300px);
     }
   }
 </style>

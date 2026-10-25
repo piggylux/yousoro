@@ -145,6 +145,41 @@ export async function getWatchingEntries(
   };
 }
 
+/**
+ * When each of the given anime last aired an episode, as Unix time in seconds, for those that aired
+ * one after `since` (Unix time in seconds); the others are left out. One page of 50 airings, newest
+ * first, is plenty for the day or two `since` covers
+ */
+export async function getLatestAirings(
+  mediaIds: number[],
+  since: number
+): Promise<Map<number, number>> {
+  const data = await query<{
+    Page: { airingSchedules: { mediaId: number; airingAt: number }[] };
+  }>(
+    `query ($ids: [Int], $since: Int) {
+      Page(perPage: 50) {
+        airingSchedules(
+          mediaId_in: $ids
+          airingAt_greater: $since
+          notYetAired: false
+          sort: TIME_DESC
+        ) {
+          mediaId
+          airingAt
+        }
+      }
+    }`,
+    { ids: mediaIds, since }
+  );
+  const latest = new Map<number, number>();
+  // Newest first, so each anime's first airing is its latest
+  for (const { mediaId, airingAt } of data.Page.airingSchedules) {
+    if (!latest.has(mediaId)) latest.set(mediaId, airingAt);
+  }
+  return latest;
+}
+
 export type AniListUser = { id: number; name: string; avatarUrl: string | null };
 
 type AniListUserFields = { id: number; name: string; avatar: { large: string | null } | null };

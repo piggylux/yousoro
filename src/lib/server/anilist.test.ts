@@ -17,12 +17,24 @@ function media(title: { romaji: string; english: string | null }, synonyms: stri
   };
 }
 
-// Answers the list query the way AniList would, with one entry
-function answerWith(entryMedia: ReturnType<typeof media>) {
+type Airing = { mediaId: number; airingAt: number };
+
+// Answers the list query the way AniList would, with one entry, and the recent airings query with
+// `airings`, or with an error when there are none to give
+function answerWith(entryMedia: ReturnType<typeof media>, airings: Airing[] | null = []) {
   vi.stubGlobal(
     'fetch',
-    vi.fn(async () =>
-      Response.json({
+    vi.fn(async (_: string, init: RequestInit) => {
+      const { query } = JSON.parse(init.body as string) as { query: string };
+      if (query.includes('airingSchedules')) {
+        return airings
+          ? Response.json({ data: { Page: { airingSchedules: airings } } })
+          : Response.json(
+              { data: null, errors: [{ message: 'Too Many Requests' }] },
+              { status: 429 }
+            );
+      }
+      return Response.json({
         data: {
           MediaListCollection: {
             user: {
@@ -41,12 +53,15 @@ function answerWith(entryMedia: ReturnType<typeof media>) {
             ],
           },
         },
-      })
-    )
+      });
+    })
   );
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 describe('AniListApi.getUserAnimeList', () => {
   it('gives the English title, and the synonyms other than the main titles', async () => {
@@ -76,5 +91,28 @@ describe('AniListApi.getUserAnimeList', () => {
     const { animeList } = await new AniListApi().getUserAnimeList('Piggylux');
     expect(animeList[0].englishTitle).toBeNull();
     expect(animeList[0].otherTitles).toEqual([]);
+  });
+
+  it('gives when the latest episode aired, the newest airing of each anime', async () => {
+    answerWith(media({ romaji: 'Koupen-chan', english: null }, []), [
+      { mediaId: 1, airingAt: 2000 },
+      { mediaId: 1, airingAt: 1000 },
+    ]);
+    const { animeList } = await new AniListApi().getUserAnimeList('Piggylux');
+    expect(animeList[0].recentEpisodeAiredAt).toBe(2_000_000);
+  });
+
+  it('gives no air time for an anime that hasn’t aired an episode recently', async () => {
+    answerWith(media({ romaji: 'Koupen-chan', english: null }, []), []);
+    const { animeList } = await new AniListApi().getUserAnimeList('Piggylux');
+    expect(animeList[0].recentEpisodeAiredAt).toBeNull();
+  });
+
+  it('still gives the list when AniList fails to give recent airings', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    answerWith(media({ romaji: 'Koupen-chan', english: null }, []), null);
+    const { animeList } = await new AniListApi().getUserAnimeList('Piggylux');
+    expect(animeList[0].title).toBe('Koupen-chan');
+    expect(animeList[0].recentEpisodeAiredAt).toBeNull();
   });
 });
