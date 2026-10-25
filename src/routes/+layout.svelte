@@ -1,14 +1,20 @@
 <script lang="ts">
-  import Header from './Header.svelte';
   import type { LayoutProps } from './$types';
+  import Header from './Header.svelte';
+
   import './styles.css';
   import '../app.css';
 
-  let { children }: LayoutProps = $props();
+  let { data, children }: LayoutProps = $props();
 </script>
 
+<!-- Default title, overridden by pages that set their own -->
+<svelte:head>
+  <title>Yousoro</title>
+</svelte:head>
+
 <div class="app">
-  <Header />
+  <Header user={data.user} />
 
   <main>
     {@render children()}
@@ -31,8 +37,8 @@
     display: flex;
     flex-direction: column;
     padding: 1rem;
+    /* Full width, so the anime grid can use wide screens; narrower content centers itself */
     width: 100%;
-    max-width: 64rem;
     margin: 0 auto;
     box-sizing: border-box;
   }

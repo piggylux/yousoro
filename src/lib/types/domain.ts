@@ -1,4 +1,5 @@
-const DOMAIN_VALUES = ['myanimelist', 'anilist'] as const;
+// MyAnimeList support was removed for now; it can come back as another domain
+const DOMAIN_VALUES = ['anilist'] as const;
 export type Domain = (typeof DOMAIN_VALUES)[number];
 
 export function isDomain(value: string): value is Domain {

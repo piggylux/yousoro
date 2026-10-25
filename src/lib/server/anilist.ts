@@ -1,83 +1,34 @@
-import type { Anime } from '#lib/types/anime.js';
-import type { Api } from '#lib/types/api.js';
-import { ANILIST_TOKEN } from '$app/env/private';
-import anilist from 'anilist-node';
-import type { AiringEntry, ListEntry } from 'anilist-node';
-import { RateLimit } from 'async-sema';
+import { getAiredEpisodes, getWatchingEntries } from '#lib/server/anilist-client.js';
+import type { Api, UserAnimeList } from '#lib/types/api.js';
 
 export class AniListApi implements Api {
-  malSecret?: string | undefined;
-  apiUrl = '';
-  anilistSecret = ANILIST_TOKEN;
+  /** The signed-in user's token, so their own private entries are visible to them */
+  constructor(private token?: string) {}
 
-  anilist = new anilist(this.anilistSecret);
-  rateLimit = RateLimit(3);
+  async getUserAnimeList(username: string): Promise<UserAnimeList> {
+    const { userId, userName, avatarUrl, entries } = await getWatchingEntries(username, this.token);
 
-  async getAnimeList(username: string): Promise<Anime[]> {
-    const animeList = await this.getWatchingList(username);
-    const animeDetails = await Promise.all(
-      animeList.map((anime) => this.getAnimeDetails(anime.title))
-    );
-
-    return animeList.map((anime, index) => ({
-      ...anime,
-      id: animeDetails[index]?.id ?? 0,
-      numberAiredEpisodes: animeDetails[index]?.numberAiredEpisodes ?? 0,
-      thumbnailUrl: animeDetails[index]?.thumbnailUrl ?? '',
-    }));
-  }
-
-  async getWatchingList(
-    username: string
-  ): Promise<Omit<Anime, 'id' | 'numberAiredEpisodes' | 'thumbnailUrl'>[]> {
-    const response = await this.anilist.lists.anime(username);
-    const list: ListEntry[] = response.find((list) => list.status === 'CURRENT')?.entries ?? [];
-    return Promise.resolve(
-      list.map(({ media, progress }) => ({
-        currentEpisode: progress,
+    return {
+      userId,
+      username: userName,
+      avatarUrl,
+      animeList: entries.map(({ media, progress, updatedAt }) => ({
+        id: media.id,
         title: media.title.romaji,
+        thumbnailUrl: media.coverImage.extraLarge,
+        status: media.status,
+        currentEpisode: progress,
+        lastUpdatedAt: updatedAt ? updatedAt * 1000 : null,
+        nextEpisode: media.nextAiringEpisode
+          ? {
+              number: media.nextAiringEpisode.episode,
+              airsAt: media.nextAiringEpisode.airingAt * 1000,
+            }
+          : null,
+        numberAiredEpisodes: getAiredEpisodes(media),
         numberEpisodes: media.episodes ?? 0,
         endDate: new Date(`${media.endDate.year}-${media.endDate.month}-${media.endDate.day}`),
-      }))
-    );
-  }
-
-  private async getAnimeDetails(
-    animeTitle: string
-  ): Promise<Pick<Anime, 'id' | 'numberAiredEpisodes' | 'thumbnailUrl'> | null> {
-    try {
-      await this.rateLimit();
-      const response = await this.anilist.searchEntry.anime(animeTitle);
-
-      if (!response.media.length) {
-        return null;
-      }
-
-      await this.rateLimit();
-      const anime = await this.anilist.media.anime(response.media[0].id);
-
-      if (anime.status === 'FINISHED') {
-        return {
-          id: anime.id,
-          numberAiredEpisodes: anime.episodes,
-          thumbnailUrl: anime.coverImage.large,
-        };
-      }
-
-      if (anime.status === 'NOT_YET_RELEASED') {
-        return null;
-      }
-
-      const airingEntry = anime.nextAiringEpisode as unknown as AiringEntry;
-
-      return {
-        id: anime.id,
-        numberAiredEpisodes: airingEntry.episode - 1,
-        thumbnailUrl: anime.coverImage.large,
-      };
-    } catch (error) {
-      console.error(error);
-      return null;
-    }
+      })),
+    };
   }
 }

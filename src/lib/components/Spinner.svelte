@@ -1,5 +1,5 @@
 <section class="loading-container">
-  <span class="loading loading-ring loading-lg"></span>
+  <span class="tw:loading tw:loading-ring tw:loading-lg"></span>
 </section>
 
 <style>

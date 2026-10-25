@@ -1,2 +1,16 @@
-@import 'tailwindcss';
+/* Tailwind and daisyUI classes are written with a tw: prefix (tw:flex, tw:btn), which sets them
+   apart from the project's own CSS classes */
+@import 'tailwindcss' prefix(tw);
 @plugin 'daisyui';
+
+/*
+ * You Watanabe's blues (Love Live! Sunshine!!), whose "Yousoro!" names the app. Her sky blue is too
+ * light to read as text, so it's for accents and fills; text uses the deeper blues, which keep good
+ * contrast on light backgrounds.
+ */
+:root {
+  --you-blue: #49b9f9;
+  --you-blue-pale: #eef8ff;
+  --sea-blue: #145f9c;
+  --navy: #0f3d6e;
+}

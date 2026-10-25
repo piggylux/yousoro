@@ -1,15 +1,30 @@
 {
   "name": "yousoro",
   "version": "0.0.1",
-  "private": true,
-  "type": "module",
-  "packageManager": "bun@1.4.3",
+  "devDependencies": {
+    "@sveltejs/adapter-vercel": "^7.0.1",
+    "@sveltejs/kit": "^3.1.0",
+    "@sveltejs/vite-plugin-svelte": "^7.3.1",
+    "@tailwindcss/vite": "^4.3.3",
+    "daisyui": "^5.7.50",
+    "oxfmt": "0.74.0",
+    "oxlint": "^1.89.0",
+    "svelte": "^5.57.2",
+    "svelte-check": "^4.7.7",
+    "tailwindcss": "^4.3.3",
+    "tslib": "^2.8.1",
+    "typescript": "^6.0.3",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
+  },
   "engines": {
     "node": ">=22.17"
   },
   "imports": {
     "#lib/*": "./src/lib/*"
   },
+  "packageManager": "bun@1.4.3",
+  "private": true,
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
@@ -18,30 +33,9 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "test": "vitest",
-    "lint": "prettier --check . && oxlint",
+    "lint": "oxfmt --check && oxlint",
     "lint:fix": "oxlint --fix",
-    "format": "prettier --write ."
+    "format": "oxfmt"
   },
-  "dependencies": {
-    "anilist-node": "^1.14.1",
-    "async-sema": "^3.1.1"
-  },
-  "devDependencies": {
-    "@sveltejs/adapter-auto": "^8.0.0",
-    "@sveltejs/kit": "^3.1.0",
-    "@sveltejs/vite-plugin-svelte": "^7.3.1",
-    "@tailwindcss/vite": "^4.3.3",
-    "@trivago/prettier-plugin-sort-imports": "^6.0.2",
-    "daisyui": "^5.7.50",
-    "oxlint": "^1.89.0",
-    "prettier": "^3.9.10",
-    "prettier-plugin-svelte": "^4.1.1",
-    "svelte": "^5.57.2",
-    "svelte-check": "^4.7.7",
-    "tailwindcss": "^4.3.3",
-    "tslib": "^2.8.1",
-    "typescript": "^6.0.3",
-    "vite": "^8.3.5",
-    "vitest": "^5.0.5"
-  }
+  "type": "module"
 }

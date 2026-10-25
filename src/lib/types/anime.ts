@@ -1,8 +1,19 @@
+/** Airing status, as AniList reports it */
+export type AiringStatus = 'FINISHED' | 'RELEASING' | 'NOT_YET_RELEASED' | 'CANCELLED' | 'HIATUS';
+
 export type Anime = {
   id: number;
   title: string;
   thumbnailUrl: string;
+  status: AiringStatus;
   currentEpisode: number;
+  /**
+   * When the user last changed this anime on their list, as Unix time in ms. Usually that's their
+   * progress, but AniList also counts other edits such as the score.
+   */
+  lastUpdatedAt: number | null;
+  /** The next episode to air and when, as Unix time in ms; null when none is scheduled */
+  nextEpisode: { number: number; airsAt: number } | null;
   numberAiredEpisodes: number | null;
   endDate: Date;
   numberEpisodes: number;
