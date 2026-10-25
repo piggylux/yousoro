@@ -79,8 +79,10 @@
     return () => observer.disconnect();
   });
 
-  // Measured again when the list becomes long enough, changes length, or the keyboard leaves it
+  // Measured again when the list becomes long enough, changes length, or the keyboard leaves it,
+  // and when the card size setting changes the columns and the row height
   $effect(() => {
+    void data.preferences.cardSize;
     if (animeList.length) remeasure();
   });
 
@@ -140,6 +142,7 @@
 
   <div
     class="anime-grid"
+    data-size={data.preferences.cardSize}
     bind:this={grid}
     onfocusin={onGridFocusIn}
     onfocusout={onGridFocusOut}
@@ -235,13 +238,37 @@
   }
 
   /*
-   * On larger screens, cards shrink with the window height (down to 200px wide) so two full
+   * The viewer's card size setting: small fits two cards side by side on any phone. The width
+   * comes from the viewport, as the page is narrower by its 16px padding on each side, since a
+   * percentage would mean something else on the cards, which reuse --card-width
+   */
+  .anime-grid[data-size='small'] {
+    --card-width: min(220px, calc((100vw - 32px - 24px) / 2));
+  }
+
+  .anime-grid[data-size='large'] {
+    --card-width: 400px;
+  }
+
+  /*
+   * On larger screens, medium cards shrink with the window height (down to 200px wide) so two full
    * rows fit without scrolling. A card is its 3:4 cover plus 108px of title and progress, and the
    * grid starts about 222px down the page; 262px also counts the gap between rows and a little slack.
+   * Small cards are about three quarters of that size, so more fit in a row, and large ones about
+   * a third bigger, so fewer do
    */
   @media (min-width: 768px) {
     .anime-grid {
-      --card-width: clamp(200px, calc(20px + 0.75 * ((100svh - 262px) / 2 - 108px)), 300px);
+      --two-rows-width: calc(20px + 0.75 * ((100svh - 262px) / 2 - 108px));
+      --card-width: clamp(200px, var(--two-rows-width), 300px);
+    }
+
+    .anime-grid[data-size='small'] {
+      --card-width: clamp(150px, calc(0.75 * var(--two-rows-width)), 225px);
+    }
+
+    .anime-grid[data-size='large'] {
+      --card-width: clamp(260px, calc(1.35 * var(--two-rows-width)), 400px);
     }
   }
 </style>

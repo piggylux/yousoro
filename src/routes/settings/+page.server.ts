@@ -8,6 +8,7 @@ export const actions: Actions = {
     const preferences = toPreferences({
       // An unticked checkbox sends nothing, so its absence means "off"
       blurMature: form.get('blurMature') === 'on',
+      cardSize: form.get('cardSize'),
       downloadLanguage: form.get('downloadLanguage'),
       downloadVersion: form.get('downloadVersion'),
     });

@@ -6,6 +6,14 @@ export type DownloadLanguage = (typeof DOWNLOAD_LANGUAGES)[number];
 export const DOWNLOAD_VERSIONS = ['any', 'subbed', 'dubbed', 'dual-audio'] as const;
 export type DownloadVersion = (typeof DOWNLOAD_VERSIONS)[number];
 
+/** How big the anime cards are: smaller cards fit more per row */
+export const CARD_SIZES = ['small', 'medium', 'large'] as const;
+export type CardSize = (typeof CARD_SIZES)[number];
+
+export function isCardSize(value: unknown): value is CardSize {
+  return CARD_SIZES.includes(value as CardSize);
+}
+
 export function isDownloadLanguage(value: unknown): value is DownloadLanguage {
   return DOWNLOAD_LANGUAGES.includes(value as DownloadLanguage);
 }
@@ -18,6 +26,8 @@ export function isDownloadVersion(value: unknown): value is DownloadVersion {
 export type Preferences = {
   /** Blur covers of anime AniList marks as adult (18+) */
   blurMature: boolean;
+  /** How big the anime cards are, and so how many fit in a row */
+  cardSize: CardSize;
   /** The language the download search on the viewer's own list looks for */
   downloadLanguage: DownloadLanguage;
   /** Subbed, dubbed or dual-audio releases, for the same search */
@@ -27,6 +37,7 @@ export type Preferences = {
 /** What a visitor gets before choosing anything: the safe choice for lists others may see */
 export const DEFAULT_PREFERENCES: Preferences = {
   blurMature: true,
+  cardSize: 'medium',
   downloadLanguage: 'any',
   downloadVersion: 'any',
 };

@@ -276,10 +276,15 @@
         aria-label={`${anime.title} details`}
         aria-keyshortcuts="Escape"
       >
-        <!-- Always three lines tall, so the details sit at the same height on every card -->
-        <a class="back-title" href={animeLinkFn(anime.id)} target="_blank" title={anime.title}>
-          {anime.title}<span class="tw:sr-only">, on AniList, opens in a new tab</span>
-        </a>
+        <!--
+          Always three lines tall, so the details sit at the same height on every card. Only the
+          title's own text is the link; the space around a short title turns the card back over
+        -->
+        <p class="back-title">
+          <a href={animeLinkFn(anime.id)} target="_blank" title={anime.title}>
+            {anime.title}<span class="tw:sr-only">, on AniList, opens in a new tab</span>
+          </a>
+        </p>
 
         <dl class="facts">
           <dt>Watched</dt>
@@ -491,8 +496,8 @@
     line-height: 1.3;
   }
 
-  .back-title:hover,
-  .back-title:focus-visible {
+  .back-title a:hover,
+  .back-title a:focus-visible {
     color: var(--sea-blue);
     text-decoration: underline;
   }

@@ -1,14 +1,30 @@
 <script lang="ts">
   import { page } from '$app/state';
 
+  import SettingsDrawer from '#lib/components/SettingsDrawer.svelte';
   import SignInButton from '#lib/components/SignInButton.svelte';
+  import type { Preferences } from '#lib/types/preferences.js';
   import type { SessionUser } from '#lib/types/session-user.js';
 
   type Props = {
     user: SessionUser | null;
+    preferences: Preferences;
   };
 
-  let { user }: Props = $props();
+  let { user, preferences }: Props = $props();
+
+  let settingsOpen = $state(false);
+
+  // The gear opens the settings drawer, except on the settings page, which already shows them. A
+  // click meant for a new tab still opens the page there
+  function openSettings(event: MouseEvent) {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+      return;
+    }
+    if (page.url.pathname === '/settings') return;
+    event.preventDefault();
+    settingsOpen = true;
+  }
 
   // Come back to the current page after signing in or out
   const redirectTo = $derived(page.url.pathname);
@@ -32,7 +48,13 @@
       <div class="tw:navbar-center"></div>
 
       <div class="tw:navbar-end">
-        <a class="tw:btn tw:btn-ghost tw:btn-circle" href="/settings" aria-label="Settings">
+        <a
+          class="tw:btn tw:btn-ghost tw:btn-circle"
+          href="/settings"
+          aria-label="Settings"
+          aria-haspopup="dialog"
+          onclick={openSettings}
+        >
           <!-- A gear -->
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -105,3 +127,5 @@
     </div>
   </nav>
 </header>
+
+<SettingsDrawer {preferences} bind:open={settingsOpen} />

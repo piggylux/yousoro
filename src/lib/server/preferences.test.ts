@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import { getPreferences, setPreferences } from '#lib/server/preferences.js';
 import {
+  CARD_SIZES,
   DEFAULT_PREFERENCES,
   DOWNLOAD_LANGUAGES,
   DOWNLOAD_VERSIONS,
@@ -22,39 +23,55 @@ describe('getPreferences', () => {
   it('blurs mature covers and searches every release by default', () => {
     expect(getPreferences(cookiesWith())).toEqual({
       blurMature: true,
+      cardSize: 'medium',
       downloadLanguage: 'any',
       downloadVersion: 'any',
     });
   });
 
   it('reads saved choices', () => {
-    const saved = { blurMature: false, downloadLanguage: 'french', downloadVersion: 'dubbed' };
+    const saved = {
+      blurMature: false,
+      cardSize: 'small',
+      downloadLanguage: 'french',
+      downloadVersion: 'dubbed',
+    };
     expect(getPreferences(cookiesWith(cookie(saved)))).toEqual(saved);
   });
 
   it('gives settings added later their default, keeping the others', () => {
     expect(getPreferences(cookiesWith(cookie({ blurMature: false })))).toEqual({
       blurMature: false,
+      cardSize: 'medium',
       downloadLanguage: 'any',
       downloadVersion: 'any',
     });
+  });
+
+  it('falls back to medium cards for an unknown card size', () => {
+    expect(getPreferences(cookiesWith(cookie({ cardSize: 'huge' }))).cardSize).toBe('medium');
   });
 
   it.each([
     [
       'the wrong type',
       { blurMature: 'no', downloadLanguage: 'english', downloadVersion: 'subbed' },
-      { blurMature: true, downloadLanguage: 'english', downloadVersion: 'subbed' },
+      {
+        blurMature: true,
+        cardSize: 'medium',
+        downloadLanguage: 'english',
+        downloadVersion: 'subbed',
+      },
     ],
     [
       'an unknown language',
       { blurMature: false, downloadLanguage: 'klingon', downloadVersion: 'dubbed' },
-      { blurMature: false, downloadLanguage: 'any', downloadVersion: 'dubbed' },
+      { blurMature: false, cardSize: 'medium', downloadLanguage: 'any', downloadVersion: 'dubbed' },
     ],
     [
       'an unknown version',
       { blurMature: false, downloadLanguage: 'french', downloadVersion: 'raw' },
-      { blurMature: false, downloadLanguage: 'french', downloadVersion: 'any' },
+      { blurMature: false, cardSize: 'medium', downloadLanguage: 'french', downloadVersion: 'any' },
     ],
   ])('falls back to the default for just the setting with %s', (_, data, expected) => {
     expect(getPreferences(cookiesWith(cookie(data)))).toEqual(expected);
@@ -73,10 +90,12 @@ describe('setPreferences', () => {
     for (const blurMature of [true, false]) {
       for (const downloadLanguage of DOWNLOAD_LANGUAGES) {
         for (const downloadVersion of DOWNLOAD_VERSIONS) {
-          const preferences = { blurMature, downloadLanguage, downloadVersion };
-          const cookies = cookiesWith();
-          setPreferences(cookies, preferences);
-          expect(getPreferences(cookies)).toEqual(preferences);
+          for (const cardSize of CARD_SIZES) {
+            const preferences = { blurMature, cardSize, downloadLanguage, downloadVersion };
+            const cookies = cookiesWith();
+            setPreferences(cookies, preferences);
+            expect(getPreferences(cookies)).toEqual(preferences);
+          }
         }
       }
     }

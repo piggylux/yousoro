@@ -3,6 +3,7 @@ import type { Cookies } from '@sveltejs/kit';
 import { type CookieFormat, readVersioned, writeVersioned } from '#lib/server/versioned-cookie.js';
 import {
   DEFAULT_PREFERENCES,
+  isCardSize,
   isDownloadLanguage,
   isDownloadVersion,
   type Preferences,
@@ -20,6 +21,7 @@ export function toPreferences(values: Partial<Record<keyof Preferences, unknown>
   return {
     blurMature:
       typeof values.blurMature === 'boolean' ? values.blurMature : DEFAULT_PREFERENCES.blurMature,
+    cardSize: isCardSize(values.cardSize) ? values.cardSize : DEFAULT_PREFERENCES.cardSize,
     downloadLanguage: isDownloadLanguage(values.downloadLanguage)
       ? values.downloadLanguage
       : DEFAULT_PREFERENCES.downloadLanguage,

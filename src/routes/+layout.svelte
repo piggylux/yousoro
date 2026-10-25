@@ -16,7 +16,7 @@
 </svelte:head>
 
 <div class="app">
-  <Header user={data.user} />
+  <Header user={data.user} preferences={data.preferences} />
 
   <!-- Focusable from script only, so "Back to top" can move focus here -->
   <main tabindex="-1">
