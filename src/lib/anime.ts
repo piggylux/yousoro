@@ -81,8 +81,9 @@ function getSortGroup(anime: Anime): number {
 }
 
 /**
- * Anime with new episodes to watch first, then rewatches, the ones the user updated most recently
- * first in each, since those are what they're actively watching. Then caught-up anime, the next
+ * Anime with new episodes to watch first: those whose episode just aired, the newest airing first,
+ * then the others. Then rewatches. Otherwise the ones the user updated most recently come first,
+ * since those are what they're actively watching. Then caught-up anime, the next
  * episode to air first. Then anime with no episode info. Anime in the same place keep their
  * original order.
  */
@@ -91,6 +92,13 @@ export function sortWatchingList(animeList: Anime[]): Anime[] {
     const groupA = getSortGroup(a);
     const groupB = getSortGroup(b);
     if (groupA !== groupB) return groupA - groupB;
+    if (groupA === 0) {
+      // Whether an episode aired recently is as of when the list loaded, so the order doesn't
+      // change while the viewer looks at it
+      const airedA = a.recentEpisodeAiredAt ?? 0;
+      const airedB = b.recentEpisodeAiredAt ?? 0;
+      if (airedA !== airedB) return airedB - airedA;
+    }
     // Within a group, anime with no update time or no scheduled episode go last
     if (groupA <= 1) return (b.lastUpdatedAt ?? 0) - (a.lastUpdatedAt ?? 0);
     if (groupA === 2) {

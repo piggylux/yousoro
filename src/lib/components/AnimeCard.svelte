@@ -1,6 +1,6 @@
 <script lang="ts">
   import { enhance, type SubmitFunction } from '$app/forms';
-  import { onMount, tick } from 'svelte';
+  import { onDestroy, onMount, tick } from 'svelte';
 
   import {
     BIG_BACKLOG,
@@ -76,6 +76,11 @@
   // Countdowns use the viewer's clock and time zone, so they only appear once in the browser
   let mounted = $state(false);
   onMount(() => (mounted = true));
+  // A card that leaves the page, as when it scrolls out of a long list, no longer counts as the one
+  // turned over, or the page would wait forever for it to be turned back before reloading
+  onDestroy(() => {
+    if (flippedCard.id === uid) flippedCard.id = null;
+  });
 
   const countdown = $derived.by(() => {
     if (!mounted || !anime.nextEpisode) return null;
@@ -310,7 +315,8 @@
   {/if}
   <div class="anime-card" class:flipped>
     <!--
-      A click anywhere on the card turns it over, except on its links, buttons and form fields. It's
+      A click anywhere on the card turns it over, except on its links, buttons and form fields, and
+      around the actions at the bottom of the back, so a click that just misses one doesn't. It's
       handled here rather than on each side, so it works mid-turn too: the side being left is
       already inert. Keyboard users have the cover button, so the click needs no key equivalent.
     -->
@@ -319,7 +325,9 @@
       class="flipper"
       onclick={(event) => {
         const target = event.target as Element;
-        if (!target.closest('a, button, input, select, textarea, label, form')) flip(!flipped);
+        if (!target.closest('a, button, input, select, textarea, label, form, .back-actions')) {
+          flip(!flipped);
+        }
       }}
     >
       <!-- Only the side facing the viewer can be focused or read by a screen reader -->
@@ -470,59 +478,67 @@
           </dl>
         </div>
 
-        <!-- Pinned to the bottom, so the buttons and errors line up across cards too -->
-        <div class="back-actions">
-          {#if canEdit}
-            <!--
+        <!--
+          Pinned to the bottom, so the buttons and errors line up across cards too. Only there when
+          it holds something, as clicks on it don't turn the card
+        -->
+        {#if canEdit || nextToWatch || (errorMessage && flipped)}
+          <div class="back-actions">
+            {#if canEdit}
+              <!--
               Saves the watched count and the score together; Enter in either field saves too. Revert
               puts both back to what's saved on AniList
             -->
-            <form
-              id={entryFormId}
-              class="entry-actions"
-              method="POST"
-              action="?/updateEntry"
-              use:enhance={submitEntry}
-            >
-              <input type="hidden" name="mediaId" value={anime.id} />
-              <input type="hidden" name="scoreFormat" value={scoreFormat} />
-              <button
-                type="button"
-                class="tw:btn tw:btn-ghost tw:btn-xs"
-                disabled={saving || !entryChanged}
-                onclick={revertDrafts}
+              <form
+                id={entryFormId}
+                class="entry-actions"
+                method="POST"
+                action="?/updateEntry"
+                use:enhance={submitEntry}
               >
-                Revert
-              </button>
-              <button class="tw:btn tw:btn-primary tw:btn-xs" disabled={saving || !entryChanged}>
-                Save
-              </button>
-            </form>
-          {/if}
-          {#if nextToWatch}
-            <a
-              class="download-link"
-              href={nyaaSearchUrl({
-                title: anime.title,
-                englishTitle: anime.englishTitle,
-                otherTitles: anime.otherTitles,
-                episode: nextToWatch,
-                language: downloadLanguage,
-                version: downloadVersion,
-                adult: anime.isAdult,
-              })}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Find episode {nextToWatch} on {nyaaSite(anime.isAdult)}<span class="tw:sr-only"
-                >, opens in a new tab</span
+                <input type="hidden" name="mediaId" value={anime.id} />
+                <input type="hidden" name="scoreFormat" value={scoreFormat} />
+                <button
+                  type="button"
+                  class="tw:btn tw:btn-ghost tw:btn-xs"
+                  disabled={saving || !entryChanged}
+                  onclick={revertDrafts}
+                >
+                  Revert
+                </button>
+                <button class="tw:btn tw:btn-primary tw:btn-xs" disabled={saving || !entryChanged}>
+                  Save
+                </button>
+              </form>
+            {/if}
+            {#if nextToWatch}
+              <a
+                class="download-link"
+                href={nyaaSearchUrl({
+                  title: anime.title,
+                  englishTitle: anime.englishTitle,
+                  otherTitles: anime.otherTitles,
+                  episode: nextToWatch,
+                  language: downloadLanguage,
+                  version: downloadVersion,
+                  adult: anime.isAdult,
+                })}
+                target="_blank"
+                rel="noreferrer"
               >
-            </a>
-          {/if}
-          {#if errorMessage && flipped}
-            <p class="tw:text-error tw:text-sm" role="alert">{errorMessage}</p>
-          {/if}
-        </div>
+                <!-- Always two lines, one each, so the button is the same size for either site -->
+                <span class="download-line"
+                  ><span class="download-words">Find episode</span> {nextToWatch}</span
+                >
+                <span class="download-line download-site">on {nyaaSite(anime.isAdult)}</span>
+                <span class="tw:sr-only">, opens in a new tab</span>
+              </a>
+            {/if}
+            {#if errorMessage && flipped}
+              <p class="tw:text-error tw:text-sm" role="alert">{errorMessage}</p>
+            {/if}
+          </div>
+        {/if}
       </div>
     </div>
   </div>
@@ -640,7 +656,9 @@
     inset: 0;
     justify-content: flex-start;
     gap: 12px;
-    padding: 16px 14px;
+    --back-padding-y: 16px;
+    --back-padding-x: 14px;
+    padding: var(--back-padding-y) var(--back-padding-x);
     overflow-y: auto;
     text-align: center;
     transform: rotateY(180deg);
@@ -771,7 +789,12 @@
     flex-direction: column;
     align-items: center;
     gap: 8px;
-    margin-top: auto;
+    /* Reaches over the back's padding, so a click that just misses an action, below or beside it,
+       doesn't turn the card */
+    margin: auto calc(-1 * var(--back-padding-x)) calc(-1 * var(--back-padding-y));
+    padding: 0 var(--back-padding-x) var(--back-padding-y);
+    /* The back centers its content; this spans it, so the link is as wide as the card */
+    align-self: stretch;
   }
 
   .aired-note {
@@ -781,17 +804,55 @@
     white-space: nowrap;
   }
 
+  /* A pill as wide as the card allows, so it's an easy target rather than a line of small text */
   .download-link {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    /* Little side padding, so both lines fit even on the smallest cards */
+    padding: 0.35rem 0.25rem;
+    border: 2px solid var(--you-blue);
+    border-radius: 999px;
+    background: var(--you-blue-pale);
     color: var(--sea-blue);
     font-size: 0.85rem;
+    font-weight: 700;
+    line-height: 1.2;
+    text-align: center;
+    transition:
+      background-color 0.15s ease-out,
+      color 0.15s ease-out;
+  }
+
+  /*
+   * Each line stays on one line, cut short on the narrowest cards rather than wrapping. On the
+   * first, only the words are cut, never the episode number
+   */
+  .download-line {
+    display: flex;
+    gap: 0.25em;
+    max-width: 100%;
+    white-space: nowrap;
+  }
+
+  .download-words,
+  .download-site {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .download-site {
+    font-size: 0.75rem;
     font-weight: 600;
-    text-decoration: underline;
-    text-underline-offset: 3px;
   }
 
   .download-link:hover,
   .download-link:focus-visible {
-    color: var(--navy);
+    background: var(--you-blue);
+    color: #ffffff;
   }
 
   /* Without motion, the card simply switches sides */

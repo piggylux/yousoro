@@ -96,6 +96,19 @@ describe('sortWatchingList', () => {
     expect(sortWatchingList(list).map((a) => a.id)).toEqual([3, 4, 2, 1]);
   });
 
+  it('puts anime whose episode just aired first, newest airing first, then the others', () => {
+    const behind = { currentEpisode: 3, numberAiredEpisodes: 4 };
+    const list = [
+      anime({ id: 1, ...behind, lastUpdatedAt: 900 }),
+      anime({ id: 2, ...behind, lastUpdatedAt: 100, recentEpisodeAiredAt: 5000 }),
+      anime({ id: 3, ...behind, lastUpdatedAt: 50, recentEpisodeAiredAt: 8000 }),
+      // A rewatch's episodes aren't new, even when the show is airing
+      anime({ id: 4, ...behind, rewatching: true, lastUpdatedAt: 999, recentEpisodeAiredAt: 9000 }),
+    ];
+
+    expect(sortWatchingList(list).map((a) => a.id)).toEqual([3, 2, 1, 4]);
+  });
+
   it('puts anime to watch with no update time after the ones that have one', () => {
     const list = [
       anime({ id: 1, currentEpisode: 0, numberAiredEpisodes: 2 }),

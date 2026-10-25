@@ -14,10 +14,12 @@ export async function load({
   params,
   locals,
   cookies,
+  isDataRequest,
 }: {
   params: { username: string; domain: string };
   locals: App.Locals;
   cookies: Cookies;
+  isDataRequest: boolean;
 }) {
   // Only AniList is supported for now
   if (!isDomain(params.domain)) {
@@ -26,16 +28,16 @@ export async function load({
 
   let userAnimeList;
   try {
-    userAnimeList = await new AniListApi(locals.session?.token).getUserAnimeList(params.username);
+    userAnimeList = await getUserAnimeList(params.username, locals, cookies);
   } catch (err) {
     if (err instanceof AniListNotFoundError) {
       error(404, `There's no AniList user named ${params.username}`);
     }
-    if (!(err instanceof AniListTokenError) || !locals.session) throw err;
-    // The signed-in user's token expired: sign them out and read the public list instead
-    clearSession(cookies);
-    locals.session = null;
-    userAnimeList = await new AniListApi().getUserAnimeList(params.username);
+    // In the browser, the page may already show this list, reloading it by itself or after a
+    // save. It keeps showing it then (see +page.ts), rather than an error the viewer didn't ask for
+    if (!isDataRequest) throw err;
+    console.error(err);
+    return { unavailable: true as const, username: params.username };
   }
   const { userId, username, avatarUrl, scoreFormat, animeList } = userAnimeList;
 
@@ -49,6 +51,18 @@ export async function load({
     scoreFormat,
     userProfileLink: `https://anilist.co/user/${encodeURIComponent(username)}/animelist/Watching`,
   };
+}
+
+async function getUserAnimeList(username: string, locals: App.Locals, cookies: Cookies) {
+  try {
+    return await new AniListApi(locals.session?.token).getUserAnimeList(username);
+  } catch (err) {
+    if (!(err instanceof AniListTokenError) || !locals.session) throw err;
+    // The signed-in user's token expired: sign them out and read the public list instead
+    clearSession(cookies);
+    locals.session = null;
+    return await new AniListApi().getUserAnimeList(username);
+  }
 }
 
 /**

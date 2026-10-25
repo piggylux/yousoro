@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { beforeNavigate } from '$app/navigation';
+  import { beforeNavigate, invalidateAll } from '$app/navigation';
   import { onMount, tick } from 'svelte';
   import { flip } from 'svelte/animate';
   import { prefersReducedMotion } from 'svelte/motion';
@@ -10,6 +10,8 @@
   import BacklogBanner from '#lib/components/BacklogBanner.svelte';
   import ScorePrompt from '#lib/components/ScorePrompt.svelte';
   import YousoroCelebration from '#lib/components/YousoroCelebration.svelte';
+  import { flippedCard } from '#lib/flipped-card.svelte.js';
+  import { nextAiringReloadDelay, planReload, reloadsOnReturn } from '#lib/live-updates.js';
   import type { Anime } from '#lib/types/anime.js';
   import type { AnimePageData } from '#lib/types/api.js';
   import { countColumns, getVisibleRange, type VisibleRange } from '#lib/virtual-grid.js';
@@ -96,6 +98,7 @@
     return () => {
       observer.disconnect();
       clearTimeout(highlightTimer);
+      clearTimeout(busyTimer);
     };
   });
 
@@ -188,6 +191,46 @@
     }
   }
 
+  /*
+   * Live updates: the list reloads when an episode on it airs, so a caught-up anime moves up with
+   * its new episode, and when the viewer comes back to the tab after a while, to show changes made
+   * elsewhere. AniList can't tell the page about changes, so these are the moments worth asking
+   */
+  const BUSY_RETRY_MS = 30 * 1000;
+
+  let loadedAt = Date.now();
+  // Waiting for the tab to be visible again, as a hidden tab doesn't reload
+  let reloadWhenVisible = false;
+  let busyTimer: ReturnType<typeof setTimeout> | undefined;
+
+  $effect(() => {
+    void data.watchingList;
+    loadedAt = Date.now();
+  });
+
+  function reload() {
+    clearTimeout(busyTimer);
+    const plan = planReload({
+      hidden: document.hidden,
+      busy: flippedCard.id !== null || scoring !== null,
+    });
+    reloadWhenVisible = plan === 'when-visible';
+    if (plan === 'later') busyTimer = setTimeout(reload, BUSY_RETRY_MS);
+    if (plan === 'now') void invalidateAll();
+  }
+
+  $effect(() => {
+    const delay = nextAiringReloadDelay(data.watchingList, Date.now());
+    if (delay === null) return;
+    const timer = setTimeout(reload, delay);
+    return () => clearTimeout(timer);
+  });
+
+  function onVisibilityChange() {
+    if (document.hidden) return;
+    if (reloadsOnReturn({ waiting: reloadWhenVisible, loadedAt, now: Date.now() })) reload();
+  }
+
   // The prompt covers the page, but Back could still leave it with a score unasked
   beforeNavigate(({ cancel, willUnload }) => {
     if (!willUnload && scoring) cancel();
@@ -195,6 +238,7 @@
 </script>
 
 <svelte:window onscroll={remeasure} onresize={remeasure} />
+<svelte:document onvisibilitychange={onVisibilityChange} />
 
 <svelte:head>
   <title>{data.username} - Yousoro</title>
