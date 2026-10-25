@@ -9,7 +9,9 @@ function anime(overrides: Partial<Anime>): Anime {
     title: 'Anime',
     thumbnailUrl: '',
     status: 'RELEASING',
+    isAdult: false,
     currentEpisode: 0,
+    rewatching: false,
     lastUpdatedAt: null,
     nextEpisode: null,
     numberAiredEpisodes: null,
@@ -129,6 +131,37 @@ describe('getBacklog', () => {
 
     expect(getBacklog(list)).toEqual({ episodes: 0, anime: 0, biggest: null });
     expect(getBacklog([])).toEqual({ episodes: 0, anime: 0, biggest: null });
+  });
+
+  it('leaves rewatches out, since their episodes aren’t new', () => {
+    const list = [
+      anime({ id: 1, currentEpisode: 2, numberAiredEpisodes: 5 }),
+      anime({ id: 2, currentEpisode: 9, numberAiredEpisodes: 276, rewatching: true }),
+    ];
+
+    expect(getBacklog(list)).toMatchObject({
+      episodes: 3,
+      anime: 1,
+      biggest: { anime: { id: 1 } },
+    });
+  });
+});
+
+describe('sortWatchingList with rewatches', () => {
+  it('puts a recently updated rewatch with the other anime being watched', () => {
+    const list = [
+      anime({ id: 1, currentEpisode: 4, numberAiredEpisodes: 4 }),
+      anime({
+        id: 2,
+        currentEpisode: 9,
+        numberAiredEpisodes: 276,
+        rewatching: true,
+        lastUpdatedAt: 50,
+      }),
+      anime({ id: 3, currentEpisode: 0, numberAiredEpisodes: 2, lastUpdatedAt: 10 }),
+    ];
+
+    expect(sortWatchingList(list).map((a) => a.id)).toEqual([2, 3, 1]);
   });
 });
 

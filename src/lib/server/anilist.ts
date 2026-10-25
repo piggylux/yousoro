@@ -12,12 +12,14 @@ export class AniListApi implements Api {
       userId,
       username: userName,
       avatarUrl,
-      animeList: entries.map(({ media, progress, updatedAt }) => ({
+      animeList: entries.map(({ media, status, progress, updatedAt }) => ({
         id: media.id,
         title: media.title.romaji,
         thumbnailUrl: media.coverImage.extraLarge,
         status: media.status,
+        isAdult: media.isAdult,
         currentEpisode: progress,
+        rewatching: status === 'REPEATING',
         lastUpdatedAt: updatedAt ? updatedAt * 1000 : null,
         nextEpisode: media.nextAiringEpisode
           ? {

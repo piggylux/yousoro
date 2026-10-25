@@ -1,5 +1,6 @@
 import type { Anime } from '#lib/types/anime.js';
 import type { Domain } from '#lib/types/domain.js';
+import type { Preferences } from '#lib/types/preferences.js';
 
 export type UserAnimeList = {
   /** The service's id for the list owner, when the service provides it */
@@ -22,4 +23,6 @@ export type AnimePageData = {
   canEdit: boolean;
   watchingList: Anime[];
   userProfileLink: string;
+  /** The viewer's display settings, from the root layout */
+  preferences: Preferences;
 };

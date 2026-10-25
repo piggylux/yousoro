@@ -6,7 +6,11 @@ export type Anime = {
   title: string;
   thumbnailUrl: string;
   status: AiringStatus;
+  /** Marked as adult (18+) on AniList */
+  isAdult: boolean;
   currentEpisode: number;
+  /** On the user's "Rewatching" list rather than "Watching"; `currentEpisode` is then the rewatch's */
+  rewatching: boolean;
   /**
    * When the user last changed this anime on their list, as Unix time in ms. Usually that's their
    * progress, but AniList also counts other edits such as the score.

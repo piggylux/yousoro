@@ -1,7 +1,7 @@
 import type { Cookies } from '@sveltejs/kit';
 import { describe, expect, it } from 'vitest';
 
-import { getSession, isAccessToken } from '#lib/server/session.js';
+import { getSession, isAccessToken, setSession } from '#lib/server/session.js';
 
 const TOKEN = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiI0MDUzOSJ9.c2lnbmF0dXJl';
 
@@ -54,5 +54,30 @@ describe('getSession', () => {
     const cookies =
       value === undefined ? ({ get: () => undefined } as unknown as Cookies) : cookiesWith(value);
     expect(getSession(cookies)).toBeNull();
+  });
+});
+
+describe('session cookie versions', () => {
+  const user = { id: 40539, name: 'Piggylux', avatarUrl: null };
+
+  it('writes a versioned cookie that reads back', () => {
+    const jar = new Map<string, string>();
+    const cookies = {
+      get: (name: string) => jar.get(name),
+      set: (name: string, value: string) => void jar.set(name, value),
+    } as unknown as Cookies;
+
+    setSession(cookies, { token: TOKEN, user }, 3600);
+
+    expect(JSON.parse(jar.get('session') ?? '')).toMatchObject({ v: 1 });
+    expect(getSession(cookies)).toEqual({ token: TOKEN, user });
+  });
+
+  it('still reads a session saved before versioning', () => {
+    expect(getSession(cookiesWith({ token: TOKEN, user }))).toEqual({ token: TOKEN, user });
+  });
+
+  it('ignores a session from a newer format', () => {
+    expect(getSession(cookiesWith({ v: 2, data: { token: TOKEN, user } }))).toBeNull();
   });
 });

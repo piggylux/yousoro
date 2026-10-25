@@ -32,6 +32,26 @@
       <div class="tw:navbar-center"></div>
 
       <div class="tw:navbar-end">
+        <a class="tw:btn tw:btn-ghost tw:btn-circle" href="/settings" aria-label="Settings">
+          <!-- A gear -->
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            width="22"
+            height="22"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <circle cx="12" cy="12" r="3" />
+            <path
+              d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
+            />
+          </svg>
+        </a>
         <a
           class="tw:btn tw:btn-ghost tw:btn-circle"
           href="https://github.com/Sylux6/yousoro"
@@ -66,6 +86,9 @@
             >
               <li class="tw:menu-title">{user.name}</li>
               <li><a href={`/user/anilist/${encodeURIComponent(user.name)}`}>My list</a></li>
+              <li>
+                <a href={`/user/anilist/${encodeURIComponent(user.name)}/friends`}>My friends</a>
+              </li>
               <li>
                 <form method="POST" action="/auth/logout">
                   <input type="hidden" name="redirectTo" value={redirectTo} />

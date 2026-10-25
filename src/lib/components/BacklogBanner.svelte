@@ -127,6 +127,8 @@
     background: var(--you-blue-pale);
     color: var(--navy);
     box-shadow: 0 1px 3px rgb(15 61 110 / 0.08);
+    /* The layout adapts to the banner's own width, wherever the page puts it */
+    container-type: inline-size;
   }
 
   .empty {
@@ -152,11 +154,51 @@
 
   .headline {
     font-weight: 600;
+    /* Even lines, so a word like "on" is never left alone on the last one */
+    text-wrap: balance;
   }
 
   .detail {
     font-size: 0.85rem;
     color: var(--sea-blue);
+  }
+
+  /*
+   * On a narrow banner (phones), the count and the headline share the first line and the detail
+   * gets the full width below, instead of the count floating beside a tall block of text
+   */
+  @container (max-width: 30rem) {
+    .banner {
+      padding: 10px 14px;
+    }
+
+    .behind .content,
+    .caught-up .content {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      align-items: baseline;
+      column-gap: 10px;
+      row-gap: 4px;
+    }
+
+    .behind .content > div,
+    .caught-up .content > div {
+      display: contents;
+    }
+
+    .count {
+      font-size: 1.5rem;
+    }
+
+    .detail {
+      grid-column: 1 / -1;
+      /* A long anime title can't make the banner grow taller than two detail lines */
+      display: -webkit-box;
+      overflow: hidden;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+      line-clamp: 2;
+    }
   }
 
   .celebrate {

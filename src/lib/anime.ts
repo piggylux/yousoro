@@ -94,9 +94,14 @@ export type Backlog = {
   biggest: { anime: Anime; episodes: number } | null;
 };
 
+/**
+ * New episodes the user has fallen behind on. Rewatches are left out: their episodes aired long
+ * ago, and the user watches them at their own pace.
+ */
 export function getBacklog(animeList: Anime[]): Backlog {
   const backlog: Backlog = { episodes: 0, anime: 0, biggest: null };
   for (const anime of animeList) {
+    if (anime.rewatching) continue;
     const episodes = getEpisodesToWatch(anime);
     if (episodes > 0) {
       backlog.episodes += episodes;

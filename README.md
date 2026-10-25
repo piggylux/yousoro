@@ -13,6 +13,10 @@ shows you're actively watching come first. Once you've watched an episode, mark 
   banner adds them up for the whole list
 - **Active shows first**: anime with episodes to watch are listed by when you last updated them
   on AniList, so what you're watching right now is at the top
+- **Rewatches**: anime on your AniList "Rewatching" list appear too, with how many episodes are
+  left; they don't count towards the episodes you're behind on
+- **Next episode countdown**: caught-up anime show when their next episode airs, in your own time
+  zone, and the soonest come first
 - **Airing status**: anime you're caught up on or have completed say so, and shows with no
   episode info (next episode not scheduled, on hiatus, not aired yet, cancelled) are labelled and
   listed last
@@ -20,6 +24,11 @@ shows you're actively watching come first. Once you've watched an episode, mark 
 - **Quick updates**: a +1 button marks the next episode as watched, and the card's details let you
   set any episode count; changes are saved straight to your AniList list
 - **Shareable lists**: anyone's watching list is viewable at `/user/anilist/<username>`
+- **Friends**: `/user/anilist/<username>/friends` lists the people a user follows on AniList, with
+  a link to each one's watching list
+
+Cookies store versioned JSON (`{"v":1,"data":…}`, see `src/lib/server/versioned-cookie.ts`), so a
+format can change later: bump its version and add a migration from the old one.
 
 ## Development
 

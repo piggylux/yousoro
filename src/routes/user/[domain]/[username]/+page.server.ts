@@ -1,6 +1,10 @@
 import { type Cookies, error, fail } from '@sveltejs/kit';
 
-import { AniListTokenError, saveProgress } from '#lib/server/anilist-client.js';
+import {
+  AniListNotFoundError,
+  AniListTokenError,
+  saveProgress,
+} from '#lib/server/anilist-client.js';
 import { AniListApi } from '#lib/server/anilist.js';
 import { clearSession } from '#lib/server/session.js';
 import { isDomain } from '#lib/types/domain.js';
@@ -26,6 +30,9 @@ export async function load({
   try {
     userAnimeList = await new AniListApi(locals.session?.token).getUserAnimeList(params.username);
   } catch (err) {
+    if (err instanceof AniListNotFoundError) {
+      error(404, `There's no AniList user named ${params.username}`);
+    }
     if (!(err instanceof AniListTokenError) || !locals.session) throw err;
     // The signed-in user's token expired: sign them out and read the public list instead
     clearSession(cookies);
