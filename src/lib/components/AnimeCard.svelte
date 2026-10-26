@@ -329,7 +329,14 @@
    * Focus follows the side that's showing, so keyboard users land on what they can see, except when
    * the card is turned back because another one was turned over
    */
-  async function flip(showBack: boolean, { moveFocus = true, dragged = false } = {}) {
+  async function flip(
+    showBack: boolean,
+    {
+      moveFocus = true,
+      dragged = false,
+      clickedAt = null,
+    }: { moveFocus?: boolean; dragged?: boolean; clickedAt?: { x: number; y: number } | null } = {}
+  ) {
     // While dragged, the card is the pointer's; a turn asked for meanwhile waits for it to land
     if ((dragging || settling) && !dragged) {
       pendingFlip = { showBack, moveFocus };
@@ -340,9 +347,15 @@
      * from its far side, so rapid clicks rock it smoothly back and forth. A drag has already turned
      * the card and shown its back, so neither animates again
      */
-    const midTurn = performance.now() - turnStartedAt < TURN_MS;
-    // Clicked over from rest, the card turns sideways, whichever way it was last dragged
-    if (showBack && !flipped && !dragged && !midTurn) setTurnDirection(Math.PI / 2);
+    // Still spinning back counts too, until the card is set back to 0 degrees after the spin
+    const midTurn = turnedBack || performance.now() - turnStartedAt < TURN_MS;
+    // From rest, the turn's direction can change unseen: mid-turn it would make the card jump
+    if (!dragged && !midTurn) {
+      const direction = clickedAt && clickDirection(clickedAt);
+      if (direction !== null) setTurnDirection(direction);
+      // Turned over from the keyboard, or clicked dead center, the card turns sideways
+      else if (showBack && !flipped) setTurnDirection(Math.PI / 2);
+    }
     turnStartedAt = dragged ? 0 : performance.now();
     inMotion = true;
     clearTimeout(motionTimer);
@@ -438,8 +451,25 @@
    * A click turns the card over, but not while it's in the user's hand or still spinning from a
    * drag: the click would be read against the side it had before, and turn it again once it lands
    */
-  function flipByClick(showBack: boolean) {
-    if (!dragging && !settling) flip(showBack);
+  function flipByClick(showBack: boolean, event: MouseEvent) {
+    if (dragging || settling) return;
+    // A click from the keyboard has no position, and turns the card the usual way
+    const clickedAt = event.detail > 0 ? { x: event.clientX, y: event.clientY } : null;
+    flip(showBack, { clickedAt });
+  }
+
+  /*
+   * Clicked, the card turns over toward the click: the edge nearest it lifts toward the viewer and
+   * goes over, as it leans under the mouse. As a turn direction, that's from the click toward the
+   * card's middle; none for a click too near the middle to tell
+   */
+  function clickDirection(clickedAt: { x: number; y: number }): number | null {
+    if (!cardElement) return null;
+    const rect = cardElement.getBoundingClientRect();
+    const towardMiddleX = (rect.left + rect.width / 2 - clickedAt.x) / rect.width;
+    const towardMiddleY = (rect.top + rect.height / 2 - clickedAt.y) / rect.height;
+    if (Math.hypot(towardMiddleX, towardMiddleY) < 0.08) return null;
+    return Math.atan2(towardMiddleX, -towardMiddleY);
   }
 
   // The axis the card turns about between drags, which its back is turned about too
@@ -813,7 +843,7 @@
             'a, button, input, select, textarea, label, form, .back-actions, .badge-side'
           )
         ) {
-          flipByClick(!flipped);
+          flipByClick(!flipped, event);
         }
       }}
     >
@@ -839,7 +869,7 @@
         <button
           class="cover"
           bind:this={coverButton}
-          onclick={() => flipByClick(true)}
+          onclick={(event) => flipByClick(true, event)}
           aria-label={`${anime.title}, show details`}
         >
           <!-- Clips the cover's hover zoom to its frame -->
@@ -1057,6 +1087,8 @@
   }
 
   .anime-card {
+    /* Every badge's height, which also sets how far it rises above the card's top edge */
+    --badge-height: 1.75rem;
     /* Set by the page grid, which sizes cards to fit the screen */
     width: var(--card-width, 300px);
     max-width: 100%;
@@ -1116,17 +1148,21 @@
 
   /*
    * The badge, centered on the card's top edge, one on each side just above its face, so it tilts,
-   * rises and turns with the card and shows on whichever side faces the viewer
+   * rises and turns with the card and shows on whichever side faces the viewer. It's centered with
+   * auto margins and half its height above the edge, not shifted by a share of its own size: that
+   * relies on the `translate` property, which not every browser or build applies, leaving the
+   * badge off to the right
    */
   .badge-side {
     position: absolute;
-    top: 0;
-    left: 50%;
+    top: calc(var(--badge-height) / -2);
+    right: 0;
+    left: 0;
     z-index: 3;
     display: flex;
-    /* As wide as its badge, which would otherwise wrap in the half of the card right of center */
+    /* As wide as its badge, so it centers rather than stretching across the card */
     width: max-content;
-    translate: -50% -50%;
+    margin-inline: auto;
     backface-visibility: hidden;
     transform: translateZ(2px);
   }
@@ -1363,13 +1399,13 @@
       z-index: 2;
     }
     /*
-     * The card tilts toward the mouse and rises off the page, its near edge sinking under it, while
-     * keeping its layout anchored. The tilt eases out while the card turns, so it never fights the
-     * turn
+     * The card tilts toward the mouse and rises off the page, the edge under the mouse rising
+     * toward the viewer, while keeping its layout anchored. The tilt eases out while the card
+     * turns, so it never fights the turn
      */
     .flipper {
-      transform: translateZ(calc(var(--lift) * 36px)) rotateX(calc(var(--pointer-y) * -18deg))
-        rotateY(calc(var(--pointer-x) * 24deg))
+      transform: translateZ(calc(var(--lift) * 36px)) rotateX(calc(var(--pointer-y) * 18deg))
+        rotateY(calc(var(--pointer-x) * -24deg))
         rotate3d(var(--turn-axis-x), var(--turn-axis-y), 0, var(--card-turn));
     }
     /* Its shadow falls away from the light and spreads as it rises, on either side */
@@ -1403,8 +1439,8 @@
   /* Where the card tilts toward the mouse, the tilt eases out on top of the drag */
   @media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
     .anime-card.dragging .flipper {
-      transform: translateZ(calc(var(--lift) * 36px)) rotateX(calc(var(--pointer-y) * -18deg))
-        rotateY(calc(var(--pointer-x) * 24deg)) var(--drag-transform);
+      transform: translateZ(calc(var(--lift) * 36px)) rotateX(calc(var(--pointer-y) * 18deg))
+        rotateY(calc(var(--pointer-x) * -24deg)) var(--drag-transform);
     }
   }
 
@@ -1723,7 +1759,7 @@
 
   /* A white ring and a shadow lift every badge off the cover and the card */
   .card-badge {
-    height: 1.75rem;
+    height: var(--badge-height);
     padding: 0 0.85rem;
     border: 2px solid #ffffff;
     font-size: 0.85rem;
@@ -1881,10 +1917,13 @@
     filter: blur(22px) brightness(1.08);
   }
 
+  /* Centered with auto margins rather than `translate`, which not every browser applies */
   .mature-label {
     position: absolute;
-    top: 50%;
-    left: 50%;
+    inset: 0;
+    width: max-content;
+    height: max-content;
+    margin: auto;
     padding: 4px 12px;
     border: 2px solid #ffffff;
     border-radius: 999px;
@@ -1892,7 +1931,6 @@
     color: #ffffff;
     font-size: 0.95rem;
     font-weight: 800;
-    translate: -50% -50%;
   }
   @media (hover: hover) and (pointer: fine) {
     .card-slot:hover .face {
