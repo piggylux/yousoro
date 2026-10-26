@@ -573,6 +573,7 @@
     position: relative;
     height: 100%;
     transform-style: preserve-3d;
+    -webkit-tap-highlight-color: transparent;
     transition: transform 760ms cubic-bezier(0.22, 0.8, 0.24, 1.06);
   }
 
@@ -674,7 +675,6 @@
     }
   }
 
-  .card-slot:hover .face,
   .card-slot:has(:focus-visible) .face {
     box-shadow:
       0 0 0 2px var(--you-blue),
@@ -1098,7 +1098,6 @@
     transition: filter 300ms ease-out;
   }
 
-  .card-slot:hover img,
   .card-slot:has(:focus-visible) img {
     filter: brightness(1.08);
   }
@@ -1116,7 +1115,6 @@
     pointer-events: none;
   }
 
-  .card-slot:hover .wave,
   .card-slot:has(:focus-visible) .wave {
     opacity: 0.9;
     animation: roll 1.6s linear infinite;
@@ -1137,7 +1135,6 @@
     scale: 1.1;
   }
 
-  .card-slot:hover .mature img,
   .card-slot:has(:focus-visible) .mature img {
     filter: blur(22px) brightness(1.08);
   }
@@ -1155,6 +1152,25 @@
     font-weight: 800;
     translate: -50% -50%;
   }
+  @media (hover: hover) and (pointer: fine) {
+    .card-slot:hover .face {
+      box-shadow:
+        0 0 0 2px var(--you-blue),
+        0 22px 38px -16px rgb(15 48 79 / 0.45),
+        0 8px 24px -10px rgb(73 185 249 / 0.4);
+    }
+    .card-slot:hover img {
+      filter: brightness(1.08);
+    }
+    .card-slot:hover .mature img {
+      filter: blur(22px) brightness(1.08);
+    }
+    .card-slot:hover .wave {
+      opacity: 0.9;
+      animation: roll 1.6s linear infinite;
+    }
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .card-badge {
       animation: none;
