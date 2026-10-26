@@ -14,7 +14,7 @@
   </h1>
 
   <!-- Back to /home after signing in, which then redirects to the user's own list -->
-  <SignInButton class="tw:btn tw:btn-primary tw:w-70" redirectTo="/home" />
+  <SignInButton redirectTo="/home" />
 </section>
 
 <style>

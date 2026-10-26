@@ -140,7 +140,7 @@
           </div>
         {:else if page.url.pathname !== '/home'}
           <!-- The home page has its own, larger sign-in button -->
-          <SignInButton class="tw:btn tw:btn-ghost tw:btn-sm" {redirectTo} />
+          <SignInButton compact {redirectTo} />
         {/if}
       </div>
     </div>
