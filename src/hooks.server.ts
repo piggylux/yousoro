@@ -10,7 +10,12 @@ export const handle: Handle = async ({ event, resolve }) => {
   event.locals.session = building ? null : getSession(event.cookies);
   event.locals.preferences = building ? DEFAULT_PREFERENCES : getPreferences(event.cookies);
 
-  const response = await resolve(event);
+  const response = await resolve(event, {
+    transformPageChunk: ({ html }) => {
+      const theme = event.locals.preferences.theme;
+      return html.replace('%yousoro.theme%', theme === 'system' ? '' : `data-theme="${theme}"`);
+    },
+  });
 
   // No other site may frame these pages, so the progress buttons can't be clickjacked. The
   // Content-Security-Policy, set in vite.config.ts, also forbids framing, for newer browsers.

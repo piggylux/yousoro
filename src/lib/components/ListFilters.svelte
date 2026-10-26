@@ -93,13 +93,13 @@
     padding: 0 14px;
     border: 2px solid var(--you-blue);
     border-radius: 999px;
-    background: #ffffff;
-    color: var(--navy);
+    background: var(--surface);
+    color: var(--text-heading);
     font-size: 0.85rem;
   }
 
   .search::placeholder {
-    color: color-mix(in srgb, var(--sea-blue) 60%, white);
+    color: var(--text-accent);
   }
 
   .search:focus-visible {
@@ -116,7 +116,7 @@
 
   /*
    * Each chip has the colours of its section's badge, so the two are easy to match up. A shown
-   * section's chip looks like the badge; a hidden one's is only outlined, dashed and faded
+   * section's chip looks like the badge; a hidden one's is only outlined and dashed
    */
   .chip {
     --chip-background: var(--sea-blue);
@@ -136,8 +136,7 @@
     cursor: pointer;
     transition:
       background-color 0.15s ease-out,
-      color 0.15s ease-out,
-      opacity 0.15s ease-out;
+      color 0.15s ease-out;
   }
 
   /* Like the "behind" badge: sea blue, with You's sky blue as a halo */
@@ -148,8 +147,8 @@
 
   /* Like the rewatch badge: sea blue on white, outlined in sky blue */
   .chip.rewatching {
-    --chip-background: #ffffff;
-    --chip-text: var(--sea-blue);
+    --chip-background: var(--surface);
+    --chip-text: var(--text-accent);
     --chip-border: var(--you-blue);
   }
 
@@ -168,21 +167,14 @@
   }
 
   .chip[aria-pressed='false'] {
+    border-color: var(--text-accent);
     border-style: dashed;
-    background: #ffffff;
+    background: var(--surface);
     box-shadow: none;
-    /* Darker than the badge colour, so light ones like the caught-up green stay readable on white */
-    color: color-mix(in srgb, var(--chip-border) 70%, black);
-    opacity: 0.75;
-  }
-
-  /* On white, the rewatch chip's sky blue would be too light to read */
-  .chip.rewatching[aria-pressed='false'] {
-    color: var(--sea-blue);
+    color: var(--text-accent);
   }
 
   .chip:hover {
-    opacity: 1;
     filter: brightness(1.08);
   }
 

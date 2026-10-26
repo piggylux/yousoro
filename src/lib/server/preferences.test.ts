@@ -7,6 +7,7 @@ import {
   DEFAULT_PREFERENCES,
   DOWNLOAD_LANGUAGES,
   DOWNLOAD_VERSIONS,
+  THEMES,
 } from '#lib/types/preferences.js';
 
 function cookiesWith(value?: string) {
@@ -22,6 +23,7 @@ const cookie = (data: object) => JSON.stringify({ v: 1, data });
 describe('getPreferences', () => {
   it('shows mature anime blurred and searches every release by default', () => {
     expect(getPreferences(cookiesWith())).toEqual({
+      theme: 'system',
       showMature: true,
       blurMature: true,
       cardSize: 'medium',
@@ -32,6 +34,7 @@ describe('getPreferences', () => {
 
   it('reads saved choices', () => {
     const saved = {
+      theme: 'dark',
       showMature: false,
       blurMature: false,
       cardSize: 'small',
@@ -50,6 +53,13 @@ describe('getPreferences', () => {
 
   it('falls back to medium cards for an unknown card size', () => {
     expect(getPreferences(cookiesWith(cookie({ cardSize: 'huge' }))).cardSize).toBe('medium');
+  });
+
+  it('falls back to the system theme for an invalid saved theme', () => {
+    expect(getPreferences(cookiesWith(cookie({ theme: 'unknown', cardSize: 'small' })))).toEqual({
+      ...DEFAULT_PREFERENCES,
+      cardSize: 'small',
+    });
   });
 
   it.each([
@@ -92,16 +102,19 @@ describe('setPreferences', () => {
         for (const downloadLanguage of DOWNLOAD_LANGUAGES) {
           for (const downloadVersion of DOWNLOAD_VERSIONS) {
             for (const cardSize of CARD_SIZES) {
-              const preferences = {
-                showMature,
-                blurMature,
-                cardSize,
-                downloadLanguage,
-                downloadVersion,
-              };
-              const cookies = cookiesWith();
-              setPreferences(cookies, preferences);
-              expect(getPreferences(cookies)).toEqual(preferences);
+              for (const theme of THEMES) {
+                const preferences = {
+                  theme,
+                  showMature,
+                  blurMature,
+                  cardSize,
+                  downloadLanguage,
+                  downloadVersion,
+                };
+                const cookies = cookiesWith();
+                setPreferences(cookies, preferences);
+                expect(getPreferences(cookies)).toEqual(preferences);
+              }
             }
           }
         }

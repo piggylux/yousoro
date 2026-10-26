@@ -620,7 +620,8 @@
     flex-direction: column;
     align-items: center;
     gap: 10px;
-    background: #ffffff;
+    background: var(--surface);
+    color: var(--color-base-content);
     backface-visibility: hidden;
     transition: box-shadow 0.2s ease-out;
   }
@@ -686,7 +687,7 @@
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
     line-clamp: 2;
-    color: var(--navy);
+    color: var(--text-heading);
     font-size: 1.05rem;
     font-weight: 800;
     line-height: 1.3;
@@ -694,7 +695,7 @@
 
   .back-title a:hover,
   .back-title a:focus-visible {
-    color: var(--sea-blue);
+    color: var(--text-accent);
     text-decoration: underline;
   }
 
@@ -725,7 +726,7 @@
   }
 
   .facts dt {
-    color: var(--sea-blue);
+    color: var(--text-accent);
     font-weight: 700;
     text-align: right;
   }
@@ -799,7 +800,7 @@
 
   .aired-note {
     margin-left: 4px;
-    color: var(--sea-blue);
+    color: var(--text-accent);
     font-size: 0.8rem;
     white-space: nowrap;
   }
@@ -816,7 +817,7 @@
     border: 2px solid var(--you-blue);
     border-radius: 999px;
     background: var(--you-blue-pale);
-    color: var(--sea-blue);
+    color: var(--text-accent);
     font-size: 0.85rem;
     font-weight: 700;
     line-height: 1.2;
@@ -851,7 +852,7 @@
 
   .download-link:hover,
   .download-link:focus-visible {
-    background: var(--you-blue);
+    background: var(--sea-blue);
     color: #ffffff;
   }
 
@@ -892,7 +893,7 @@
     left: 14px;
     padding: 4px 8px;
     border-radius: 8px;
-    background: rgb(255 255 255 / 0.95);
+    background: var(--surface);
     box-shadow: 0 2px 8px rgb(15 61 110 / 0.25);
     text-align: center;
   }
@@ -910,11 +911,11 @@
     border-radius: 999px;
     /* Not aired yet */
     background: var(--you-blue-pale);
-    box-shadow: inset 0 0 0 1px #cdeafd;
+    box-shadow: inset 0 0 0 1px var(--border-subtle);
   }
 
   .episode-bar .watched {
-    background: var(--sea-blue);
+    background: var(--text-accent);
   }
 
   /* Aired but not watched yet: the backlog the badge counts */
@@ -981,8 +982,8 @@
   /* Sea blue on white, outlined in You's sky blue: in the theme, but quieter than "behind" */
   .rewatch-badge {
     border-color: var(--you-blue);
-    background: #ffffff;
-    color: var(--sea-blue);
+    background: var(--surface);
+    color: var(--text-accent);
   }
 
   /*

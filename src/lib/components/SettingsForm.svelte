@@ -7,6 +7,7 @@
     DownloadLanguage,
     DownloadVersion,
     Preferences,
+    Theme,
   } from '#lib/types/preferences.js';
 
   type Props = {
@@ -39,6 +40,12 @@
     small: 'Small',
     medium: 'Medium',
     large: 'Large',
+  };
+
+  const THEME_LABELS: Record<Theme, string> = {
+    system: 'System',
+    light: 'Light',
+    dark: 'Dark',
   };
 
   const LANGUAGE_LABELS: Record<DownloadLanguage, string> = {
@@ -77,6 +84,24 @@
     };
   }}
 >
+  <label class="setting">
+    <span>
+      <span class="setting-name">Theme</span>
+      <span class="setting-hint">Choose a look, or follow your device.</span>
+    </span>
+    <select
+      class="choice tw:select tw:select-sm"
+      name="theme"
+      value={preferences.theme}
+      disabled={saving}
+      onchange={() => formElement?.requestSubmit()}
+    >
+      {#each Object.entries(THEME_LABELS) as [value, label] (value)}
+        <option {value}>{label}</option>
+      {/each}
+    </select>
+  </label>
+
   <label class="setting">
     <span>
       <span class="setting-name">Show mature anime</span>
@@ -194,9 +219,9 @@
     justify-content: space-between;
     gap: 20px;
     padding: 16px 18px;
-    border: 1px solid #cdeafd;
+    border: 1px solid var(--border-subtle);
     border-radius: var(--radius-box, 1rem);
-    background: #ffffff;
+    background: var(--surface);
     box-shadow: 0 1px 3px rgb(15 61 110 / 0.08);
     cursor: pointer;
   }
@@ -216,20 +241,20 @@
 
   .setting-name {
     display: block;
-    color: var(--navy);
+    color: var(--text-heading);
     font-weight: 700;
   }
 
   .setting-hint {
     display: block;
     margin-top: 2px;
-    color: var(--sea-blue);
+    color: var(--text-accent);
     font-size: 0.85rem;
   }
 
   .note {
     margin-top: 12px;
-    color: var(--sea-blue);
+    color: var(--text-accent);
     font-size: 0.8rem;
     opacity: 0.8;
   }
@@ -237,7 +262,7 @@
   .status {
     min-height: 1.5em;
     margin-top: 4px;
-    color: var(--sea-blue);
+    color: var(--text-accent);
     font-size: 0.85rem;
   }
 </style>

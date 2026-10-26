@@ -8,6 +8,11 @@
   import '../app.css';
 
   let { data, children }: LayoutProps = $props();
+
+  $effect(() => {
+    if (data.preferences.theme === 'system') delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = data.preferences.theme;
+  });
 </script>
 
 <!-- Default title, overridden by pages that set their own -->

@@ -139,8 +139,8 @@
     padding: 8px 12px;
     border: 2px solid var(--you-blue);
     border-radius: 14px 14px 14px 4px;
-    background: #ffffff;
-    color: var(--navy);
+    background: var(--surface);
+    color: var(--text-heading);
     box-shadow: 0 6px 16px rgb(15 61 110 / 0.2);
     font-size: 0.8rem;
     line-height: 1.3;
@@ -152,7 +152,7 @@
 
   .bubble strong {
     display: block;
-    color: var(--sea-blue);
+    color: var(--text-accent);
     font-size: 1.05rem;
   }
 

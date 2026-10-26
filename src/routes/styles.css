@@ -1,7 +1,8 @@
 :root {
-  --color-bg-0: rgb(202, 216, 228);
-  --color-bg-1: hsl(209, 36%, 86%);
-  --color-bg-2: hsl(224, 44%, 95%);
+  --color-bg-0: light-dark(rgb(202, 216, 228), #0c1a2b);
+  --color-bg-1: light-dark(hsl(209, 36%, 86%), #102338);
+  --color-bg-2: light-dark(hsl(224, 44%, 95%), #142d45);
+  --background-glow: light-dark(rgb(255 255 255 / 0.75), rgb(73 185 249 / 0.08));
 }
 
 body {
@@ -20,6 +21,6 @@ body::before {
   z-index: -1;
   pointer-events: none;
   background-image:
-    radial-gradient(50% 50% at 50% 50%, rgba(255, 255, 255, 0.75) 0%, rgba(255, 255, 255, 0) 100%),
+    radial-gradient(50% 50% at 50% 50%, var(--background-glow) 0%, transparent 100%),
     linear-gradient(180deg, var(--color-bg-0) 0%, var(--color-bg-1) 15%, var(--color-bg-2) 50%);
 }

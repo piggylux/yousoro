@@ -6,6 +6,7 @@ import {
   isCardSize,
   isDownloadLanguage,
   isDownloadVersion,
+  isTheme,
   type Preferences,
 } from '#lib/types/preferences.js';
 
@@ -19,6 +20,7 @@ const ONE_YEAR_SECONDS = 365 * 24 * 60 * 60;
  */
 export function toPreferences(values: Partial<Record<keyof Preferences, unknown>>): Preferences {
   return {
+    theme: isTheme(values.theme) ? values.theme : DEFAULT_PREFERENCES.theme,
     showMature:
       typeof values.showMature === 'boolean' ? values.showMature : DEFAULT_PREFERENCES.showMature,
     blurMature:

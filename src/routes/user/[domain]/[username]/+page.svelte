@@ -462,20 +462,20 @@
     border-radius: 12px;
     background: var(--you-blue-pale);
     box-shadow: 0 6px 18px rgb(15 61 110 / 0.2);
-    color: var(--navy);
+    color: var(--text-heading);
     font-size: 0.9rem;
     translate: -50% 0;
     animation: note-in 0.25s ease-out;
   }
 
   .show-section {
-    border-color: var(--sea-blue);
+    border-color: var(--text-accent);
     background: var(--sea-blue);
     color: #ffffff;
   }
 
   .show-section:hover {
-    border-color: var(--navy);
+    border-color: var(--text-heading);
     background: var(--navy);
   }
 
@@ -494,7 +494,7 @@
 
   .all-hidden {
     margin: 24px 0;
-    color: var(--sea-blue);
+    color: var(--text-accent);
     text-align: center;
   }
 

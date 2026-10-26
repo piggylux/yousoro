@@ -109,9 +109,9 @@
     gap: 8px;
     height: 100%;
     padding: 18px 12px 14px;
-    border: 1px solid #cdeafd;
+    border: 1px solid var(--border-subtle);
     border-radius: var(--radius-box, 1rem);
-    background: #ffffff;
+    background: var(--surface);
     box-shadow: 0 1px 3px rgb(15 61 110 / 0.08);
     transition:
       translate 0.15s ease-out,
@@ -136,7 +136,7 @@
     display: grid;
     place-items: center;
     background: var(--you-blue-pale);
-    color: var(--sea-blue);
+    color: var(--text-accent);
     font-size: 1.75rem;
     font-weight: 800;
   }
@@ -144,14 +144,14 @@
   .friend-name {
     max-width: 100%;
     overflow: hidden;
-    color: var(--navy);
+    color: var(--text-heading);
     font-weight: 700;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
   .friend-link {
-    color: var(--sea-blue);
+    color: var(--text-accent);
     font-size: 0.8rem;
   }
 

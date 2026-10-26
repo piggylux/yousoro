@@ -26,7 +26,7 @@
 
   .heading {
     margin-bottom: 20px;
-    color: var(--navy);
+    color: var(--text-heading);
     font-size: 1.5rem;
     font-weight: 800;
   }

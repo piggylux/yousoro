@@ -96,10 +96,10 @@
     margin: auto;
     width: min(22rem, calc(100vw - 32px));
     padding: 28px 24px 22px;
-    border: 1px solid #cdeafd;
+    border: 1px solid var(--border-subtle);
     border-radius: var(--radius-box, 1rem);
     background: var(--you-blue-pale);
-    color: var(--navy);
+    color: var(--text-heading);
     box-shadow: 0 16px 40px rgb(15 61 110 / 0.35);
     text-align: center;
   }
@@ -131,7 +131,7 @@
   }
 
   .greeting {
-    color: var(--sea-blue);
+    color: var(--text-accent);
     font-size: 0.85rem;
     font-weight: 700;
     letter-spacing: 0.04em;
@@ -168,7 +168,7 @@
   }
 
   .note {
-    color: var(--sea-blue);
+    color: var(--text-accent);
     font-size: 0.8rem;
   }
 

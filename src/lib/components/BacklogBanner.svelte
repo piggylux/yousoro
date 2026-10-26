@@ -121,11 +121,11 @@
     flex: 0 1 40rem;
     max-width: 100%;
     padding: 12px 18px;
-    border: 1px solid #cdeafd;
+    border: 1px solid var(--border-subtle);
     border-left: 4px solid var(--accent);
     border-radius: var(--radius-box, 1rem);
     background: var(--you-blue-pale);
-    color: var(--navy);
+    color: var(--text-heading);
     box-shadow: 0 1px 3px rgb(15 61 110 / 0.08);
     /* The layout adapts to the banner's own width, wherever the page puts it */
     container-type: inline-size;
@@ -145,7 +145,7 @@
 
   .count {
     flex: none;
-    color: var(--sea-blue);
+    color: var(--text-accent);
     font-size: 1.75rem;
     font-weight: 800;
     line-height: 1;
@@ -160,7 +160,7 @@
 
   .detail {
     font-size: 0.85rem;
-    color: var(--sea-blue);
+    color: var(--text-accent);
   }
 
   /*

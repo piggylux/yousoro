@@ -1,16 +1,29 @@
 /* Tailwind and daisyUI classes are written with a tw: prefix (tw:flex, tw:btn), which sets them
    apart from the project's own CSS classes */
 @import 'tailwindcss' prefix(tw);
-@plugin 'daisyui';
+@plugin 'daisyui' {
+  themes:
+    light --default,
+    dark --prefersdark;
+}
 
 /*
- * You Watanabe's blues (Love Live! Sunshine!!), whose "Yousoro!" names the app. Her sky blue is too
- * light to read as text, so it's for accents and fills; text uses the deeper blues, which keep good
- * contrast on light backgrounds.
+ * You Watanabe's sky blue, with navy and sea tones. Text and surfaces follow the active
+ * color scheme; the brand colors stay constant for badges and other filled controls.
  */
 :root {
   --you-blue: #49b9f9;
-  --you-blue-pale: #eef8ff;
+  --you-blue-pale: light-dark(#eef8ff, #142b42);
   --sea-blue: #145f9c;
   --navy: #0f3d6e;
+  --surface: light-dark(#ffffff, #1b3048);
+  --border-subtle: light-dark(#cdeafd, #36546f);
+  --text-heading: light-dark(#0f3d6e, #e1f2ff);
+  --text-accent: light-dark(#145f9c, #9fdcff);
+  --color-base-100: var(--surface);
+  --color-base-200: light-dark(#f3f8fc, #16283d);
+  --color-base-300: light-dark(#dce9f3, #36546f);
+  --color-base-content: light-dark(#1f2937, #e1edf7);
+  --color-primary: var(--you-blue);
+  --color-primary-content: #0f304f;
 }

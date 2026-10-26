@@ -121,7 +121,7 @@
   }
 
   .heading {
-    color: var(--navy);
+    color: var(--text-heading);
     font-size: 1.35rem;
     font-weight: 800;
   }
