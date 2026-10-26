@@ -79,6 +79,12 @@
   // Countdowns use the viewer's clock and time zone, so they only appear once in the browser
   let mounted = $state(false);
   onMount(() => (mounted = true));
+  /*
+   * Browsers that can't register `--card-turn` (Firefox before 128) can't animate it, so there the
+   * card turns by transitioning its transform instead, without following the mouse
+   */
+  let legacyTurn = $state(false);
+  onMount(() => (legacyTurn = !('registerProperty' in CSS)));
   // A card that leaves the page, as when it scrolls out of a long list, no longer counts as the one
   // turned over, or the page would wait forever for it to be turned back before reloading
   onDestroy(() => {
@@ -184,6 +190,107 @@
 
   // The card flips over to show its details, instead of opening a popup
   let flipped = $state(false);
+  // Set while the card spins back to its front
+  let turnedBack = $state(false);
+  let turnedByDrag = $state(false);
+  // How long turning over, or spinning back, takes
+  const TURN_MS = 760;
+  let turnStartedAt = 0;
+  // Long enough for the spin
+  const TURN_BACK_MS = 800;
+  $effect(() => {
+    if (!turnedBack) return;
+    // A full turn round, the card is set back to 0 degrees
+    const timer = setTimeout(() => swapTurn(() => (turnedBack = false)), TURN_BACK_MS);
+    return () => clearTimeout(timer);
+  });
+
+  /*
+   * Moves the card to an angle a full turn from where it is, which looks the same, without a
+   * transition, so it doesn't spin all the way round to get there
+   */
+  let swapCount = 0;
+  async function swapTurn(update: () => unknown) {
+    // Only the latest swap brings the transition back, so overlapping swaps can't animate
+    const swap = ++swapCount;
+    if (flipperElement) flipperElement.style.transition = 'none';
+    await update();
+    await tick();
+    if (!flipperElement) return;
+    // Applies the swap before the transition comes back
+    flipperElement.getBoundingClientRect();
+    requestAnimationFrame(() => {
+      if (swap === swapCount) flipperElement?.style.removeProperty('transition');
+    });
+  }
+
+  /*
+   * Where the mouse is over the card, from -0.5 to 0.5 across and down, and how far it has lifted
+   * toward the viewer, from 0 to 1. Each eases toward its target every frame, so the card glides
+   * after the mouse rather than snapping to it. Written straight to the card's style, since they
+   * change every frame
+   */
+  let cardElement = $state<HTMLElement>();
+  const tilt = { x: 0, y: 0, lift: 0 };
+  const tiltTarget = { x: 0, y: 0, lift: 0 };
+  // How quickly the card catches up with the mouse: about two thirds of the way in this time
+  const TILT_EASE_MS = 90;
+  let tiltFrame = 0;
+  let lastFrameTime = 0;
+
+  function stepTilt(time: number) {
+    if (pointerAt && cardElement) {
+      const rect = cardElement.getBoundingClientRect();
+      const clamp = (value: number) => Math.min(0.5, Math.max(-0.5, value));
+      tiltTarget.x = clamp((pointerAt.x - rect.left) / rect.width - 0.5);
+      tiltTarget.y = clamp((pointerAt.y - rect.top) / rect.height - 0.5);
+    }
+    const ease = 1 - Math.exp(-(time - lastFrameTime) / TILT_EASE_MS);
+    lastFrameTime = time;
+    let moving = false;
+    for (const key of ['x', 'y', 'lift'] as const) {
+      // The card lies flat while it turns, then tilts toward the mouse again
+      const target = turning ? 0 : tiltTarget[key];
+      tilt[key] += (target - tilt[key]) * ease;
+      if (Math.abs(target - tilt[key]) > 0.001) moving = true;
+      else tilt[key] = target;
+    }
+    cardElement?.style.setProperty('--pointer-x', String(tilt.x));
+    cardElement?.style.setProperty('--pointer-y', String(tilt.y));
+    cardElement?.style.setProperty('--lift', String(tilt.lift));
+    tiltFrame = moving ? requestAnimationFrame(stepTilt) : 0;
+  }
+
+  function aimTilt(target: Partial<typeof tiltTarget>) {
+    Object.assign(tiltTarget, target);
+    if (tiltFrame) return;
+    lastFrameTime = performance.now();
+    tiltFrame = requestAnimationFrame(stepTilt);
+  }
+
+  // Eases the tilt out when the card starts turning, and back in once it's done
+  $effect(() => {
+    void turning;
+    aimTilt(tiltTarget);
+  });
+
+  /*
+   * Where the mouse last was, measured against the card once a frame rather than on every move:
+   * at the start of a frame the page is already laid out, so measuring is cheap, and it stays right
+   * when the card moves under a still mouse
+   */
+  let pointerAt: { x: number; y: number } | null = null;
+
+  function trackPointer(event: PointerEvent) {
+    if (event.pointerType !== 'mouse' || legacyTurn) return;
+    pointerAt = { x: event.clientX, y: event.clientY };
+    aimTilt({ lift: 1 });
+  }
+
+  // Also runs on the server, where no frame is ever requested
+  onDestroy(() => {
+    if (tiltFrame) cancelAnimationFrame(tiltFrame);
+  });
   let coverButton = $state<HTMLButtonElement>();
   let backFace = $state<HTMLElement>();
 
@@ -191,7 +298,21 @@
    * Focus follows the side that's showing, so keyboard users land on what they can see, except when
    * the card is turned back because another one was turned over
    */
-  async function flip(showBack: boolean, { moveFocus = true } = {}) {
+  async function flip(showBack: boolean, { moveFocus = true, dragged = false } = {}) {
+    // While dragged, the card is the pointer's; a turn asked for meanwhile waits for it to land
+    if ((dragging || settling) && !dragged) {
+      pendingFlip = { showBack, moveFocus };
+      return;
+    }
+    /*
+     * Clicked again mid-turn, the card turns back from wherever it is rather than jumping to spin
+     * from its far side, so rapid clicks rock it smoothly back and forth. A drag has already turned
+     * the card and shown its back, so neither animates again
+     */
+    const midTurn = performance.now() - turnStartedAt < TURN_MS;
+    turnStartedAt = dragged ? 0 : performance.now();
+    turnedBack = !dragged && !midTurn && flipped && !showBack;
+    turnedByDrag = dragged;
     flipped = showBack;
     if (showBack) flippedCard.id = uid;
     else if (flippedCard.id === uid) flippedCard.id = null;
@@ -207,6 +328,118 @@
     const options = { preventScroll: true };
     if (showBack) backFace?.querySelector<HTMLElement>('a, button, input')?.focus(options);
     else coverButton?.focus(options);
+  }
+
+  /*
+   * Dragging the card sideways turns it with the pointer. Let go past halfway, or with a quick flick
+   * the same way, and it finishes turning over; otherwise it settles back. A mostly vertical drag is
+   * left to scroll the page
+   */
+  type Drag = {
+    pointerId: number;
+    startX: number;
+    startY: number;
+    width: number;
+    // How far the card has turned from its resting side, from -180 to 180 degrees
+    angle: number;
+    lastX: number;
+    lastTime: number;
+    // Degrees per millisecond, at the last move
+    velocity: number;
+    active: boolean;
+  };
+  let drag: Drag | null = null;
+  // The card follows the pointer, then finishes or undoes the turn once let go
+  let dragging = $state(false);
+  // Spinning back or dragged; either side tilts toward the mouse only when at rest
+  const turning = $derived(turnedBack || dragging);
+  let settling = $state(false);
+  // A turn asked for while the card was dragged, such as another card being turned over
+  let pendingFlip: { showBack: boolean; moveFocus: boolean } | null = null;
+  // A drag ends with a click, which must not turn the card again
+  let suppressClick = false;
+  let flipperElement = $state<HTMLElement>();
+  const DRAG_START_PX = 8;
+  const FLICK_DEG_PER_MS = 0.4;
+  const FLICK_PAUSE_MS = 80;
+  // Matches the settling transition
+  const SETTLE_MS = 420;
+
+  function setDragAngle(angle: number) {
+    cardElement?.style.setProperty('--drag-angle', `${(flipped ? 180 : 0) + angle}deg`);
+  }
+
+  function startDrag(event: PointerEvent) {
+    if (!event.isPrimary || event.button !== 0 || settling || !cardElement) return;
+    // A drag picks the card up at rest, not mid-turn
+    if (performance.now() - turnStartedAt < TURN_MS) return;
+    // The cover is a button, but every other control keeps its own pointer behavior
+    const target = event.target as Element;
+    if (
+      target.closest('a, button:not(.cover), input, select, textarea, label, form, .back-actions')
+    )
+      return;
+    drag = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      width: cardElement.offsetWidth,
+      angle: 0,
+      lastX: event.clientX,
+      lastTime: event.timeStamp,
+      velocity: 0,
+      active: false,
+    };
+  }
+
+  function moveDrag(event: PointerEvent) {
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    const dx = event.clientX - drag.startX;
+    if (!drag.active) {
+      const dy = event.clientY - drag.startY;
+      if (Math.abs(dx) < DRAG_START_PX && Math.abs(dy) < DRAG_START_PX) return;
+      if (Math.abs(dy) > Math.abs(dx)) {
+        drag = null;
+        return;
+      }
+      drag.active = true;
+      dragging = true;
+      flipperElement?.setPointerCapture(event.pointerId);
+    }
+    const elapsed = event.timeStamp - drag.lastTime;
+    if (elapsed > 0) drag.velocity = (((event.clientX - drag.lastX) / drag.width) * 180) / elapsed;
+    drag.lastX = event.clientX;
+    drag.lastTime = event.timeStamp;
+    drag.angle = Math.max(-180, Math.min(180, (dx / drag.width) * 180));
+    setDragAngle(drag.angle);
+  }
+
+  async function endDrag(event: PointerEvent, { cancelled = false } = {}) {
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    const { angle, active, lastTime } = drag;
+    // A pause before letting go is no flick, however fast the drag was before it
+    const velocity = event.timeStamp - lastTime > FLICK_PAUSE_MS ? 0 : drag.velocity;
+    drag = null;
+    if (!active) return;
+    suppressClick = true;
+    setTimeout(() => (suppressClick = false));
+
+    const flick = Math.abs(velocity) > FLICK_DEG_PER_MS && Math.sign(velocity) === Math.sign(angle);
+    const turnOver = !cancelled && (Math.abs(angle) > 90 || flick);
+    settling = true;
+    setDragAngle(turnOver ? Math.sign(angle) * 180 : 0);
+    await new Promise((resolve) => setTimeout(resolve, SETTLE_MS));
+
+    // The drag may end a full turn away from the side's own angle
+    await swapTurn(async () => {
+      dragging = false;
+      settling = false;
+      if (turnOver) await flip(!flipped, { dragged: true });
+    });
+    const pending = pendingFlip;
+    pendingFlip = null;
+    if (pending && pending.showBack !== flipped)
+      await flip(pending.showBack, { moveFocus: pending.moveFocus });
   }
 
   // Only one card shows its back at a time: this one turns back when another is turned over, a
@@ -276,15 +509,13 @@
   }}
 />
 
-<div class="card-slot tw:indicator tw:h-full" class:highlight={highlighted}>
-  <!-- Every badge sits in the same place, centered on top of the card, so they're easy to scan -->
+<!-- Every badge sits in the same place, centered on top of the card, so they're easy to scan -->
+{#snippet badge()}
   {#if watchState === 'completed'}
-    <span class="card-badge tw:indicator-item tw:indicator-center tw:badge tw:badge-success"
-      >✓ Completed</span
-    >
+    <span class="card-badge tw:badge tw:badge-success">✓ Completed</span>
   {:else if watchState === 'caught-up'}
     <span
-      class="card-badge tw:indicator-item tw:indicator-center tw:badge tw:badge-success"
+      class="card-badge tw:badge tw:badge-success"
       class:splash={justCaughtUp}
       title={countdown?.date}
       aria-label={countdown?.spoken}
@@ -292,16 +523,13 @@
       ✓ {countdown?.label ?? 'Caught up'}
     </span>
   {:else if noEpisodeInfo}
-    <span
-      class="card-badge tw:indicator-item tw:indicator-center tw:badge tw:badge-neutral"
-      title={noEpisodeInfo.title}
-    >
+    <span class="card-badge tw:badge tw:badge-neutral" title={noEpisodeInfo.title}>
       {noEpisodeInfo.label}
     </span>
   {:else if watchState === 'to-watch' && anime.rewatching}
     <!-- A rewatch isn't "behind": its episodes aren't new, so it gets a calmer badge -->
     <span
-      class="card-badge tw:indicator-item tw:indicator-center tw:badge rewatch-badge"
+      class="card-badge tw:badge rewatch-badge"
       title="Rewatching"
       aria-label={`Rewatching, ${episodesToWatch} episode${episodesToWatch === 1 ? '' : 's'} left`}
     >
@@ -309,7 +537,7 @@
     </span>
   {:else if watchState === 'to-watch'}
     <span
-      class="card-badge tw:indicator-item tw:indicator-center tw:badge behind-badge"
+      class="card-badge tw:badge behind-badge"
       class:new-episode={newEpisode}
       class:deep={episodesToWatch >= BIG_BACKLOG}
       aria-label={`${newEpisode ? 'New episode. ' : ''}${episodesToWatch} episode${episodesToWatch === 1 ? '' : 's'} to watch`}
@@ -321,25 +549,76 @@
       behind
     </span>
   {/if}
-  <div class="anime-card" class:flipped>
+{/snippet}
+
+<!-- Following the mouse is decoration only, so it needs no keyboard or screen reader equivalent -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div
+  class="card-slot tw:h-full"
+  class:highlight={highlighted}
+  onpointermove={trackPointer}
+  onpointerleave={() => {
+    pointerAt = null;
+    aimTilt({ x: 0, y: 0, lift: 0 });
+  }}
+>
+  <div
+    class="anime-card"
+    class:flipped
+    class:turned-back={turnedBack}
+    class:dragging
+    class:turned-by-drag={turnedByDrag}
+    class:settling
+    class:legacy-turn={legacyTurn}
+    bind:this={cardElement}
+  >
     <!--
-      A click anywhere on the card turns it over, except on its links, buttons and form fields, and
-      around the actions at the bottom of the back, so a click that just misses one doesn't. It's
-      handled here rather than on each side, so it works mid-turn too: the side being left is
-      already inert. Keyboard users have the cover button, so the click needs no key equivalent.
+      A click anywhere on the card turns it over, except on its badge, links, buttons and form
+      fields, and around the actions at the bottom of the back, so a click that just misses one
+      doesn't. It's handled here rather than on each side, so it works mid-turn too: the side being
+      left is already inert. Keyboard users have the cover button, so the click needs no key
+      equivalent.
     -->
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
     <div
       class="flipper"
+      bind:this={flipperElement}
+      onpointerdown={startDrag}
+      onpointermove={moveDrag}
+      onpointerup={(event) => endDrag(event)}
+      onpointercancel={(event) => endDrag(event, { cancelled: true })}
+      ondragstart={(event) => event.preventDefault()}
+      onclickcapture={(event) => {
+        if (!suppressClick) return;
+        event.stopPropagation();
+        event.preventDefault();
+      }}
       onclick={(event) => {
         const target = event.target as Element;
-        if (!target.closest('a, button, input, select, textarea, label, form, .back-actions')) {
+        if (
+          !target.closest(
+            'a, button, input, select, textarea, label, form, .back-actions, .badge-side'
+          )
+        ) {
           flip(!flipped);
         }
       }}
     >
+      <!--
+        The badge turns with the card, on whichever side faces the viewer. The copy on the back is
+        only for show, so screen readers hear it once
+      -->
+      <div class="badge-side front-side">{@render badge()}</div>
+      <div class="badge-side back-side" aria-hidden="true">{@render badge()}</div>
+      <!--
+        The light that glances off the back as it turns, over it rather than inside it, so it stays
+        put when the back's details scroll. The back has no gloss under the mouse
+      -->
+      <div class="back-light" aria-hidden="true"></div>
       <!-- Only the side facing the viewer can be focused or read by a screen reader -->
-      <div class="face front tw:card tw:shadow-xl" inert={flipped}>
+      <div class="face front tw:card" inert={flipped}>
+        <!-- A soft light on the cover where the mouse is -->
+        <span class="glare" aria-hidden="true"></span>
         <button
           class="cover"
           bind:this={coverButton}
@@ -354,7 +633,7 @@
               loading="lazy"
               class:up-to-date={episodesToWatch === 0}
             />
-            <span class="wave" aria-hidden="true"></span>
+            <span class="holo" aria-hidden="true"></span>
             {#if coverBlurred}
               <span class="mature-label">18+</span>
             {/if}
@@ -407,7 +686,7 @@
         over with Esc
       -->
       <div
-        class="face back tw:card tw:shadow-xl"
+        class="face back tw:card"
         bind:this={backFace}
         inert={!flipped}
         role="group"
@@ -553,6 +832,13 @@
 </div>
 
 <style>
+  /* Shrinks to its card, and holds the badge and card in place */
+  .card-slot {
+    position: relative;
+    display: inline-flex;
+    width: max-content;
+  }
+
   .anime-card {
     /* Set by the page grid, which sizes cards to fit the screen */
     width: var(--card-width, 300px);
@@ -568,35 +854,117 @@
     user-select: text;
   }
 
+  /*
+   * How far the card has turned. Turning over, spinning back and dragging all animate this one
+   * angle, so the reflection on each side can follow the turn as it happens
+   */
+  @property --card-turn {
+    syntax: '<angle>';
+    inherits: true;
+    initial-value: 0deg;
+  }
+
   /* Both sides turn together; the front sets the card's height and the back sits behind it */
   .flipper {
     position: relative;
     height: 100%;
     transform-style: preserve-3d;
     -webkit-tap-highlight-color: transparent;
-    transition: transform 760ms cubic-bezier(0.22, 0.8, 0.24, 1.06);
+    transform: rotateY(var(--card-turn));
+    transition: --card-turn 760ms cubic-bezier(0.22, 0.8, 0.24, 1.06);
   }
 
   .flipped .flipper {
-    transform: rotateY(180deg);
+    --card-turn: 180deg;
+  }
+
+  /* Without a registered `--card-turn`, the transform itself animates the turn */
+  @media (prefers-reduced-motion: no-preference) {
+    .legacy-turn .flipper {
+      transition: transform 760ms cubic-bezier(0.22, 0.8, 0.24, 1.06);
+    }
+    .legacy-turn.dragging .flipper {
+      transition: none;
+    }
+    .legacy-turn.dragging.settling .flipper {
+      transition: transform 420ms cubic-bezier(0.22, 0.8, 0.24, 1.06);
+    }
+  }
+
+  /* How edge-on the card is, from 0 lying flat to 1 side-on, for the light and lift that follow it */
+  .flipper {
+    --edge-on: max(sin(var(--card-turn)), -1 * sin(var(--card-turn)));
   }
 
   .front {
     overflow: hidden;
   }
 
-  .front::after {
+  /*
+   * The badge, centered on the card's top edge, one on each side just above its face, so it tilts,
+   * rises and turns with the card and shows on whichever side faces the viewer
+   */
+  .badge-side {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    z-index: 3;
+    display: flex;
+    /* As wide as its badge, which would otherwise wrap in the half of the card right of center */
+    width: max-content;
+    translate: -50% -50%;
+    backface-visibility: hidden;
+    transform: translateZ(2px);
+  }
+
+  .back-side {
+    transform: rotateY(180deg) translateZ(2px);
+  }
+
+  /* The badge facing away doesn't pulse; it starts when its side comes round */
+  .anime-card:not(.flipped, .dragging) .back-side .card-badge::after,
+  .flipped:not(.dragging) .front-side .card-badge::after {
+    animation: none;
+  }
+
+  /*
+   * As the card turns, light glances off it: a bright band slides across each side and the side
+   * dims as it turns away, both strongest edge-on and gone when the card lies flat. The band leaves
+   * the front on one edge and comes onto the back from the other, so the sweep carries on across
+   * the turn
+   */
+  .front::before,
+  .back-light::before {
+    --turn-band: calc(50% - sin(var(--card-turn)) * 70%);
     content: '';
     position: absolute;
-    inset: -20%;
+    inset: 0;
+    z-index: 2;
     border-radius: inherit;
-    background: linear-gradient(
-      110deg,
-      transparent 30%,
-      rgb(255 255 255 / 0.38) 48%,
-      transparent 66%
-    );
-    transform: translateX(-100%);
+    background:
+      linear-gradient(
+        100deg,
+        transparent calc(var(--turn-band) - 28%),
+        rgb(255 255 255 / 0.55) var(--turn-band),
+        transparent calc(var(--turn-band) + 28%)
+      ),
+      rgb(2 10 20 / calc(var(--edge-on) * 0.25));
+    opacity: var(--edge-on);
+    pointer-events: none;
+  }
+
+  .back-light::before {
+    --turn-band: calc(50% + sin(var(--card-turn)) * 70%);
+  }
+
+  /* Lies just over the back, turned with it, and clipped to its corners */
+  .back-light {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    border-radius: var(--radius-box);
+    backface-visibility: hidden;
+    transform: rotateY(180deg) translateZ(1px);
     pointer-events: none;
   }
 
@@ -621,31 +989,152 @@
   }
 
   @media (prefers-reduced-motion: no-preference) {
-    .flipped .back-title {
+    .flipped:not(.turned-by-drag) .back-title {
       animation: detail-reveal 300ms ease-out 220ms both;
     }
-    .flipped .facts {
+    .flipped:not(.turned-by-drag) .facts {
       animation: detail-fade 340ms ease-out 280ms both;
     }
-    .flipped .back-actions {
+    .flipped:not(.turned-by-drag) .back-actions {
       animation: detail-fade 340ms ease-out 340ms both;
     }
+    /*
+     * Mid-turn, the card rises toward the viewer, highest when edge-on, so it swings clear of its
+     * neighbours. It follows the angle, so it's smooth however the turn goes, clicked or dragged
+     */
+    .flipper {
+      translate: 0 calc(var(--edge-on) * -8px) calc(var(--edge-on) * 60px);
+    }
+  }
+
+  /*
+   * Turning back, the card keeps spinning the way it turned over, on round to a full turn, rather
+   * than unwinding; once there, it's set back to 0 degrees, which looks the same. As a transition
+   * like any other turn, a click mid-spin turns it back from wherever it is
+   */
+  .card-slot:has(.turned-back) {
+    z-index: 2;
+  }
+  .turned-back .flipper {
+    --card-turn: 360deg;
+  }
+
+  .anime-card {
+    /* Set while the mouse moves over the card; at rest the card lies flat, with no gloss */
+    --pointer-x: 0;
+    --pointer-y: 0;
+    --lift: 0;
+    /*
+     * On the dark navy page, the card is lighter than other surfaces and has a faint sky-blue
+     * edge, with deeper shadows, so it stands out as it does on the light page
+     */
+    --card-surface: light-dark(var(--surface), #24425f);
+    --card-edge: light-dark(transparent, rgb(159 220 255 / 0.2));
+    --card-shadow: light-dark(rgb(0 0 0 / 0.1), rgb(2 10 20 / 0.5));
+    --card-shadow-deep: light-dark(rgb(15 48 79 / 0.45), rgb(2 10 20 / 0.75));
+  }
+
+  /*
+   * The gloss on the tilted card: a soft highlight where the mouse is, and a broad diagonal
+   * reflection running through it, so the light stays with the mouse even at the card's edges
+   */
+  .glare {
+    /* Where the reflection crosses its diagonal, the mouse's position measured along it */
+    --band: calc(50% + (var(--pointer-x) * 0.9 + var(--pointer-y) * 0.42) * 100%);
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    border-radius: inherit;
+    background:
+      radial-gradient(
+        ellipse 70% 50% at calc(50% + var(--pointer-x) * 100%) calc(50% + var(--pointer-y) * 100%),
+        rgb(255 255 255 / 0.55),
+        rgb(255 255 255 / 0.18) 40%,
+        transparent 75%
+      ),
+      linear-gradient(
+        115deg,
+        transparent calc(var(--band) - 22%),
+        rgb(255 255 255 / 0.22) var(--band),
+        transparent calc(var(--band) + 22%)
+      );
+    mix-blend-mode: overlay;
+    opacity: var(--lift);
+    transition: opacity 250ms ease-out;
+    pointer-events: none;
+  }
+
+  /* A faint rainbow foil on the cover, strongest near the light and shifting as the card tilts */
+  .holo {
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(
+        115deg,
+        hsl(350 90% 72%) 0%,
+        hsl(45 95% 70%) 6%,
+        hsl(150 80% 68%) 12%,
+        hsl(200 95% 70%) 18%,
+        hsl(270 85% 74%) 24%,
+        hsl(350 90% 72%) 30%
+      )
+      calc(50% + var(--pointer-x) * 90%) calc(50% + var(--pointer-y) * 90%) / 300% 300%;
+    mask-image: radial-gradient(
+      circle at calc(50% + var(--pointer-x) * 100%) calc(50% + var(--pointer-y) * 100%),
+      #000,
+      transparent 75%
+    );
+    mix-blend-mode: color-dodge;
+    opacity: calc(var(--lift) * 0.28);
+    transition: opacity 250ms ease-out;
+    pointer-events: none;
+  }
+
+  /* No gloss mid-spin, which keeps the spin light to draw */
+  .turned-back :is(.glare, .holo) {
+    opacity: 0;
   }
 
   @media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
     .card-slot:hover {
       z-index: 2;
     }
-    /* Start the same turn a click completes, while keeping the card's layout anchored. */
-    .card-slot:hover .anime-card:not(.flipped) .flipper {
-      transform: rotateY(18deg);
+    /*
+     * The card tilts toward the mouse and rises off the page, its near edge sinking under it, while
+     * keeping its layout anchored. The tilt eases out while the card turns, so it never fights the
+     * turn
+     */
+    .flipper {
+      transform: translateZ(calc(var(--lift) * 36px)) rotateX(calc(var(--pointer-y) * -18deg))
+        rotateY(calc(var(--card-turn) + var(--pointer-x) * 24deg));
     }
-    .front::after {
-      transition: transform 850ms cubic-bezier(0.22, 1, 0.36, 1);
+    /* Its shadow falls away from the light and spreads as it rises, on either side */
+    .card-slot:hover .face {
+      box-shadow:
+        0 0 0 2px var(--you-blue),
+        calc(var(--pointer-x) * -36px) calc(20px + var(--pointer-y) * -30px)
+          calc(24px + var(--lift) * 24px) -12px var(--card-shadow-deep),
+        0 8px 24px -10px rgb(73 185 249 / 0.45);
+      /* It follows the mouse every frame already */
+      transition: none;
     }
-    .card-slot:hover .anime-card:not(.flipped) .front::after {
-      transform: translateX(100%);
-    }
+  }
+
+  /*
+   * While dragged, the card turns with the pointer, ahead of any tilt or side; let go, it eases to
+   * where the drag ends. Horizontal drags are the card's, vertical ones still scroll the page
+   */
+  .flipper {
+    touch-action: pan-y;
+  }
+  .card-slot:has(.dragging) {
+    z-index: 2;
+  }
+  .anime-card.dragging .flipper {
+    --card-turn: var(--drag-angle);
+    transition: none;
+  }
+  .anime-card.dragging.settling .flipper {
+    transition: --card-turn 420ms cubic-bezier(0.22, 0.8, 0.24, 1.06);
   }
 
   .face {
@@ -655,8 +1144,13 @@
     flex-direction: column;
     align-items: center;
     gap: 10px;
-    background: var(--surface);
+    background: var(--card-surface);
     color: var(--color-base-content);
+    /* Tailwind's shadow-xl, darker on the dark page, plus the card's edge */
+    box-shadow:
+      0 0 0 1px var(--card-edge),
+      0 20px 25px -5px var(--card-shadow),
+      0 8px 10px -6px var(--card-shadow);
     backface-visibility: hidden;
     transition: box-shadow 420ms cubic-bezier(0.22, 1, 0.36, 1);
   }
@@ -678,7 +1172,7 @@
   .card-slot:has(:focus-visible) .face {
     box-shadow:
       0 0 0 2px var(--you-blue),
-      0 22px 38px -16px rgb(15 48 79 / 0.45),
+      0 22px 38px -16px var(--card-shadow-deep),
       0 8px 24px -10px rgb(73 185 249 / 0.4);
   }
 
@@ -964,7 +1458,8 @@
     font-size: 0.85rem;
     font-weight: 800;
     box-shadow: 0 4px 10px rgb(0 0 0 / 0.2);
-    /* `scale` rather than `transform`, which daisyUI uses to position the badge */
+    /* Holds the rings that pulse out of it */
+    position: relative;
     animation: badge-pop 0.45s ease-out;
   }
 
@@ -1102,30 +1597,6 @@
     filter: brightness(1.08);
   }
 
-  /* A thin You-blue wave line along the bottom of the cover, shown and rolling on hover */
-  .wave {
-    position: absolute;
-    inset: auto 0 4px;
-    height: 8px;
-    background-color: var(--you-blue-pale);
-    mask: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='8' viewBox='0 0 32 8'><path d='M0 4 Q8 0 16 4 T32 4' fill='none' stroke='black' stroke-width='2'/></svg>")
-      0 0 / 32px 8px repeat-x;
-    opacity: 0;
-    transition: opacity 0.25s ease-out;
-    pointer-events: none;
-  }
-
-  .card-slot:has(:focus-visible) .wave {
-    opacity: 0.9;
-    animation: roll 1.6s linear infinite;
-  }
-
-  @keyframes roll {
-    to {
-      mask-position: 32px 0;
-    }
-  }
-
   /*
    * Mature covers, when the viewer's setting says so: blurred beyond recognition, slightly
    * enlarged so the blurred edges stay outside the frame, and labelled
@@ -1156,7 +1627,7 @@
     .card-slot:hover .face {
       box-shadow:
         0 0 0 2px var(--you-blue),
-        0 22px 38px -16px rgb(15 48 79 / 0.45),
+        0 22px 38px -16px var(--card-shadow-deep),
         0 8px 24px -10px rgb(73 185 249 / 0.4);
     }
     .card-slot:hover img {
@@ -1164,10 +1635,6 @@
     }
     .card-slot:hover .mature img {
       filter: blur(22px) brightness(1.08);
-    }
-    .card-slot:hover .wave {
-      opacity: 0.9;
-      animation: roll 1.6s linear infinite;
     }
   }
 
@@ -1185,16 +1652,10 @@
       animation: none;
     }
 
-    /* Without motion, the glow and the wave appear at once, the wave stays still and the card never turns */
+    /* Without motion, the glow appears at once and the card never turns */
     .face,
-    img,
-    .wave {
+    img {
       transition: none;
-    }
-
-    .card-slot:hover .wave,
-    .card-slot:has(:focus-visible) .wave {
-      animation: none;
     }
   }
 </style>
