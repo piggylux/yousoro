@@ -2,9 +2,15 @@ import { type Cookies, error, fail, type RequestEvent } from '@sveltejs/kit';
 
 import { withoutHiddenMature } from '#lib/anime.js';
 import { HIDDEN_SECTIONS_COOKIE, parseHiddenSections } from '#lib/hidden-sections.js';
-import { AniListNotFoundError, AniListTokenError, saveEntry } from '#lib/server/anilist-client.js';
+import {
+  AniListNotFoundError,
+  AniListTokenError,
+  AniListRateLimitError,
+  saveEntry,
+} from '#lib/server/anilist-client.js';
 import { AniListApi } from '#lib/server/anilist.js';
 import { parseEntryUpdate } from '#lib/server/entry-update.js';
+import { takeClientLimit } from '#lib/server/rate-limit.js';
 import { clearSession, type Session } from '#lib/server/session.js';
 import { isDomain } from '#lib/types/domain.js';
 
@@ -16,11 +22,13 @@ export async function load({
   locals,
   cookies,
   isDataRequest,
+  getClientAddress,
 }: {
   params: { username: string; domain: string };
   locals: App.Locals;
   cookies: Cookies;
   isDataRequest: boolean;
+  getClientAddress: () => string;
 }) {
   // Only AniList is supported for now
   if (!isDomain(params.domain)) {
@@ -31,8 +39,14 @@ export async function load({
 
   let userAnimeList;
   try {
+    const limit = await takeClientLimit(getClientAddress(), 'read', 2);
+    if (!limit.allowed) throw new AniListRateLimitError(limit.retryAfter);
     userAnimeList = await getUserAnimeList(params.username, locals, cookies);
   } catch (err) {
+    if (err instanceof AniListRateLimitError) {
+      locals.retryAfter = Math.max(locals.retryAfter ?? 0, err.retryAfter);
+      if (!isDataRequest) error(429, err.message);
+    }
     if (err instanceof AniListNotFoundError) {
       error(404, `There's no AniList user named ${params.username}`);
     }
@@ -86,6 +100,10 @@ async function updateOwnList<T>(
   try {
     return await update(locals.session);
   } catch (err) {
+    if (err instanceof AniListRateLimitError) {
+      locals.retryAfter = Math.max(locals.retryAfter ?? 0, err.retryAfter);
+      return fail(429, { message: err.message });
+    }
     console.error(err);
     if (err instanceof AniListTokenError) {
       clearSession(cookies);
@@ -101,6 +119,11 @@ export const actions: Actions = {
    * back, or the score prompt after completing an anime. A field that isn't sent stays as it is
    */
   updateEntry: async (event) => {
+    const limit = await takeClientLimit(event.getClientAddress(), 'write');
+    if (!limit.allowed) {
+      event.locals.retryAfter = Math.max(event.locals.retryAfter ?? 0, limit.retryAfter);
+      return fail(429, { message: 'Too many updates, please try again shortly' });
+    }
     const update = parseEntryUpdate(await event.request.formData());
     if ('message' in update) return fail(400, { message: update.message });
     const { mediaId, changes } = update;

@@ -1,13 +1,19 @@
 import { error, json } from '@sveltejs/kit';
 
 import { getViewer } from '#lib/server/anilist-client.js';
+import { takeClientLimit } from '#lib/server/rate-limit.js';
 import { safeRedirectPath } from '#lib/server/redirect.js';
 import { isAccessToken, setSession } from '#lib/server/session.js';
 
 import type { RequestHandler } from './$types';
 
 /** Turns the token from the sign-in callback into a session cookie. */
-export const POST: RequestHandler = async ({ request, cookies }) => {
+export const POST: RequestHandler = async ({ request, cookies, getClientAddress, locals }) => {
+  const limit = await takeClientLimit(getClientAddress(), 'auth');
+  if (!limit.allowed) {
+    locals.retryAfter = limit.retryAfter;
+    error(429, 'Too many sign-in attempts, please try again shortly');
+  }
   // JSON only: another site can't send JSON here without the browser asking first, and this route
   // never allows it, so nobody can sign a visitor in to the wrong account
   if (request.headers.get('content-type')?.split(';')[0].trim() !== 'application/json') {

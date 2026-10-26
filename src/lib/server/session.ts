@@ -10,12 +10,12 @@ export type Session = {
 };
 
 const SESSION_COOKIE = 'session';
-// AniList tokens last a year, but signing out can't revoke them, so sessions stop sooner
+// Limit browser cookie retention; this cannot revoke a copied token or enforce token expiry.
 const MAX_SESSION_SECONDS = 30 * 24 * 60 * 60;
 
 /**
  * AniList access tokens are JWTs: three base64url parts joined by dots. Anything else is refused, so
- * a hand-edited value never reaches the Authorization header sent to AniList.
+ * malformed values cannot inject Authorization headers. AniList validates token authenticity.
  */
 export function isAccessToken(value: unknown): value is string {
   return (

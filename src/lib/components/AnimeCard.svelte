@@ -51,6 +51,8 @@
     scoreFormat?: ScoreFormat;
     /** Where the card is in the list, counting from 0 */
     position?: number;
+    /** Apply the confirmed progress before requesting fresh list data. */
+    onConfirmed: (saved: Anime, status: string) => void;
     /** Called once a save is done and the list reloaded, with where the card was before */
     onSaved?: (animeId: number, positionBefore: number) => void;
     /** Glows for a moment, so the eye finds the card in its new place after a save */
@@ -68,6 +70,7 @@
     scoreFormat = DEFAULT_SCORE_FORMAT,
     position = 0,
     onSaved,
+    onConfirmed,
     highlighted = false,
   }: Props = $props();
 
@@ -223,33 +226,37 @@
     const scored = formData.has('score') && scoreChanged;
 
     return async ({ result, update }) => {
-      saving = false;
-      if (result.type === 'failure') {
-        errorMessage = (result.data?.message as string | undefined) ?? 'The update failed';
-        return;
-      }
-      if (result.type === 'success') {
-        const saved = {
-          ...anime,
-          currentEpisode: Number(result.data?.progress),
-          userScore: Number(result.data?.score) || null,
-        };
-        // A new episode count shows on the front; a score alone stays in view on the back
-        if (flipped && saved.currentEpisode !== progressBefore) await flip(false);
-
-        // Celebrate only the moment the user catches up or finishes, judged by what AniList saved
-        const stateAfter = getWatchState(saved);
-        const wasDone = stateBefore === 'caught-up' || stateBefore === 'completed';
-        if (!wasDone && (stateAfter === 'caught-up' || stateAfter === 'completed')) {
-          onCaughtUp?.(stateAfter, saved, { scored });
+      try {
+        if (result.type === 'failure') {
+          errorMessage = (result.data?.message as string | undefined) ?? 'The update failed';
+          return;
         }
-        // The card shows the new count once the list reloads, maybe as a new card if it moves
-        if (saved.currentEpisode !== progressBefore)
-          countsBeforeSave.set(anime.id, episodesToWatch);
+        if (result.type === 'success') {
+          const saved = {
+            ...anime,
+            currentEpisode: Number(result.data?.progress),
+            userScore: Number(result.data?.score) || null,
+          };
+          // A new episode count shows on the front; a score alone stays in view on the back
+          if (flipped && saved.currentEpisode !== progressBefore) await flip(false);
+
+          // Celebrate only the moment the user catches up or finishes, judged by what AniList saved
+          const stateAfter = getWatchState(saved);
+          const wasDone = stateBefore === 'caught-up' || stateBefore === 'completed';
+          if (!wasDone && (stateAfter === 'caught-up' || stateAfter === 'completed')) {
+            onCaughtUp?.(stateAfter, saved, { scored });
+          }
+          // The card may be replaced as the confirmed progress moves it to a new section.
+          if (saved.currentEpisode !== progressBefore)
+            countsBeforeSave.set(anime.id, episodesToWatch);
+          onConfirmed(saved, String(result.data?.status ?? ''));
+        }
+        // Reloads the list, so the card shows what AniList saved
+        await update({ reset: false });
+        if (result.type === 'success') onSaved?.(anime.id, positionBefore);
+      } finally {
+        saving = false;
       }
-      // Reloads the list, so the card shows what AniList saved
-      await update({ reset: false });
-      if (result.type === 'success') onSaved?.(anime.id, positionBefore);
     };
   };
 </script>

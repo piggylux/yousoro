@@ -27,9 +27,6 @@ shows you're actively watching come first. Once you've watched an episode, mark 
 - **Friends**: `/user/anilist/<username>/friends` lists the people a user follows on AniList, with
   a link to each one's watching list
 
-Cookies store versioned JSON (`{"v":1,"data":…}`, see `src/lib/server/versioned-cookie.ts`), so a
-format can change later: bump its version and add a migration from the old one.
-
 ## Development
 
 Requires [Bun](https://bun.sh). Create an [AniList API client](https://anilist.co/settings/developer)

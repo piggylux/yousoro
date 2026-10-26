@@ -6,6 +6,7 @@
     "@sveltejs/kit": "^3.1.0",
     "@sveltejs/vite-plugin-svelte": "^7.3.1",
     "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^24",
     "daisyui": "^5.7.50",
     "oxfmt": "0.74.0",
     "oxlint": "^1.89.0",

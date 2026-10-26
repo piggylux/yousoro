@@ -1,6 +1,17 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AniListApi } from '#lib/server/anilist.js';
+
+const cacheNamespace = vi.hoisted(() => ({ value: 0 }));
+beforeEach(() => {
+  cacheNamespace.value++;
+});
+
+vi.mock('#lib/server/rate-limit.js', () => ({
+  fingerprint: (value: string) => `${cacheNamespace.value}:${value}`,
+  takeAniListRequest: async () => ({ allowed: true, retryAfter: 0 }),
+  pauseAniList: vi.fn(),
+}));
 
 function media(title: { romaji: string; english: string | null }, synonyms: string[] | null) {
   return {

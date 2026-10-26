@@ -7,6 +7,8 @@ declare global {
   namespace App {
     // interface Error {}
     interface Locals {
+      /** Combined delay from action and load; emitted once by the response hook. */
+      retryAfter?: number;
       session: Session | null;
       preferences: Preferences;
     }

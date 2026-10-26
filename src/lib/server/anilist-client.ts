@@ -1,7 +1,10 @@
 import { DEFAULT_SCORE_FORMAT, isScoreFormat, type ScoreFormat } from '#lib/score.js';
+import { fingerprint, pauseAniList, takeAniListRequest } from '#lib/server/rate-limit.js';
 import type { AiringStatus } from '#lib/types/anime.js';
 
 const ANILIST_URL = 'https://graphql.anilist.co';
+const publicCache = new Map<string, { data: unknown; expiresAt: number }>();
+const MAX_CACHE_ENTRIES = 100;
 
 const MEDIA_FIELDS = `
   id
@@ -55,6 +58,12 @@ export class AniListTokenError extends Error {}
 /** Thrown when AniList has no user by the requested name. */
 export class AniListNotFoundError extends Error {}
 
+export class AniListRateLimitError extends Error {
+  constructor(public retryAfter: number) {
+    super('AniList request limit reached, please try again shortly');
+  }
+}
+
 /**
  * Sends a query as the given user, or anonymously when there is no token. Public data needs no
  * token, so the app never holds credentials of its own.
@@ -64,6 +73,18 @@ async function query<T>(
   variables: Record<string, unknown>,
   token?: string
 ): Promise<T> {
+  // Only anonymous reads are shared. Authenticated/private results never enter this cache.
+  const cacheKey =
+    !token && query.trimStart().startsWith('query')
+      ? `yousoro:public:${fingerprint(JSON.stringify([query, variables]))}`
+      : null;
+  if (cacheKey) {
+    const cached = publicCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) return cached.data as T;
+    publicCache.delete(cacheKey);
+  }
+  const budget = await takeAniListRequest();
+  if (!budget.allowed) throw new AniListRateLimitError(budget.retryAfter);
   const response = await fetch(ANILIST_URL, {
     method: 'POST',
     headers: {
@@ -72,7 +93,24 @@ async function query<T>(
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify({ query, variables }),
+    signal: AbortSignal.timeout(10_000),
+    redirect: 'error',
+    cache: 'no-store',
   });
+  if (response.status === 429) {
+    const retry = response.headers.get('Retry-After');
+    const seconds =
+      retry && /^\d+$/.test(retry)
+        ? Number(retry)
+        : retry
+          ? (Date.parse(retry) - Date.now()) / 1000
+          : 60;
+    const retryAfter = Number.isFinite(seconds)
+      ? Math.max(1, Math.min(300, Math.ceil(seconds)))
+      : 60;
+    await pauseAniList(retryAfter);
+    throw new AniListRateLimitError(retryAfter);
+  }
   const body: GraphQLResponse<T> = await response.json();
 
   if (!response.ok || body.errors || !body.data) {
@@ -86,6 +124,12 @@ async function query<T>(
     throw new Error(`AniList API returned ${response.status}: ${messages}`);
   }
 
+  if (cacheKey) {
+    if (publicCache.size >= MAX_CACHE_ENTRIES) {
+      publicCache.delete(publicCache.keys().next().value!);
+    }
+    publicCache.set(cacheKey, { data: body.data, expiresAt: Date.now() + 30_000 });
+  }
   return body.data;
 }
 
@@ -253,12 +297,14 @@ export async function saveEntry(
   token: string,
   mediaId: number,
   changes: { progress?: number; score?: number }
-): Promise<{ progress: number; score: number }> {
+): Promise<{ progress: number; score: number; status: string }> {
   if (!token) throw new AniListTokenError('An access token is required to update a list');
 
-  const data = await query<{ SaveMediaListEntry: { progress: number; score: number } }>(
+  const data = await query<{
+    SaveMediaListEntry: { progress: number; score: number; status: string };
+  }>(
     `mutation ($mediaId: Int, $progress: Int, $score: Float) {
-      SaveMediaListEntry(mediaId: $mediaId, progress: $progress, score: $score) { progress score }
+      SaveMediaListEntry(mediaId: $mediaId, progress: $progress, score: $score) { progress score status }
     }`,
     // Left out of the JSON when undefined, so AniList keeps the current value
     { mediaId, progress: changes.progress, score: changes.score },

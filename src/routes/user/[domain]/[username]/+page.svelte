@@ -23,12 +23,17 @@
   import YousoroCelebration from '#lib/components/YousoroCelebration.svelte';
   import { flippedCard } from '#lib/flipped-card.svelte.js';
   import { hiddenSectionsCookie, toggleHidden } from '#lib/hidden-sections.js';
+  import { recordSavedEntry } from '#lib/list-data.js';
   import { nextAiringReloadDelay, planReload, reloadsOnReturn } from '#lib/live-updates.js';
   import type { Anime } from '#lib/types/anime.js';
   import type { AnimePageData } from '#lib/types/api.js';
   import { countColumns, getVisibleRange, type VisibleRange } from '#lib/virtual-grid.js';
 
   let { data }: { data: AnimePageData } = $props();
+
+  function confirmSaved(saved: Anime, status: string) {
+    data = recordSavedEntry(data, saved, status);
+  }
 
   const sortedList = $derived(sortWatchingList(data.watchingList));
 
@@ -393,6 +398,7 @@
           downloadVersion={data.preferences.downloadVersion}
           scoreFormat={data.scoreFormat}
           position={range.start + i}
+          onConfirmed={confirmSaved}
           onSaved={followCard}
           highlighted={highlightId === anime.id}
         />
