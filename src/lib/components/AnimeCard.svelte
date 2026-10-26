@@ -85,9 +85,14 @@
    */
   let legacyTurn = $state(false);
   onMount(() => (legacyTurn = !('registerProperty' in CSS)));
-  // A card that leaves the page, as when it scrolls out of a long list, no longer counts as the one
-  // turned over, or the page would wait forever for it to be turned back before reloading
+  /*
+   * A card that leaves the page, as when it scrolls out of a long list, no longer counts as the one
+   * turned over, or the page would wait forever for it to be turned back before reloading. Work it
+   * still had going, like a drag settling, stops there and can't claim that again
+   */
+  let destroyed = false;
   onDestroy(() => {
+    destroyed = true;
     if (flippedCard.id === uid) flippedCard.id = null;
   });
 
@@ -302,6 +307,7 @@
 
   // Makes this the one card showing its back, or gives that up
   function claimBack(showBack: boolean) {
+    if (destroyed) return;
     if (showBack) flippedCard.id = uid;
     else if (flippedCard.id === uid) flippedCard.id = null;
   }
@@ -560,8 +566,8 @@
     if (thisDrag !== dragCount) return;
     setDragTurn(settled * 180);
     await new Promise((resolve) => setTimeout(resolve, duration));
-    // Caught again while settling: the new drag takes it from here
-    if (thisDrag !== dragCount) return;
+    // Caught again while settling, the new drag takes it from here; gone, there's nothing to land
+    if (thisDrag !== dragCount || destroyed) return;
 
     // The drag may end a full turn away from the side's own angle
     await swapTurn(async () => {
