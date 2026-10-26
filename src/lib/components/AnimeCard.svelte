@@ -201,6 +201,7 @@
       errorMessage = null;
     }
     await tick();
+    if (showBack && backFace) backFace.scrollTop = 0;
     if (!moveFocus) return;
     // Without scrolling: the card is already where the user is looking, even if partly off screen
     const options = { preventScroll: true };
@@ -423,7 +424,7 @@
           </a>
         </p>
 
-        <!-- When a small card runs short of room, only the details scroll; the actions stay put -->
+        <!-- Details retain their height; short cards scroll the whole back to keep fields reachable. -->
         <div class="facts-area">
           <dl class="facts">
             <dt>Watched</dt>
@@ -486,8 +487,8 @@
         </div>
 
         <!--
-          Pinned to the bottom, so the buttons and errors line up across cards too. Only there when
-          it holds something, as clicks on it don't turn the card
+          At the bottom when there is room, otherwise after the details in the same scroll area.
+          Only there when it holds something, as clicks on it don't turn the card
         -->
         {#if canEdit || nextToWatch || (errorMessage && flipped)}
           <div class="back-actions">
@@ -557,7 +558,7 @@
     width: var(--card-width, 300px);
     max-width: 100%;
     /* Gives the flip its depth */
-    perspective: 1200px;
+    perspective: 1400px;
     /* Clicking turns the card over, so a quick double click shouldn't select its text */
     user-select: none;
   }
@@ -572,51 +573,77 @@
     position: relative;
     height: 100%;
     transform-style: preserve-3d;
-    transition: transform 0.6s cubic-bezier(0.2, 0.7, 0.2, 1);
+    transition: transform 760ms cubic-bezier(0.22, 0.8, 0.24, 1.06);
   }
 
   .flipped .flipper {
     transform: rotateY(180deg);
   }
 
-  /*
-   * As a hint that the card turns over, hovering its front starts to turn it and lets it settle
-   * back, as a light gleam sweeps across. The turn uses `rotate`, separate from the flip's
-   * `transform`, so a click mid-hint still flips the card smoothly. It ends flat, so the text ends
-   * sharp. The back doesn't move on hover, so its fields stay still while being used
-   */
-  .card-slot:hover .anime-card:not(.flipped) .flipper {
-    animation: peek 0.6s ease-in-out;
-  }
-
-  @keyframes peek {
-    45% {
-      rotate: y -12deg;
-    }
+  .front {
+    overflow: hidden;
   }
 
   .front::after {
     content: '';
     position: absolute;
-    inset: 0;
+    inset: -20%;
     border-radius: inherit;
     background: linear-gradient(
-        105deg,
-        transparent 35%,
-        rgb(255 255 255 / 0.45) 50%,
-        transparent 65%
-      )
-      100% 0 / 250% 100% no-repeat;
+      110deg,
+      transparent 30%,
+      rgb(255 255 255 / 0.38) 48%,
+      transparent 66%
+    );
+    transform: translateX(-100%);
     pointer-events: none;
   }
 
-  .card-slot:hover .front::after {
-    animation: gleam-sweep 0.7s ease-out;
+  @keyframes detail-reveal {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 
-  @keyframes gleam-sweep {
+  @keyframes detail-fade {
+    from {
+      opacity: 0;
+    }
     to {
-      background-position: 0 0;
+      opacity: 1;
+    }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .flipped .back-title {
+      animation: detail-reveal 300ms ease-out 220ms both;
+    }
+    .flipped .facts {
+      animation: detail-fade 340ms ease-out 280ms both;
+    }
+    .flipped .back-actions {
+      animation: detail-fade 340ms ease-out 340ms both;
+    }
+  }
+
+  @media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+    .card-slot:hover {
+      z-index: 2;
+    }
+    /* Start the same turn a click completes, while keeping the card's layout anchored. */
+    .card-slot:hover .anime-card:not(.flipped) .flipper {
+      transform: rotateY(18deg);
+    }
+    .front::after {
+      transition: transform 850ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    .card-slot:hover .anime-card:not(.flipped) .front::after {
+      transform: translateX(100%);
     }
   }
 
@@ -630,13 +657,9 @@
     background: var(--surface);
     color: var(--color-base-content);
     backface-visibility: hidden;
-    transition: box-shadow 0.2s ease-out;
+    transition: box-shadow 420ms cubic-bezier(0.22, 1, 0.36, 1);
   }
 
-  /*
-   * Sea glow: on hover, or when a keyboard user is on the card, a sky-blue glow rings it, the cover
-   * brightens and a wave rolls along its bottom edge. Nothing moves or scales, so it stays sharp
-   */
   /* After a save moves the card, a sky-blue ring that fades out, so the eye finds it again */
   .highlight .face {
     animation: found 2s ease-out;
@@ -655,7 +678,8 @@
   .card-slot:has(:focus-visible) .face {
     box-shadow:
       0 0 0 2px var(--you-blue),
-      0 10px 28px -6px rgb(73 185 249 / 0.55);
+      0 22px 38px -16px rgb(15 48 79 / 0.45),
+      0 8px 24px -10px rgb(73 185 249 / 0.4);
   }
 
   /* A fixed layout from the top: title, details, then any error at the bottom */
@@ -667,7 +691,12 @@
     --back-padding-y: 16px;
     --back-padding-x: 14px;
     padding: var(--back-padding-y) var(--back-padding-x);
+    overflow-x: hidden;
     overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--text-accent) 45%, transparent) transparent;
+    scrollbar-gutter: stable;
+    overscroll-behavior: contain;
     text-align: center;
     transform: rotateY(180deg);
     /* The details adapt to the card's own width, which the page grid sets */
@@ -713,12 +742,9 @@
     /* The details keep together at the top, whatever room is left below them */
     align-items: flex-start;
     justify-content: center;
-    flex: 1 1 auto;
+    flex: none;
     min-width: 0;
-    min-height: 0;
-    overflow-x: hidden;
-    overflow-y: auto;
-    /* Room for the fields' focus rings, which the scrolling would otherwise clip */
+    /* Room for the fields' focus rings. */
     padding: 3px;
   }
 
@@ -1055,35 +1081,6 @@
     }
   }
 
-  @media (prefers-reduced-motion: reduce) {
-    .card-badge {
-      animation: none;
-    }
-
-    .behind-badge.new-episode::after,
-    .splash::after {
-      display: none;
-    }
-
-    .count.ticked {
-      animation: none;
-    }
-
-    /* Without motion, the glow and the wave appear at once, the wave stays still and the card never turns */
-    .face,
-    img,
-    .wave {
-      transition: none;
-    }
-
-    .card-slot:hover .wave,
-    .card-slot:has(:focus-visible) .wave,
-    .card-slot:hover .flipper,
-    .card-slot:hover .front::after {
-      animation: none;
-    }
-  }
-
   /* Every cover gets the same 3:4 frame, cropped to fit, whatever the image's own proportions */
   .cover-frame {
     position: relative;
@@ -1098,7 +1095,7 @@
     width: 100%;
     aspect-ratio: 3 / 4;
     object-fit: cover;
-    transition: filter 0.25s ease-out;
+    transition: filter 300ms ease-out;
   }
 
   .card-slot:hover img,
@@ -1157,5 +1154,31 @@
     font-size: 0.95rem;
     font-weight: 800;
     translate: -50% -50%;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .card-badge {
+      animation: none;
+    }
+
+    .behind-badge.new-episode::after,
+    .splash::after {
+      display: none;
+    }
+
+    .count.ticked {
+      animation: none;
+    }
+
+    /* Without motion, the glow and the wave appear at once, the wave stays still and the card never turns */
+    .face,
+    img,
+    .wave {
+      transition: none;
+    }
+
+    .card-slot:hover .wave,
+    .card-slot:has(:focus-visible) .wave {
+      animation: none;
+    }
   }
 </style>
