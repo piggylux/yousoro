@@ -239,7 +239,8 @@
   let lastFrameTime = 0;
 
   function stepTilt(time: number) {
-    if (pointerAt && cardElement) {
+    // Turning, the card lies flat whatever the mouse does, so there's nothing to measure
+    if (pointerAt && cardElement && !turning) {
       const rect = cardElement.getBoundingClientRect();
       const clamp = (value: number) => Math.min(0.5, Math.max(-0.5, value));
       tiltTarget.x = clamp((pointerAt.x - rect.left) / rect.width - 0.5);
@@ -252,12 +253,15 @@
       // The card lies flat while it turns, then tilts toward the mouse again
       const target = turning ? 0 : tiltTarget[key];
       tilt[key] += (target - tilt[key]) * ease;
-      if (Math.abs(target - tilt[key]) > 0.001) moving = true;
+      // Close enough to be invisible ends the easing, and the work each frame with it
+      if (Math.abs(target - tilt[key]) > 0.005) moving = true;
       else tilt[key] = target;
     }
     cardElement?.style.setProperty('--pointer-x', String(tilt.x));
     cardElement?.style.setProperty('--pointer-y', String(tilt.y));
     cardElement?.style.setProperty('--lift', String(tilt.lift));
+    // The gloss layers only exist while the card is tilted, so idle cards don't keep them
+    cardElement?.toggleAttribute('data-lit', tilt.lift !== 0 || tilt.x !== 0 || tilt.y !== 0);
     tiltFrame = moving ? requestAnimationFrame(stepTilt) : 0;
   }
 
@@ -268,10 +272,11 @@
     tiltFrame = requestAnimationFrame(stepTilt);
   }
 
-  // Eases the tilt out when the card starts turning, and back in once it's done
+  // Eases the tilt out when the card starts turning, and back in once it's done; a card that
+  // isn't tilted and has no mouse over it has nothing to ease
   $effect(() => {
     void turning;
-    aimTilt(tiltTarget);
+    if (pointerAt || tilt.lift !== 0 || tilt.x !== 0 || tilt.y !== 0) aimTilt(tiltTarget);
   });
 
   /*
@@ -290,9 +295,16 @@
   // Also runs on the server, where no frame is ever requested
   onDestroy(() => {
     if (tiltFrame) cancelAnimationFrame(tiltFrame);
+    clearTimeout(motionTimer);
   });
   let coverButton = $state<HTMLButtonElement>();
   let backFace = $state<HTMLElement>();
+
+  // Makes this the one card showing its back, or gives that up
+  function claimBack(showBack: boolean) {
+    if (showBack) flippedCard.id = uid;
+    else if (flippedCard.id === uid) flippedCard.id = null;
+  }
 
   /*
    * Focus follows the side that's showing, so keyboard users land on what they can see, except when
@@ -310,12 +322,17 @@
      * the card and shown its back, so neither animates again
      */
     const midTurn = performance.now() - turnStartedAt < TURN_MS;
+    // Clicked over from rest, the card turns sideways, whichever way it was last dragged
+    if (showBack && !flipped && !dragged && !midTurn) setTurnDirection(Math.PI / 2);
     turnStartedAt = dragged ? 0 : performance.now();
+    inMotion = true;
+    clearTimeout(motionTimer);
+    motionTimer = setTimeout(() => (inMotion = false), TURN_MS + 100);
     turnedBack = !dragged && !midTurn && flipped && !showBack;
     turnedByDrag = dragged;
     flipped = showBack;
-    if (showBack) flippedCard.id = uid;
-    else if (flippedCard.id === uid) flippedCard.id = null;
+    // A drag has already said which card shows its back, when it was let go
+    if (!dragged) claimBack(showBack);
     if (!showBack) {
       // Turning back over discards an unsaved edit and any error, so the next flip starts fresh
       revertDrafts();
@@ -331,8 +348,25 @@
   }
 
   /*
-   * Dragging the card sideways turns it with the pointer. Let go past halfway, or with a quick flick
-   * the same way, and it finishes turning over; otherwise it settles back. A mostly vertical drag is
+   * The way the card turns, as the direction of the drag that turns it, clockwise from up: 90
+   * degrees, the default, turns it sideways about its vertical axis, 180 tips it forward about its
+   * horizontal one, and anything in between turns it about the axis square to the drag. Both sides
+   * turn about the same axis, so the side at rest is always upright, and the axis can change between
+   * turns without anything moving
+   */
+  let turnDirection = Math.PI / 2;
+  function setTurnDirection(radians: number) {
+    turnDirection = radians;
+    cardElement?.style.setProperty('--turn-direction', `${radians}rad`);
+    cardElement?.style.setProperty('--turn-axis-x', String(Math.cos(radians)));
+    cardElement?.style.setProperty('--turn-axis-y', String(Math.sin(radians)));
+  }
+
+  /*
+   * Dragging the card turns it with the pointer, in whichever direction the drag sets off; from
+   * then on only how far the pointer goes along that line counts, so straying off it doesn't swing
+   * the card round. It keeps turning for as long as the drag goes on, and once let go spins on with
+   * whatever speed it had, then settles on a side. On a touch screen, a mostly vertical swipe is
    * left to scroll the page
    */
   type Drag = {
@@ -340,12 +374,15 @@
     startX: number;
     startY: number;
     width: number;
-    // How far the card has turned from its resting side, from -180 to 180 degrees
+    // Where the card was turned to, in degrees, when the drag caught it
+    baseTurn: number;
+    // The way the drag set off, as a unit vector on screen
+    directionX: number;
+    directionY: number;
+    // How far the card has turned from its resting side, in degrees, as many turns as dragged
     angle: number;
-    lastX: number;
-    lastTime: number;
-    // Degrees per millisecond, at the last move
-    velocity: number;
+    // The angle at each recent move, to tell how fast the card is turning
+    recent: { time: number; angle: number }[];
     active: boolean;
   };
   let drag: Drag | null = null;
@@ -353,26 +390,56 @@
   let dragging = $state(false);
   // Spinning back or dragged; either side tilts toward the mouse only when at rest
   const turning = $derived(turnedBack || dragging);
+  /*
+   * Showing its back, or in any turn: the only times the card needs drawing in 3D, with its back
+   * and the layers that turn with it. At rest on its front it's drawn flat
+   */
+  let inMotion = $state(false);
+  let motionTimer: ReturnType<typeof setTimeout> | undefined;
   let settling = $state(false);
-  // A turn asked for while the card was dragged, such as another card being turned over
+  const inThreeD = $derived(flipped || inMotion || turnedBack || dragging || settling);
+  // A turn asked for while the card was dragged or spinning on, by Esc or a save
   let pendingFlip: { showBack: boolean; moveFocus: boolean } | null = null;
   // A drag ends with a click, which must not turn the card again
   let suppressClick = false;
   let flipperElement = $state<HTMLElement>();
   const DRAG_START_PX = 8;
-  const FLICK_DEG_PER_MS = 0.4;
-  const FLICK_PAUSE_MS = 80;
-  // Matches the settling transition
-  const SETTLE_MS = 420;
+  // How far back the turning speed is measured, smoothing out uneven pointer moves
+  const SPEED_WINDOW_MS = 100;
+  /*
+   * Let go while turning, the card spins on and slows to a stop like a real card: it travels as
+   * far as it would in this long at the speed it was let go with
+   */
+  const MOMENTUM_MS = 300;
+  // The quickest and slowest a card takes to settle, however far its momentum carries it
+  const SETTLE_MIN_MS = 420;
+  const SETTLE_MAX_MS = 1600;
 
-  function setDragAngle(angle: number) {
-    cardElement?.style.setProperty('--drag-angle', `${(flipped ? 180 : 0) + angle}deg`);
+  // Each drag counts up, so a drag that catches the card while the last one settles takes over
+  let dragCount = 0;
+
+  /*
+   * A click turns the card over, but not while it's in the user's hand or still spinning from a
+   * drag: the click would be read against the side it had before, and turn it again once it lands
+   */
+  function flipByClick(showBack: boolean) {
+    if (!dragging && !settling) flip(showBack);
+  }
+
+  function setDragTurn(degrees: number) {
+    cardElement?.style.setProperty('--drag-angle', `${degrees}deg`);
+  }
+
+  // Where the card is turned to right now, mid-turn or not
+  function currentTurn() {
+    const resting = flipped ? 180 : 0;
+    if (!flipperElement || legacyTurn) return resting;
+    const turn = parseFloat(getComputedStyle(flipperElement).getPropertyValue('--card-turn'));
+    return Number.isFinite(turn) ? turn : resting;
   }
 
   function startDrag(event: PointerEvent) {
-    if (!event.isPrimary || event.button !== 0 || settling || !cardElement) return;
-    // A drag picks the card up at rest, not mid-turn
-    if (performance.now() - turnStartedAt < TURN_MS) return;
+    if (!event.isPrimary || event.button !== 0 || drag?.active || !cardElement) return;
     // The cover is a button, but every other control keeps its own pointer behavior
     const target = event.target as Element;
     if (
@@ -384,10 +451,11 @@
       startX: event.clientX,
       startY: event.clientY,
       width: cardElement.offsetWidth,
+      baseTurn: 0,
+      directionX: 1,
+      directionY: 0,
       angle: 0,
-      lastX: event.clientX,
-      lastTime: event.timeStamp,
-      velocity: 0,
+      recent: [],
       active: false,
     };
   }
@@ -395,46 +463,111 @@
   function moveDrag(event: PointerEvent) {
     if (!drag || event.pointerId !== drag.pointerId) return;
     const dx = event.clientX - drag.startX;
+    const dy = event.clientY - drag.startY;
     if (!drag.active) {
-      const dy = event.clientY - drag.startY;
       if (Math.abs(dx) < DRAG_START_PX && Math.abs(dy) < DRAG_START_PX) return;
-      if (Math.abs(dy) > Math.abs(dx)) {
+      if (event.pointerType === 'touch' && Math.abs(dy) > Math.abs(dx)) {
         drag = null;
         return;
       }
+      /*
+       * The drag catches the card wherever it is, even mid-turn or still settling from the last
+       * drag. At rest, it turns the way the drag sets off; mid-turn, it keeps turning about the
+       * same axis, which can't change without the card jumping
+       */
+      const turn = currentTurn();
+      const atRest = Math.abs(turn - Math.round(turn / 180) * 180) < 1;
+      if (atRest) {
+        const distance = Math.hypot(dx, dy);
+        drag.directionX = dx / distance;
+        drag.directionY = dy / distance;
+        setTurnDirection(Math.atan2(dx, -dy));
+      } else {
+        drag.directionX = Math.sin(turnDirection);
+        drag.directionY = -Math.cos(turnDirection);
+      }
+      drag.baseTurn = turn;
       drag.active = true;
+      dragCount++;
+      setDragTurn(turn);
       dragging = true;
+      settling = false;
+      turnedBack = false;
       flipperElement?.setPointerCapture(event.pointerId);
     }
-    const elapsed = event.timeStamp - drag.lastTime;
-    if (elapsed > 0) drag.velocity = (((event.clientX - drag.lastX) / drag.width) * 180) / elapsed;
-    drag.lastX = event.clientX;
-    drag.lastTime = event.timeStamp;
-    drag.angle = Math.max(-180, Math.min(180, (dx / drag.width) * 180));
-    setDragAngle(drag.angle);
+    // Each card's width of drag along the way it set off turns it over once more, for as long as
+    // the drag goes on; back past the start turns it the other way
+    const along = dx * drag.directionX + dy * drag.directionY;
+    const angle = (along / drag.width) * 180;
+    drag.recent.push({ time: event.timeStamp, angle });
+    while (drag.recent[0].time < event.timeStamp - SPEED_WINDOW_MS) drag.recent.shift();
+    drag.angle = angle;
+    setDragTurn(drag.baseTurn + angle);
   }
 
   async function endDrag(event: PointerEvent, { cancelled = false } = {}) {
     if (!drag || event.pointerId !== drag.pointerId) return;
-    const { angle, active, lastTime } = drag;
-    // A pause before letting go is no flick, however fast the drag was before it
-    const velocity = event.timeStamp - lastTime > FLICK_PAUSE_MS ? 0 : drag.velocity;
+    const { angle, active, baseTurn, recent } = drag;
+    // In degrees per millisecond over the last moves; a pause before letting go leaves none, as
+    // they've all aged out of the window
+    const fresh = recent.filter(({ time }) => time >= event.timeStamp - SPEED_WINDOW_MS);
+    const first = fresh[0];
+    const last = fresh.at(-1);
+    const velocity =
+      cancelled || !first || !last || last.time === first.time
+        ? 0
+        : (last.angle - first.angle) / (last.time - first.time);
     drag = null;
     if (!active) return;
     suppressClick = true;
     setTimeout(() => (suppressClick = false));
 
-    const flick = Math.abs(velocity) > FLICK_DEG_PER_MS && Math.sign(velocity) === Math.sign(angle);
-    const turnOver = !cancelled && (Math.abs(angle) > 90 || flick);
+    /*
+     * The card spins on as far as its momentum carries it and settles on the side nearest there;
+     * an odd number of half turns leaves the other side showing. It sets off at the speed it was
+     * let go with and slows to a stop, taking longer the further it has to go
+     */
+    const from = baseTurn + angle;
+    const settled = Math.round((from + velocity * MOMENTUM_MS) / 180);
+    const showBack = Math.abs(settled) % 2 === 1;
+    /*
+     * Letting go is what counts for which card shows its back, not where the card lands: a card
+     * turned over while this one was in hand gives way to it, and one turned over while this one
+     * spins on takes over from it
+     */
+    claimBack(showBack);
+    const distance = settled * 180 - from;
+    const duration = Math.min(
+      SETTLE_MAX_MS,
+      Math.max(SETTLE_MIN_MS, 300 + Math.abs(distance) * 1.5)
+    );
+    // The easing's opening slope, matching the release speed, capped short of overshooting
+    const slope =
+      distance !== 0 && Math.sign(velocity) === Math.sign(distance)
+        ? Math.min(4, (velocity * duration) / distance)
+        : 0;
+    cardElement?.style.setProperty('--settle-duration', `${duration}ms`);
+    cardElement?.style.setProperty(
+      '--settle-easing',
+      slope > 0.5
+        ? `cubic-bezier(0.25, ${0.25 * slope}, 0.3, 1)`
+        : 'cubic-bezier(0.22, 0.8, 0.24, 1.06)'
+    );
+    const thisDrag = dragCount;
     settling = true;
-    setDragAngle(turnOver ? Math.sign(angle) * 180 : 0);
-    await new Promise((resolve) => setTimeout(resolve, SETTLE_MS));
+    // The settling transition has to be in place before the card is sent on its way
+    await tick();
+    if (thisDrag !== dragCount) return;
+    setDragTurn(settled * 180);
+    await new Promise((resolve) => setTimeout(resolve, duration));
+    // Caught again while settling: the new drag takes it from here
+    if (thisDrag !== dragCount) return;
 
     // The drag may end a full turn away from the side's own angle
     await swapTurn(async () => {
       dragging = false;
       settling = false;
-      if (turnOver) await flip(!flipped, { dragged: true });
+      if (showBack !== flipped) await flip(showBack, { dragged: true });
     });
     const pending = pendingFlip;
     pendingFlip = null;
@@ -442,11 +575,14 @@
       await flip(pending.showBack, { moveFocus: pending.moveFocus });
   }
 
-  // Only one card shows its back at a time: this one turns back when another is turned over, a
-  // moment later, so the two turns follow each other rather than happen at once
+  /*
+   * Only one card shows its back at a time: this one turns back when another is turned over, a
+   * moment later, so the two turns follow each other rather than happen at once. While this card
+   * is dragged it's in the user's hand, so it waits until it lands, then checks again
+   */
   const TURN_BACK_DELAY_MS = 100;
   $effect(() => {
-    if (!flipped || flippedCard.id === uid) return;
+    if (!flipped || flippedCard.id === uid || dragging || settling) return;
     const timer = setTimeout(() => flip(false, { moveFocus: false }), TURN_BACK_DELAY_MS);
     return () => clearTimeout(timer);
   });
@@ -569,6 +705,7 @@
     class:dragging
     class:turned-by-drag={turnedByDrag}
     class:settling
+    class:in-3d={inThreeD}
     class:legacy-turn={legacyTurn}
     bind:this={cardElement}
   >
@@ -587,6 +724,7 @@
       onpointermove={moveDrag}
       onpointerup={(event) => endDrag(event)}
       onpointercancel={(event) => endDrag(event, { cancelled: true })}
+      onlostpointercapture={(event) => endDrag(event, { cancelled: true })}
       ondragstart={(event) => event.preventDefault()}
       onclickcapture={(event) => {
         if (!suppressClick) return;
@@ -600,7 +738,7 @@
             'a, button, input, select, textarea, label, form, .back-actions, .badge-side'
           )
         ) {
-          flip(!flipped);
+          flipByClick(!flipped);
         }
       }}
     >
@@ -609,7 +747,9 @@
         only for show, so screen readers hear it once
       -->
       <div class="badge-side front-side">{@render badge()}</div>
-      <div class="badge-side back-side" aria-hidden="true">{@render badge()}</div>
+      <div class="back-side" aria-hidden="true">
+        <div class="badge-side">{@render badge()}</div>
+      </div>
       <!--
         The light that glances off the back as it turns, over it rather than inside it, so it stays
         put when the back's details scroll. The back has no gloss under the mouse
@@ -622,7 +762,7 @@
         <button
           class="cover"
           bind:this={coverButton}
-          onclick={() => flip(true)}
+          onclick={() => flipByClick(true)}
           aria-label={`${anime.title}, show details`}
         >
           <!-- Clips the cover's hover zoom to its frame -->
@@ -870,7 +1010,7 @@
     height: 100%;
     transform-style: preserve-3d;
     -webkit-tap-highlight-color: transparent;
-    transform: rotateY(var(--card-turn));
+    transform: rotate3d(var(--turn-axis-x), var(--turn-axis-y), 0, var(--card-turn));
     transition: --card-turn 760ms cubic-bezier(0.22, 0.8, 0.24, 1.06);
   }
 
@@ -887,7 +1027,8 @@
       transition: none;
     }
     .legacy-turn.dragging.settling .flipper {
-      transition: transform 420ms cubic-bezier(0.22, 0.8, 0.24, 1.06);
+      transition: transform var(--settle-duration, 420ms)
+        var(--settle-easing, cubic-bezier(0.22, 0.8, 0.24, 1.06));
     }
   }
 
@@ -917,8 +1058,22 @@
     transform: translateZ(2px);
   }
 
+  /*
+   * The back's badge sits in a layer the size of the card, turned exactly as the back is, about the
+   * card's center. Turned about its own center instead, a turn on any axis but the vertical one
+   * would carry it away from the top of the back
+   */
   .back-side {
-    transform: rotateY(180deg) translateZ(2px);
+    position: absolute;
+    inset: 0;
+    backface-visibility: hidden;
+    transform: rotate3d(var(--turn-axis-x), var(--turn-axis-y), 0, 180deg) translateZ(2px);
+    pointer-events: none;
+  }
+
+  .back-side .badge-side {
+    transform: none;
+    pointer-events: auto;
   }
 
   /* The badge facing away doesn't pulse; it starts when its side comes round */
@@ -943,7 +1098,7 @@
     border-radius: inherit;
     background:
       linear-gradient(
-        100deg,
+        calc(var(--turn-direction) + 10deg),
         transparent calc(var(--turn-band) - 28%),
         rgb(255 255 255 / 0.55) var(--turn-band),
         transparent calc(var(--turn-band) + 28%)
@@ -964,7 +1119,7 @@
     overflow: hidden;
     border-radius: var(--radius-box);
     backface-visibility: hidden;
-    transform: rotateY(180deg) translateZ(1px);
+    transform: rotate3d(var(--turn-axis-x), var(--turn-axis-y), 0, 180deg) translateZ(1px);
     pointer-events: none;
   }
 
@@ -1020,6 +1175,10 @@
   }
 
   .anime-card {
+    /* Which way the card turns, set by dragging it; sideways unless dragged otherwise */
+    --turn-direction: 90deg;
+    --turn-axis-x: 0;
+    --turn-axis-y: 1;
     /* Set while the mouse moves over the card; at rest the card lies flat, with no gloss */
     --pointer-x: 0;
     --pointer-y: 0;
@@ -1094,6 +1253,30 @@
     opacity: 0;
   }
 
+  /*
+   * Most cards, most of the time, lie on their front with nothing moving. Those are drawn flat:
+   * their back, the layers that turn with it and the turn's reflection are left out, and nothing is
+   * lifted into 3D, so the page doesn't hold a stack of 3D layers for every card. A card only
+   * becomes 3D while it shows its back or turns, and only tilts while the mouse is over it
+   */
+  .anime-card:not(.in-3d) .flipper {
+    transform-style: flat;
+  }
+  .anime-card:not(.in-3d) :is(.back, .back-light, .back-side),
+  .anime-card:not(.in-3d) .front::before {
+    display: none;
+  }
+  .anime-card:not(.in-3d) .front-side {
+    transform: none;
+  }
+  .anime-card:not(.in-3d, [data-lit]) .flipper {
+    transform: none;
+    translate: none;
+  }
+  .anime-card:not([data-lit]) :is(.glare, .holo) {
+    display: none;
+  }
+
   @media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
     .card-slot:hover {
       z-index: 2;
@@ -1105,7 +1288,8 @@
      */
     .flipper {
       transform: translateZ(calc(var(--lift) * 36px)) rotateX(calc(var(--pointer-y) * -18deg))
-        rotateY(calc(var(--card-turn) + var(--pointer-x) * 24deg));
+        rotateY(calc(var(--pointer-x) * 24deg))
+        rotate3d(var(--turn-axis-x), var(--turn-axis-y), 0, var(--card-turn));
     }
     /* Its shadow falls away from the light and spreads as it rises, on either side */
     .card-slot:hover .face {
@@ -1121,7 +1305,7 @@
 
   /*
    * While dragged, the card turns with the pointer, ahead of any tilt or side; let go, it eases to
-   * where the drag ends. Horizontal drags are the card's, vertical ones still scroll the page
+   * where the drag ends. On a touch screen, a swipe that starts vertical still scrolls the page
    */
   .flipper {
     touch-action: pan-y;
@@ -1133,8 +1317,10 @@
     --card-turn: var(--drag-angle);
     transition: none;
   }
+  /* The duration and easing come from how fast and far the card was let go spinning */
   .anime-card.dragging.settling .flipper {
-    transition: --card-turn 420ms cubic-bezier(0.22, 0.8, 0.24, 1.06);
+    transition: --card-turn var(--settle-duration, 420ms)
+      var(--settle-easing, cubic-bezier(0.22, 0.8, 0.24, 1.06));
   }
 
   .face {
@@ -1192,7 +1378,7 @@
     scrollbar-gutter: stable;
     overscroll-behavior: contain;
     text-align: center;
-    transform: rotateY(180deg);
+    transform: rotate3d(var(--turn-axis-x), var(--turn-axis-y), 0, 180deg);
     /* The details adapt to the card's own width, which the page grid sets */
     container-type: inline-size;
   }
