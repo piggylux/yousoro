@@ -14,6 +14,7 @@
   let { user, preferences }: Props = $props();
 
   let settingsOpen = $state(false);
+  const logoutFormId = $props.id();
 
   // The gear opens the settings drawer, except on the settings page, which already shows them. A
   // click meant for a new tab still opens the page there
@@ -131,12 +132,12 @@
                 <a href={`/user/anilist/${encodeURIComponent(user.name)}/friends`}>My friends</a>
               </li>
               <li>
-                <form method="POST" action="/auth/logout">
-                  <input type="hidden" name="redirectTo" value={redirectTo} />
-                  <button class="tw:w-full tw:text-left">Sign out</button>
-                </form>
+                <button type="submit" form={logoutFormId}>Sign out</button>
               </li>
             </ul>
+            <form id={logoutFormId} method="POST" action="/auth/logout">
+              <input type="hidden" name="redirectTo" value={redirectTo} />
+            </form>
           </div>
         {:else if page.url.pathname !== '/home'}
           <!-- The home page has its own, larger sign-in button -->
