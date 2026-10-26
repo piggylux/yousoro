@@ -380,13 +380,13 @@
             </div>
           {/if}
           <span class="tw:text-sm tw:opacity-70">{progressLabel}</span>
-          {#if canEdit}
+          {#if canEdit && (watchState === 'to-watch' || watchState === 'next-episode-unscheduled')}
             <form method="POST" action="?/updateEntry" use:enhance={submitEntry}>
               <input type="hidden" name="mediaId" value={anime.id} />
               <input type="hidden" name="progress" value={anime.currentEpisode + 1} />
               <button
                 class="tw:btn tw:btn-primary tw:btn-xs"
-                disabled={saving || watchState === 'completed'}
+                disabled={saving}
                 aria-label={`Mark episode ${anime.currentEpisode + 1} of ${anime.title} as watched`}
               >
                 {#if saving}<span class="tw:loading tw:loading-spinner tw:loading-xs"
