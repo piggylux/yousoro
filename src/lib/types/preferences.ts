@@ -47,7 +47,7 @@ export type Preferences = {
 /** What a visitor gets before choosing anything: the safe choice for lists others may see */
 export const DEFAULT_PREFERENCES: Preferences = {
   theme: 'system',
-  showMature: true,
+  showMature: false,
   blurMature: true,
   cardSize: 'medium',
   downloadLanguage: 'any',

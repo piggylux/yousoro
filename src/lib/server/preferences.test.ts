@@ -21,10 +21,10 @@ function cookiesWith(value?: string) {
 const cookie = (data: object) => JSON.stringify({ v: 1, data });
 
 describe('getPreferences', () => {
-  it('shows mature anime blurred and searches every release by default', () => {
+  it('hides mature anime and searches every release by default', () => {
     expect(getPreferences(cookiesWith())).toEqual({
       theme: 'system',
-      showMature: true,
+      showMature: false,
       blurMature: true,
       cardSize: 'medium',
       downloadLanguage: 'any',
@@ -32,10 +32,10 @@ describe('getPreferences', () => {
     });
   });
 
-  it('reads saved choices', () => {
+  it.each([true, false])('preserves the saved show-mature choice %s', (showMature) => {
     const saved = {
       theme: 'dark',
-      showMature: false,
+      showMature,
       blurMature: false,
       cardSize: 'small',
       downloadLanguage: 'french',

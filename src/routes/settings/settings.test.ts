@@ -40,6 +40,7 @@ describe('saving settings in a native form submission', () => {
     } as RequestEvent<Record<string, never>, '/settings'>;
     const expected = {
       ...DEFAULT_PREFERENCES,
+      showMature: true,
       theme,
       cardSize: 'small',
       downloadLanguage: 'french',

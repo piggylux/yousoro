@@ -190,7 +190,10 @@ it('preserves confirmed progress when a save uses the final upstream slot', asyn
   recordSavedEntry(displayed, { ...displayed.watchingList[0], currentEpisode: 2, userScore: 8 });
   const unavailable = await page.load(event(true));
   expect(unavailable).toMatchObject({ unavailable: true });
-  const fallback = await client.load({ data: unavailable } as Parameters<typeof client.load>[0]);
+  const fallback = await client.load({
+    data: unavailable,
+    parent: async () => ({ preferences: DEFAULT_PREFERENCES, user: null }),
+  } as Parameters<typeof client.load>[0]);
   expect(fallback?.watchingList[0]).toMatchObject({ currentEpisode: 2, userScore: 8 });
   expect(fetch).toHaveBeenCalledTimes(3);
   expect(displayed.watchingList[0].currentEpisode).toBe(1);
@@ -209,6 +212,9 @@ it('preserves confirmed progress when a save uses the final upstream slot', asyn
     { ...fallback!.watchingList[0], currentEpisode: 12 },
     'COMPLETED'
   );
-  const completed = await client.load({ data: unavailable } as Parameters<typeof client.load>[0]);
+  const completed = await client.load({
+    data: unavailable,
+    parent: async () => ({ preferences: DEFAULT_PREFERENCES, user: null }),
+  } as Parameters<typeof client.load>[0]);
   expect(completed?.watchingList).toEqual([]);
 });
