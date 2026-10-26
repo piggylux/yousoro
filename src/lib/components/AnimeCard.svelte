@@ -431,6 +431,8 @@
   let suppressClick = false;
   let flipperElement = $state<HTMLElement>();
   const DRAG_START_PX = 8;
+  // A fingertip drifts further than a mouse while tapping, so a touch must go further to drag
+  const TOUCH_DRAG_START_PX = 14;
   // How far back the turning speed is measured, smoothing out uneven pointer moves
   const SPEED_WINDOW_MS = 100;
   /*
@@ -451,10 +453,20 @@
    * A click turns the card over, but not while it's in the user's hand or still spinning from a
    * drag: the click would be read against the side it had before, and turn it again once it lands
    */
+  // What last pressed the card: a mouse, a finger or a pen
+  let pressedWith = '';
+
   function flipByClick(showBack: boolean, event: MouseEvent) {
     if (dragging || settling) return;
-    // A click from the keyboard has no position, and turns the card the usual way
-    const clickedAt = event.detail > 0 ? { x: event.clientX, y: event.clientY } : null;
+    /*
+     * Only a mouse click turns the card toward where it clicked: the card leans under the mouse
+     * first, so the turn's direction is no surprise. A tap gives no such hint, and turning toward
+     * wherever a finger landed looks random, so taps, like clicks from the keyboard, which have no
+     * position, turn the card the usual way. What made the click is told by the press before it:
+     * not every browser says so on the click itself
+     */
+    const byMouse = event.detail > 0 && pressedWith === 'mouse';
+    const clickedAt = byMouse ? { x: event.clientX, y: event.clientY } : null;
     flip(showBack, { clickedAt });
   }
 
@@ -526,6 +538,7 @@
   }
 
   function startDrag(event: PointerEvent) {
+    pressedWith = event.pointerType;
     if (!event.isPrimary || event.button !== 0 || drag?.active || !cardElement) return;
     // The cover is a button, but every other control keeps its own pointer behavior
     const target = event.target as Element;
@@ -550,7 +563,8 @@
     if (!drag.active) {
       const dx = event.clientX - drag.startX;
       const dy = event.clientY - drag.startY;
-      if (Math.abs(dx) < DRAG_START_PX && Math.abs(dy) < DRAG_START_PX) return;
+      const dragStart = event.pointerType === 'touch' ? TOUCH_DRAG_START_PX : DRAG_START_PX;
+      if (Math.abs(dx) < dragStart && Math.abs(dy) < dragStart) return;
       if (event.pointerType === 'touch' && Math.abs(dy) > Math.abs(dx)) {
         drag = null;
         return;
@@ -568,6 +582,10 @@
         orientation = axisAngle(...restingAxis(), 0, turn);
         drawOrientation();
       }
+      // The turn starts here, not where the pointer went down, so the distance it took to count
+      // as a drag doesn't turn the card all at once
+      drag.lastX = event.clientX;
+      drag.lastY = event.clientY;
       drag.active = true;
       dragCount++;
       dragging = true;
