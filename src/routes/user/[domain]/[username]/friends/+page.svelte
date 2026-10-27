@@ -123,11 +123,6 @@
   onretry={() => refresh++}
 />
 
-<svelte:head>
-  <title>{data.user.name}'s friends - Yousoro</title>
-  <meta name="description" content={`The people ${data.user.name} follows on AniList`} />
-</svelte:head>
-
 <section class="friends-page">
   <header class="friends-header">
     <div class="heading-copy">

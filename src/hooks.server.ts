@@ -1,12 +1,14 @@
 import { building } from '$app/env';
 import type { Handle } from '@sveltejs/kit/hooks';
 
+import { getPageSeo } from '#lib/seo.js';
 import { getPreferences } from '#lib/server/preferences.js';
 import { getSession } from '#lib/server/session.js';
 import { DEFAULT_PREFERENCES } from '#lib/types/preferences.js';
 
 export const handle: Handle = async ({ event, resolve }) => {
-  const path = new URL(event.request.url).pathname;
+  const url = new URL(event.request.url);
+  const path = url.pathname;
   // Prerendered pages are shared, so they never see personal cookies.
   event.locals.session = building ? null : getSession(event.cookies);
   event.locals.preferences = building ? DEFAULT_PREFERENCES : getPreferences(event.cookies);
@@ -19,6 +21,9 @@ export const handle: Handle = async ({ event, resolve }) => {
 
   if (event.locals.retryAfter !== undefined) {
     response.headers.set('Retry-After', String(event.locals.retryAfter));
+  }
+  if (getPageSeo(url, response.status).noindex || event.locals.session) {
+    response.headers.set('X-Robots-Tag', 'noindex, follow');
   }
   return secureResponse(response, path);
 };

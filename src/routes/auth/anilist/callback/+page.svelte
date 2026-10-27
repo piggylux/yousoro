@@ -48,10 +48,6 @@
   });
 </script>
 
-<svelte:head>
-  <title>Signing in - Yousoro</title>
-</svelte:head>
-
 <section class="tw:flex tw:flex-col tw:items-center tw:gap-4">
   {#if errorMessage}
     <p class="tw:text-error" role="alert">{errorMessage}</p>

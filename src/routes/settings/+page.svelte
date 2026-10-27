@@ -6,10 +6,6 @@
   let { data }: PageProps = $props();
 </script>
 
-<svelte:head>
-  <title>Settings - Yousoro</title>
-</svelte:head>
-
 <!-- The gear in the header opens these settings in a drawer; this page is for browsers without
   JavaScript, and where the form saves to -->
 <section class="settings">

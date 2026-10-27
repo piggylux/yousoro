@@ -1,7 +1,11 @@
 {
-  "start_url": "app.html",
-  "name": "yousoro",
-  "short_name": "yousoro",
+  "id": "/",
+  "start_url": "/home",
+  "scope": "/",
+  "name": "Yousoro",
+  "short_name": "Yousoro",
+  "description": "Track your AniList watching list and plan your next anime episode.",
+  "lang": "en",
   "icons": [
     {
       "src": "/android-chrome-192x192.png",
@@ -14,7 +18,7 @@
       "type": "image/png"
     }
   ],
-  "theme_color": "#ffffff",
+  "theme_color": "#145f9c",
   "background_color": "#ffffff",
   "display": "standalone"
 }

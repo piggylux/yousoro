@@ -5,10 +5,6 @@
   import AutoReadRetry from '#lib/components/AutoReadRetry.svelte';
 </script>
 
-<svelte:head>
-  <title>{page.status} - Yousoro</title>
-</svelte:head>
-
 <h1>{page.status}: {page.error?.message}</h1>
 <AutoReadRetry
   retryKey={`page:${page.data.user?.id ?? 'public'}:${page.url.pathname}:${page.url.search}`}

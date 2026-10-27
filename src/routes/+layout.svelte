@@ -1,5 +1,6 @@
 <script lang="ts">
   import BackToTop from '#lib/components/BackToTop.svelte';
+  import Seo from '#lib/components/Seo.svelte';
   import { setFriendsViewer } from '#lib/friend-watching.js';
   import { setListContext } from '#lib/list-data.js';
 
@@ -22,10 +23,7 @@
   });
 </script>
 
-<!-- Default title, overridden by pages that set their own -->
-<svelte:head>
-  <title>Yousoro</title>
-</svelte:head>
+<Seo />
 
 <div class="app">
   <Header user={data.user} preferences={data.preferences} />

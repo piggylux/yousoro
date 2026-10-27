@@ -3,22 +3,14 @@
   import YouSvg from '#lib/images/minimalist_you.svg';
 </script>
 
-<svelte:head>
-  <title>Home - Yousoro</title>
-  <meta
-    name="description"
-    content="Keep your anime watching on course. See what's aired, catch up on your backlog, and update your AniList progress with Yousoro."
-  />
-</svelte:head>
-
 <div class="home">
   <section class="hero" aria-labelledby="welcome-title">
     <div class="intro">
       <p class="eyebrow"><span aria-hidden="true">⚓</span> Yousoro · ヨーソロー!</p>
       <h1 id="welcome-title">Your next episode.<br /><span>Full speed ahead.</span></h1>
       <p class="description">
-        Less time checking your list. More time watching what you love. Keep your anime on course
-        with a little help from You.
+        Track your AniList watching list, catch up on aired anime episodes, and plan your next watch
+        with an episode calendar. Keep your anime on course with a little help from You.
       </p>
       <div class="start">
         <SignInButton redirectTo="/home" />

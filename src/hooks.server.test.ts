@@ -1,6 +1,7 @@
 import { type RequestEvent } from '@sveltejs/kit';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { SITE_ORIGIN } from '#lib/seo.js';
 import { getSession } from '#lib/server/session.js';
 
 import { handle } from './hooks.server';
@@ -12,9 +13,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getSession).mockReturnValue(null);
 });
-function event(path: string) {
+function event(path: string, origin = SITE_ORIGIN) {
   return {
-    request: new Request(`https://yousoro.example${path}`),
+    request: new Request(`${origin}${path}`),
     locals: {},
     getClientAddress: () => '192.0.2.1',
     cookies: { get: () => undefined },
@@ -26,6 +27,52 @@ function expectPrivate(response: Response) {
 }
 
 describe('request security', () => {
+  it.each(['/home', '/user/anilist/fixture', '/user/anilist/fixture?view=calendar'])(
+    'permits indexing successful public production pages: %s',
+    async (path) => {
+      const response = await handle({
+        event: event(path),
+        resolve: async () => new Response('fixture'),
+      });
+      expect(response.headers.get('X-Robots-Tag')).toBeNull();
+    }
+  );
+  it.each(['/settings', '/auth/anilist/callback', '/api/nyaa', '/user/anilist/fixture/friends'])(
+    'excludes utility pages from indexing: %s',
+    async (path) => {
+      const response = await handle({
+        event: event(path),
+        resolve: async () => new Response('fixture'),
+      });
+      expect(response.headers.get('X-Robots-Tag')).toBe('noindex, follow');
+    }
+  );
+  it('excludes preview hosts and errors even on public routes', async () => {
+    for (const request of [event('/home', 'https://preview.vercel.app'), event('/home')]) {
+      const response = await handle({
+        event: request,
+        resolve: async () => new Response('fixture', { status: 503 }),
+      });
+      expect(response.headers.get('X-Robots-Tag')).toBe('noindex, follow');
+    }
+    const response = await handle({
+      event: event('/home', 'https://preview.vercel.app'),
+      resolve: async () => new Response('fixture'),
+    });
+    expect(response.headers.get('X-Robots-Tag')).toBe('noindex, follow');
+  });
+  it('does not index responses rendered with an account session', async () => {
+    vi.mocked(getSession).mockReturnValue({
+      token: 'fixture',
+      user: { id: 1, name: 'fixture' },
+    } as NonNullable<ReturnType<typeof getSession>>);
+    const response = await handle({
+      event: event('/user/anilist/fixture'),
+      resolve: async () => new Response('fixture'),
+    });
+    expect(response.headers.get('X-Robots-Tag')).toBe('noindex, follow');
+    expectPrivate(response);
+  });
   it.each(['/settings', '/auth/logout', '/auth/anilist/callback?error=denied'])(
     'prevents caching responses from %s',
     async (path) => {

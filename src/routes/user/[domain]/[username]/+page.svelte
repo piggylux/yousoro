@@ -357,14 +357,6 @@
 <svelte:window onscroll={remeasure} onresize={remeasure} />
 <svelte:document onvisibilitychange={onVisibilityChange} />
 
-<svelte:head>
-  <title>{data.username}{calendarView ? ' · Calendar' : ''} - Yousoro</title>
-  <meta
-    name="description"
-    content={`${data.username}'s ${calendarView ? 'upcoming episode calendar' : 'watching list'}`}
-  />
-</svelte:head>
-
 <section>
   <AutoReadRetry
     retryKey={`page:${page.data.user?.id ?? 'public'}:${page.url.pathname}:${page.url.search}`}
@@ -378,8 +370,14 @@
       {#if data.avatarUrl}
         <img class="avatar-img" src={data.avatarUrl} alt={`${data.username}'s profile picture`} />
       {/if}
-      <span>
-        <span class="name">{data.username}</span>
+      <div>
+        {#if calendarView}
+          <span class="name">{data.username}</span>
+        {:else}
+          <h1 class="name">
+            {data.username}<span class="tw:sr-only">'s anime watching list</span>
+          </h1>
+        {/if}
         <span class="profile-links">
           <a href={`/user/anilist/${encodeURIComponent(data.username)}/friends`}>Friends</a>
           ·
@@ -388,7 +386,7 @@
           >
           · <a href={data.userProfileLink} target="_blank">AniList profile ↗</a>
         </span>
-      </span>
+      </div>
     </div>
 
     <!-- Updates with every progress change, since the list reloads after each one -->
