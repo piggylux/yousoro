@@ -309,7 +309,7 @@ export async function getUpcomingAirings(
         `query ($ids: [Int], $from: Int, $until: Int, $page: Int) {
           Page(page: $page, perPage: 50) {
             pageInfo { hasNextPage }
-            airingSchedules(mediaId_in: $ids, airingAt_greater: $from, airingAt_lesser: $until, notYetAired: true, sort: TIME) {
+            airingSchedules(mediaId_in: $ids, airingAt_greater: $from, airingAt_lesser: $until, sort: TIME) {
               mediaId episode airingAt
             }
           }

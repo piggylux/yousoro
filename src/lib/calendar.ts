@@ -25,7 +25,7 @@ export function calendarEpisodes(
   for (const schedule of schedules ?? []) {
     if (preferNext && episodes.has(`${schedule.mediaId}:${schedule.episode}`)) continue;
     const entry = byId.get(schedule.mediaId);
-    if (entry && schedule.airsAt > now)
+    if (entry)
       episodes.set(`${entry.id}:${schedule.episode}`, {
         anime: entry,
         episode: schedule.episode,
@@ -65,14 +65,13 @@ export function sameCalendarDay(a: Date, b: Date): boolean {
   );
 }
 
-export function calendarWeek(episodes: CalendarEpisode[], start: Date, now: number) {
-  const upcoming = episodes.filter((entry) => entry.airsAt > now);
+export function calendarWeek(episodes: CalendarEpisode[], start: Date) {
   return Array.from({ length: 7 }, (_, i) => {
     const date = addCalendarDays(start, i);
     const end = addCalendarDays(date, 1).getTime();
     return {
       date,
-      episodes: upcoming
+      episodes: episodes
         .filter((entry) => entry.airsAt >= date.getTime() && entry.airsAt < end)
         .sort((a, b) => a.airsAt - b.airsAt || a.anime.title.localeCompare(b.anime.title)),
     };

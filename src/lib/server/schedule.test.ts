@@ -28,6 +28,19 @@ beforeEach(async () => {
 });
 
 describe('four-week airing lookup', () => {
+  it('returns already-aired episodes alongside future episodes within the requested window', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue((from + 200) * 1000);
+    vi.mocked(fetch).mockResolvedValueOnce(page([row(1, 2, from), row(1, 3, from + 300)]));
+    const result = await client.getUpcomingAirings([1], from, until);
+    expect(result.episodes).toEqual([
+      { mediaId: 1, episode: 2, airsAt: from * 1000 },
+      { mediaId: 1, episode: 3, airsAt: (from + 300) * 1000 },
+    ]);
+    expect(result.partial).toBe(false);
+    expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string).query).not.toContain(
+      'notYetAired'
+    );
+  });
   it('batches deduplicated IDs, uses only public schedule fields, filters unrelated/out-of-window rows', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       page([row(), row(), row(2, 4), row(99), row(1, 1, from - 1), row(1, 9, until)])
@@ -43,7 +56,7 @@ describe('four-week airing lookup', () => {
     const init = vi.mocked(fetch).mock.calls[0][1]!;
     const body = JSON.parse(init.body as string);
     expect(body.variables).toEqual({ ids: [1, 2], from: from - 1, until, page: 1 });
-    expect(body.query).toContain('notYetAired: true');
+    expect(body.query).not.toContain('notYetAired');
     expect(body.query).toContain('perPage: 50');
     expect(body.query).not.toContain('MediaList');
     expect(init.headers).not.toHaveProperty('Authorization');

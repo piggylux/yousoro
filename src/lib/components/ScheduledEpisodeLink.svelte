@@ -1,6 +1,8 @@
 <script lang="ts">
   import type { CalendarEpisode } from '#lib/calendar.js';
+  import { clock } from '#lib/clock.js';
   let { entry, blurMature = true }: { entry: CalendarEpisode; blurMature?: boolean } = $props();
+  const aired = $derived(entry.airsAt <= clock.now);
   let failed = $state(false);
   $effect(() => {
     void entry.anime.thumbnailUrl;
@@ -9,6 +11,7 @@
 </script>
 
 <a
+  class:aired
   href={`https://anilist.co/anime/${entry.anime.id}`}
   target="_blank"
   rel="noopener noreferrer"
@@ -35,12 +38,13 @@
       >Episode {entry.episode}{entry.anime.rewatching ? ' · Rewatching' : ''}</span
     >
   </span>
-  <span class="tw:sr-only">Opens on AniList in a new tab</span>
+  <span class="tw:sr-only">{aired ? 'Already aired. ' : ''}Opens on AniList in a new tab</span>
 </a>
 
 <style>
   a {
     display: flex;
+    flex-shrink: 0;
     align-items: center;
     gap: 10px;
     padding: 8px;
@@ -56,6 +60,14 @@
   a:focus-visible {
     outline: 3px solid var(--you-blue);
     outline-offset: 2px;
+  }
+  .aired .poster {
+    filter: grayscale(1);
+    opacity: 0.65;
+  }
+  .aired .info,
+  .aired time {
+    color: color-mix(in srgb, var(--color-base-content) 65%, var(--surface));
   }
   .poster {
     position: relative;
@@ -104,6 +116,8 @@
     font-size: 0.8rem;
     font-weight: 750;
     line-height: 1.4;
+    /* Keep episode blocks aligned whether the title uses one line or two. */
+    min-height: 2lh;
     overflow-wrap: anywhere;
     display: -webkit-box;
     -webkit-line-clamp: 2;

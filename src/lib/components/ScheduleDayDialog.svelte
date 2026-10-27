@@ -15,6 +15,12 @@
   } = $props();
   const heading = $props.id();
   let dialog = $state<HTMLDialogElement>();
+  let episodeList = $state<HTMLUListElement>();
+  const selectedDay = $derived(selection?.date.getTime());
+  $effect(() => {
+    void selectedDay;
+    if (episodeList) episodeList.scrollTop = 0;
+  });
   $effect(() => {
     if (selection && dialog && !dialog.open) dialog.showModal();
     else if (!selection && dialog?.open) dialog.close();
@@ -34,19 +40,33 @@
           })}
         </h2>
         <p>
-          {selection.episodes.length} upcoming episodes · Local time{partial
+          {selection.episodes.length} scheduled episodes · Local time{partial
             ? ' · Incomplete schedule'
             : ''}
         </p>
       </div>
-      <button type="button" aria-label="Close day schedule" onclick={() => dialog?.close()}
-        >×</button
+      <button
+        class="close-button"
+        type="button"
+        aria-label="Close day schedule"
+        onclick={() => dialog?.close()}
       >
+        <svg
+          width="20"
+          height="20"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          aria-hidden="true"><path d="m6 6 12 12M6 18 18 6" /></svg
+        >
+      </button>
     </header>
-    <ul>
+    <ul bind:this={episodeList} aria-label="Scheduled episodes">
       {#each selection.episodes as entry (`${entry.anime.id}:${entry.episode}`)}<li>
           <ScheduledEpisodeLink {entry} {blurMature} />
-        </li>{/each}
+        </li>{:else}<li class="empty-results">No scheduled episodes for this day.</li>{/each}
     </ul>
   {/if}
 </dialog>
@@ -93,14 +113,21 @@
     color: var(--text-accent);
     font-size: 0.75rem;
   }
-  button {
+  .close-button {
+    display: grid;
+    place-items: center;
     width: 44px;
     height: 44px;
     flex: none;
-    border-radius: 50%;
-    background: var(--you-blue-pale);
+    padding: 0;
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    background: transparent;
+    color: var(--text-accent);
     cursor: pointer;
-    font-size: 1.5rem;
+  }
+  .close-button:hover {
+    background: var(--you-blue-pale);
   }
   button:focus-visible {
     outline: 3px solid var(--you-blue);
@@ -112,10 +139,27 @@
     overscroll-behavior: contain;
     list-style: none;
     padding: 4px;
+    scrollbar-gutter: stable;
+  }
+  .empty-results {
+    padding: 24px 8px;
+    text-align: center;
+    font-size: 0.85rem;
+    color: var(--text-accent);
   }
   li + li {
     border-top: 1px solid var(--border-subtle);
     padding-top: 5px;
     margin-top: 5px;
+  }
+  @media (max-height: 600px) {
+    dialog {
+      max-height: calc(100dvh - 24px);
+      overflow-y: auto;
+    }
+    ul {
+      flex: none;
+      max-height: 50dvh;
+    }
   }
 </style>

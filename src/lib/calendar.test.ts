@@ -60,7 +60,7 @@ describe('episode calendar', () => {
       entry(5, new Date(2026, 10, 2)),
       entry(6, new Date(2026, 9, 26, 12)),
     ];
-    const week = calendarWeek(calendarEpisodes(anime, null, now), start, now);
+    const week = calendarWeek(calendarEpisodes(anime, null, now), start);
     expect(week).toHaveLength(7);
     expect(week[1].episodes.map((a) => a.anime.id)).toEqual([2, 1]);
     expect(week.flatMap((day) => day.episodes)).toHaveLength(2);
@@ -75,15 +75,14 @@ describe('episode calendar', () => {
         null,
         start.getTime() - 1
       ),
-      start,
-      start.getTime() - 1
+      start
     );
     expect(week[0].episodes.map((a) => a.anime.id)).toEqual([1]);
     expect(week[6].episodes.map((a) => a.anime.id)).toEqual([2]);
     expect(week.flatMap((day) => day.episodes)).toHaveLength(2);
   });
 
-  it('includes multiple confirmed episodes per anime, and filters unknown/hidden anime and past airings', () => {
+  it('includes past and future confirmed episodes, and filters unknown/hidden anime', () => {
     const anime = [entry(1, new Date(2026, 9, 27))];
     const episodes = calendarEpisodes(
       anime,
@@ -97,9 +96,30 @@ describe('episode calendar', () => {
       50
     );
     expect(episodes.map((episode) => [episode.anime.id, episode.episode, episode.airsAt])).toEqual([
+      [1, 2, 10],
       [1, 3, 100],
       [1, 4, 210],
     ]);
+  });
+
+  it('keeps earlier days and already-aired episodes visible throughout the current week', () => {
+    const start = new Date(2026, 9, 26);
+    const now = new Date(2026, 9, 28, 12).getTime();
+    const anime = [entry(1, null)];
+    const schedules = [
+      { mediaId: 1, episode: 1, airsAt: new Date(2026, 9, 25, 23).getTime() },
+      { mediaId: 1, episode: 2, airsAt: start.getTime() },
+      { mediaId: 1, episode: 3, airsAt: now - 1000 },
+      { mediaId: 1, episode: 4, airsAt: now },
+      { mediaId: 1, episode: 5, airsAt: now + 1000 },
+      { mediaId: 1, episode: 6, airsAt: new Date(2026, 10, 2).getTime() },
+    ];
+    const episodes = calendarEpisodes(anime, schedules, now);
+    const week = calendarWeek(episodes, start);
+    expect(week[0].episodes.map((episode) => episode.episode)).toEqual([2]);
+    expect(week[2].episodes.map((episode) => episode.episode)).toEqual([3, 4, 5]);
+    expect(week.flatMap((day) => day.episodes)).toHaveLength(4);
+    expect(calendarWeek(calendarEpisodes(anime, schedules, now + 2000), start)).toEqual(week);
   });
 
   it('only falls back to next known episodes while the schedule is missing or partial', () => {

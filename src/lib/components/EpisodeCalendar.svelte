@@ -15,6 +15,8 @@
   import AutoReadRetry from '#lib/components/AutoReadRetry.svelte';
   import ScheduleDayDialog from '#lib/components/ScheduleDayDialog.svelte';
   import ScheduledEpisodeLink from '#lib/components/ScheduledEpisodeLink.svelte';
+  import UnscheduledAnimeLink from '#lib/components/UnscheduledAnimeLink.svelte';
+  import { trackDayScroll } from '#lib/day-scroll.js';
   import {
     getScheduleRetryAt,
     loadSchedule,
@@ -60,7 +62,7 @@
       currentResult?.stale
     )
   );
-  const days = $derived(week ? calendarWeek(episodes, week, clock.now) : []);
+  const days = $derived(week ? calendarWeek(episodes, week) : []);
   const total = $derived(days.reduce((count, day) => count + day.episodes.length, 0));
   const incomplete = $derived(!currentResult || currentResult.partial || currentResult.stale);
   const scheduledIds = $derived(
@@ -150,12 +152,21 @@
     direction = index > weekIndex ? 1 : -1;
     weekIndex = index;
   }
+
+  function scrollDay(event: MouseEvent) {
+    const day = (event.currentTarget as HTMLElement).closest<HTMLElement>('.day')!;
+    const list = day.querySelector<HTMLElement>('.day-episodes')!;
+    list.scrollTo({
+      top: day.hasAttribute('data-at-end') ? 0 : list.scrollTop + list.clientHeight * 0.8,
+      behavior: prefersReducedMotion.current ? 'instant' : 'smooth',
+    });
+  }
 </script>
 
-<section class="calendar" aria-label="Upcoming episodes">
+<section class="calendar" aria-label="Episode schedule">
   <div class="calendar-heading">
     <div>
-      <p class="eyebrow">Coming up</p>
+      <p class="eyebrow">This week and beyond</p>
       <h1>Episode calendar</h1>
       <p class="description">Airing times from AniList · {timezone || 'Your local time zone'}</p>
     </div>
@@ -225,15 +236,7 @@
           aria-label={`Show ${choice.label.toLowerCase()}, ${choice.range}`}
           onclick={() => changeWeek(choice.index)}
         >
-          <span class="week-choice-label"
-            >{choice.label}<svg
-              viewBox="0 0 16 16"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              aria-hidden="true"><path d="m3 8 3 3 7-7" /></svg
-            ></span
-          >
+          <span class="week-choice-label">{choice.label}</span>
           <span class="week-choice-dates">{choice.range}</span>
         </button>
       {/each}
@@ -244,7 +247,7 @@
     <div class="week-summary" aria-live="polite" aria-atomic="true">
       <h2>{dateLabel(week)} – {dateLabel(addCalendarDays(week, 6))}</h2>
       <span
-        >Week {weekIndex + 1} of 4 · {total}{incomplete ? '+' : ''} upcoming {total === 1
+        >Week {weekIndex + 1} of 4 · {total}{incomplete ? '+' : ''} scheduled {total === 1
           ? 'episode'
           : 'episodes'}</span
       >
@@ -263,31 +266,65 @@
             {@const today = sameCalendarDay(day.date, new Date(clock.now))}
             <section
               class="day"
+              use:trackDayScroll={day.episodes.length}
               class:today
               aria-label={day.date.toLocaleDateString(undefined, { dateStyle: 'full' })}
             >
               <div class="day-heading">
-                <span>{day.date.toLocaleDateString(undefined, { weekday: 'short' })}</span><span
-                  class="day-number"
-                  aria-current={today ? 'date' : undefined}>{day.date.getDate()}</span
-                >{#if today}<span class="today-label">Today</span>{/if}
+                <div class="day-heading-copy">
+                  <div class="day-name">
+                    {day.date.toLocaleDateString(undefined, { weekday: 'short' })}{#if today}<span
+                        class="today-label">Today</span
+                      >{/if}
+                  </div>
+                  <p class="day-summary">
+                    {day.episodes.length}{incomplete ? '+' : ''}
+                    {day.episodes.length === 1 ? 'episode' : 'episodes'}
+                  </p>
+                </div>
+                <span class="day-number" aria-current={today ? 'date' : undefined}
+                  >{day.date.getDate()}</span
+                >
               </div>
-              <div class="day-episodes">
-                {#each day.episodes.slice(0, 3) as entry (`${entry.anime.id}:${entry.episode}`)}<ScheduledEpisodeLink
-                    {entry}
-                    {blurMature}
-                  />{:else}<p class="empty-day">
+              <div
+                class="day-episodes"
+                role="region"
+                aria-label={`Episodes for ${day.date.toLocaleDateString(undefined, { dateStyle: 'full' })}`}
+              >
+                {#each day.episodes as entry, index (`${entry.anime.id}:${entry.episode}`)}<div
+                    class="day-entry"
+                    class:preview-hidden={index >= 3}
+                  >
+                    <ScheduledEpisodeLink {entry} {blurMature} />
+                  </div>{:else}<p class="empty-day">
                     {incomplete ? 'No known episodes' : 'No confirmed episodes'}
                   </p>{/each}
-                {#if day.episodes.length > 3}<button
-                    class="view-all"
-                    type="button"
-                    aria-haspopup="dialog"
-                    aria-label={`View all ${day.episodes.length} episodes for ${day.date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}`}
-                    onclick={() => (selectedDate = day.date)}
-                    >View all · {day.episodes.length}</button
-                  >{/if}
               </div>
+              <button class="scroll-day" type="button" onclick={scrollDay}>
+                <span class="scroll-more">More episodes ↓</span>
+                <span class="scroll-top">Back to top ↑</span>
+              </button>
+              {#if day.episodes.length > 3}<button
+                  class="view-all"
+                  type="button"
+                  aria-haspopup="dialog"
+                  aria-label={`View all ${day.episodes.length} episodes for ${day.date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}`}
+                  onclick={() => (selectedDate = day.date)}
+                  ><span class="view-all-copy"
+                    ><span>View all episodes</span><small>+{day.episodes.length - 3} more</small
+                    ></span
+                  ><svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"><path d="m9 5 7 7-7 7" /></svg
+                  ></button
+                >{/if}
             </section>
           {/each}
         </div>
@@ -304,16 +341,47 @@
     </p>
     {#if !incomplete && unscheduled.length}
       <details class="unscheduled">
-        <summary>No confirmed air date in these four weeks · {unscheduled.length} anime</summary>
-        <p>These anime may be finished, on break, or awaiting an announced air date.</p>
+        <summary>
+          <span class="unscheduled-icon" aria-hidden="true"
+            ><svg
+              width="22"
+              height="22"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              ><rect x="3" y="5" width="18" height="16" rx="3" /><path
+                d="M7 3v4m10-4v4M3 11h18m-13 5h8"
+              /></svg
+            ></span
+          >
+          <span class="unscheduled-heading"
+            ><strong
+              >More from your list <span class="unscheduled-count">{unscheduled.length}</span
+              ></strong
+            ><span>No confirmed air dates in this four-week window</span></span
+          >
+          <svg
+            class="unscheduled-chevron"
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg
+          >
+        </summary>
+        <p>
+          Still on your list, just outside the schedule. Check each anime’s airing status below.
+        </p>
         <ul>
           {#each unscheduled as entry (entry.id)}<li>
-              <a
-                href={`https://anilist.co/anime/${entry.id}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                >{entry.title}<span class="tw:sr-only">, opens in a new tab</span></a
-              >
+              <UnscheduledAnimeLink anime={entry} {blurMature} />
             </li>{/each}
         </ul>
       </details>
@@ -425,23 +493,8 @@
     color: #ffffff;
   }
   .week-choice-label {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 6px;
     font-size: 0.7rem;
     font-weight: 600;
-  }
-  .week-choice-label svg {
-    width: 15px;
-    height: 15px;
-    flex: none;
-    opacity: 0;
-    color: var(--text-accent);
-  }
-  .week-choice[aria-pressed='true'] svg {
-    opacity: 1;
-    color: #bfeaff;
   }
   .week-choice-dates {
     font-size: 0.85rem;
@@ -473,7 +526,6 @@
     cursor: default;
   }
   button:focus-visible,
-  a:focus-visible,
   summary:focus-visible {
     outline: 3px solid var(--you-blue);
     outline-offset: 3px;
@@ -542,6 +594,8 @@
     gap: 10px;
   }
   .day {
+    display: flex;
+    flex-direction: column;
     border: 1px solid var(--border-subtle);
     background: var(--surface);
     border-radius: 18px;
@@ -556,19 +610,32 @@
   .day-heading {
     display: flex;
     align-items: center;
-    flex-wrap: wrap;
-    gap: 6px;
+    gap: 10px;
+    min-height: 76px;
+    flex: none;
     padding: 12px;
     border-bottom: 1px solid var(--border-subtle);
     font-size: 0.75rem;
     color: var(--text-accent);
   }
+  .day-heading-copy {
+    min-width: 0;
+  }
+  .day-name {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 6px;
+    font-weight: 800;
+    color: var(--text-heading);
+  }
   .day-number {
     display: grid;
     place-items: center;
-    width: 30px;
-    height: 30px;
-    font-size: 1rem;
+    width: 36px;
+    height: 36px;
+    flex: none;
+    font-size: 1.15rem;
     font-weight: 800;
     color: var(--text-heading);
     margin-left: auto;
@@ -579,25 +646,89 @@
     color: #0f304f;
   }
   .today-label {
-    font-size: 0.65rem;
+    padding: 2px 5px;
+    border-radius: 5px;
+    background: var(--you-blue-pale);
+    color: var(--text-accent);
+    font-size: 0.6rem;
     font-weight: 700;
   }
   .day-episodes {
-    padding: 8px;
+    padding: 6px;
     display: flex;
     flex-direction: column;
-    gap: 5px;
+    flex: 1;
+    gap: 0;
+  }
+  .day-entry + .day-entry {
+    border-top: 1px solid var(--border-subtle);
+    margin-top: 4px;
+    padding-top: 4px;
+  }
+  .day-entry {
+    flex: none;
+  }
+  .day-entry.preview-hidden {
+    display: none;
+  }
+  .day-summary {
+    margin-top: 4px;
+    font-size: 0.65rem;
+    color: var(--text-accent);
   }
   .empty-day {
     font-size: 0.75rem;
     opacity: 0.6;
-    padding: 10px 4px;
+    padding: 24px 8px;
+    text-align: center;
+    margin: auto 0;
   }
   .view-all {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 10px 12px;
     color: var(--text-accent);
     font-size: 0.75rem;
     background: var(--you-blue-pale);
-    margin-top: 4px;
+    margin: 0 8px 8px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    flex-shrink: 0;
+  }
+  .view-all-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    text-align: left;
+  }
+  .view-all-copy small {
+    font-size: 0.65rem;
+    font-weight: 500;
+  }
+  .view-all svg {
+    flex: none;
+  }
+  .scroll-day {
+    display: none;
+    flex: none;
+    width: 100%;
+    border-top: 1px solid var(--border-subtle);
+    border-radius: 0;
+    background: var(--you-blue-pale);
+    color: var(--text-accent);
+    font-size: 0.7rem;
+    padding: 8px;
+  }
+  .scroll-top {
+    display: none;
+  }
+  .day:global([data-at-end]) .scroll-more {
+    display: none;
+  }
+  .day:global([data-at-end]) .scroll-top {
+    display: inline;
   }
   .empty-week {
     padding: 20px;
@@ -605,30 +736,106 @@
     color: var(--text-accent);
   }
   .unscheduled {
-    border-top: 1px solid var(--border-subtle);
-    padding: 16px 0;
+    border: 1px solid var(--border-subtle);
+    border-radius: 18px;
+    padding: 16px;
     margin-top: 20px;
+    background: light-dark(rgb(73 185 249 / 0.04), rgb(73 185 249 / 0.06));
   }
   summary {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    list-style: none;
     cursor: pointer;
     font-weight: 700;
     font-size: 0.85rem;
     padding: 8px 0;
   }
-  .unscheduled ul {
+  summary::-webkit-details-marker {
+    display: none;
+  }
+  .unscheduled-icon {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    flex: none;
+    border-radius: 12px;
+    background: var(--you-blue-pale);
+    color: var(--text-accent);
+  }
+  .unscheduled-heading {
+    flex: 1;
+    min-width: 0;
     display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .unscheduled-heading strong {
+    color: var(--text-heading);
+  }
+  .unscheduled-heading > span {
+    font-size: 0.75rem;
+    font-weight: 400;
+    color: var(--text-accent);
+  }
+  .unscheduled-count {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 2px 7px;
+    border-radius: 6px;
+    background: var(--you-blue-pale);
+    color: var(--text-accent);
+    font-size: 0.7rem;
+  }
+  .unscheduled-chevron {
+    flex: none;
+    color: var(--text-accent);
+  }
+  .unscheduled[open] .unscheduled-chevron {
+    transform: rotate(180deg);
+  }
+  .unscheduled > p {
+    margin: 10px 0 16px;
+    line-height: 1.6;
+  }
+  .unscheduled ul {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+    gap: 10px;
     margin-top: 12px;
     list-style: none;
   }
-  .unscheduled a {
-    display: block;
-    padding: 10px 14px;
-    border-radius: 999px;
-    background: var(--surface);
-    color: var(--text-accent);
-    font-size: 0.8rem;
+  .unscheduled li {
+    min-width: 0;
+  }
+  /* Keep touch layouts free of nested scrolling; desktop columns show the full day. */
+  @media (hover: hover) and (pointer: fine) {
+    @container schedule (min-width: 601px) {
+      .day-episodes {
+        height: min(25rem, 50dvh);
+        min-height: 0;
+        flex: none;
+        overflow-y: hidden;
+        scrollbar-gutter: auto;
+        scrollbar-width: thin;
+        scrollbar-color: var(--text-accent) var(--you-blue-pale);
+      }
+      .day:global([data-scrollable]) .day-episodes {
+        overflow-y: auto;
+        scrollbar-gutter: stable;
+      }
+      .day-entry.preview-hidden {
+        display: block;
+      }
+      .view-all {
+        display: none;
+      }
+      .day:global([data-scrollable]) .scroll-day {
+        display: block;
+      }
+    }
   }
   @container schedule (max-width: 1100px) {
     .week-grid {
