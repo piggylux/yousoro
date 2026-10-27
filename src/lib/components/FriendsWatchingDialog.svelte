@@ -68,13 +68,12 @@
         <li>
           <a href={`/user/anilist/${encodeURIComponent(friend.name)}`}>
             <FriendAvatar {...friend} size={44} />
-            <span class="identity"
-              ><strong>{friend.isViewer ? 'You' : friend.name}</strong><span
-                >{friend.rewatching ? '↻ Rewatching' : 'Watching'}{friend.isViewer
-                  ? ` · ${friend.name}`
-                  : ''}</span
-              ></span
-            >
+            <span class="identity">
+              <strong title={friend.name}
+                >{friend.isViewer ? `You · ${friend.name}` : friend.name}</strong
+              >
+              <span>{friend.rewatching ? '↻ Rewatching' : 'Watching'}</span>
+            </span>
             <span class="episode"><small>EPISODE</small><strong>{friend.progress}</strong></span>
             <span class="row-arrow" aria-hidden="true">↗</span>
           </a>
@@ -202,6 +201,7 @@
   }
   .identity {
     display: flex;
+    flex: 1;
     flex-direction: column;
     gap: 4px;
     min-width: 0;
@@ -211,6 +211,7 @@
     color: var(--text-heading);
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .identity > span {
     font-size: 0.68rem;
