@@ -2,6 +2,7 @@ import { DEFAULT_SCORE_FORMAT, isScoreFormat, type ScoreFormat } from '#lib/scor
 import { fingerprint, pauseAniList, takeAniListRequest } from '#lib/server/rate-limit.js';
 import type { AiringStatus } from '#lib/types/anime.js';
 import type { FriendWatchingResult, SharedAnime } from '#lib/types/friend-watching.js';
+import type { ScheduleResult, ScheduledEpisode } from '#lib/types/schedule.js';
 
 const ANILIST_URL = 'https://graphql.anilist.co';
 const publicCache = new Map<string, { data: unknown; expiresAt: number }>();
@@ -272,6 +273,106 @@ export async function getLatestAirings(
 }
 
 export type AniListUser = { id: number; name: string; avatarUrl: string | null };
+
+// Airings are public metadata. Neither credentials nor a user's list are cached here.
+const scheduleCache = new Map<
+  string,
+  { episodes: ScheduledEpisode[]; freshUntil: number; expiresAt: number; fetchedAt: number }
+>();
+export async function getUpcomingAirings(
+  mediaIds: number[],
+  from: number,
+  until: number
+): Promise<ScheduleResult> {
+  const ids = [...new Set(mediaIds)].sort((a, b) => a - b);
+  const episodes = new Map<string, ScheduledEpisode>();
+  const fallback = new Map<number, { episodes: ScheduledEpisode[]; fetchedAt: number }>();
+  const timestamps: number[] = [];
+  const add = (episode: ScheduledEpisode) =>
+    episodes.set(`${episode.mediaId}:${episode.episode}`, episode);
+  const missing = ids.filter((id) => {
+    const key = `${from}:${until}:${id}`;
+    const cached = scheduleCache.get(key);
+    if (cached && cached.freshUntil > Date.now()) {
+      cached.episodes.forEach(add);
+      timestamps.push(cached.fetchedAt);
+      return false;
+    }
+    if (cached && cached.expiresAt > Date.now()) fallback.set(id, cached);
+    else scheduleCache.delete(key);
+    return true;
+  });
+  const requested = new Set(missing);
+  let partial = false;
+  let retryAfter: number | undefined;
+  let partialReason: ScheduleResult['partialReason'];
+  for (let page = 1; missing.length && page <= 4; page++) {
+    try {
+      const data = await query<{
+        Page: {
+          pageInfo: { hasNextPage: boolean };
+          airingSchedules: { mediaId: number; episode: number; airingAt: number }[];
+        };
+      }>(
+        `query ($ids: [Int], $from: Int, $until: Int, $page: Int) {
+          Page(page: $page, perPage: 50) {
+            pageInfo { hasNextPage }
+            airingSchedules(mediaId_in: $ids, airingAt_greater: $from, airingAt_lesser: $until, notYetAired: true, sort: TIME) {
+              mediaId episode airingAt
+            }
+          }
+        }`,
+        { ids: missing, from: from - 1, until, page },
+        undefined,
+        { optional: true, cacheTtlMs: 60 * 60 * 1000 }
+      );
+      for (const airing of data.Page.airingSchedules) {
+        if (requested.has(airing.mediaId) && airing.airingAt >= from && airing.airingAt < until)
+          add({ mediaId: airing.mediaId, episode: airing.episode, airsAt: airing.airingAt * 1000 });
+      }
+      partial = data.Page.pageInfo.hasNextPage;
+      if (!partial) break;
+    } catch (err) {
+      if (page === 1 && episodes.size === 0 && fallback.size === 0) throw err;
+      partial = true;
+      partialReason = 'unavailable';
+      if (err instanceof AniListRateLimitError) retryAfter = err.retryAfter;
+      break;
+    }
+  }
+  if (!partial) {
+    const fetchedAt = Date.now();
+    const freshUntil = fetchedAt + 60 * 60 * 1000;
+    const expiresAt = fetchedAt + 24 * 60 * 60 * 1000;
+    for (const id of missing) {
+      if (scheduleCache.size >= 2000) scheduleCache.delete(scheduleCache.keys().next().value!);
+      scheduleCache.set(`${from}:${until}:${id}`, {
+        episodes: [...episodes.values()].filter((episode) => episode.mediaId === id),
+        expiresAt,
+        freshUntil,
+        fetchedAt,
+      });
+    }
+    timestamps.push(fetchedAt);
+  } else {
+    for (const saved of fallback.values()) {
+      timestamps.push(saved.fetchedAt);
+      for (const episode of saved.episodes) {
+        if (!episodes.has(`${episode.mediaId}:${episode.episode}`)) add(episode);
+      }
+    }
+  }
+  return {
+    episodes: [...episodes.values()].sort(
+      (a, b) => a.airsAt - b.airsAt || a.mediaId - b.mediaId || a.episode - b.episode
+    ),
+    partial,
+    fetchedAt: timestamps.length ? Math.min(...timestamps) : Date.now(),
+    ...(partial && fallback.size ? { stale: true } : {}),
+    ...(partial ? { partialReason: partialReason ?? 'limit' } : {}),
+    ...(retryAfter ? { retryAfter } : {}),
+  };
+}
 
 /** One lookup for all cards, without downloading each friend's list. */
 export async function getFriendsWatching(
