@@ -63,7 +63,7 @@
   .score-input {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--score-control-gap, 6px);
     max-width: 100%;
   }
 
@@ -75,11 +75,19 @@
   }
 
   .score-number {
-    width: 4rem;
+    width: var(--score-number-width, 4rem);
   }
 
   .scale {
     white-space: nowrap;
+  }
+
+  @media (max-width: 767px) {
+    .score-number,
+    .score-choice {
+      min-height: var(--score-control-height, 36px);
+      font-size: var(--score-control-font-size, 1rem);
+    }
   }
 
   /* Large: easy to read and to tap, with the scale beside it at the same size */

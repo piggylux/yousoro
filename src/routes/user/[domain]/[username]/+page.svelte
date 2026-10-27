@@ -472,6 +472,7 @@
             {anime}
             {animeLinkFn}
             canEdit={data.canEdit}
+            compact={data.preferences.cardSize === 'small'}
             onCaughtUp={celebrate}
             blurMature={data.preferences.blurMature}
             downloadLanguage={data.preferences.downloadLanguage}

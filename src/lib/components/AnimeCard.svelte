@@ -49,6 +49,8 @@
     animeLinkFn: (animeId: number) => string;
     /** Whether the signed-in user can update this anime's progress */
     canEdit?: boolean;
+    /** Use the condensed layout for the small card setting. */
+    compact?: boolean;
     /**
      * Called when an update catches the user up on this anime, or finishes it, with the anime as
      * AniList saved it; `scored` says the same update also set its score
@@ -82,6 +84,7 @@
     anime,
     animeLinkFn,
     canEdit = false,
+    compact = false,
     onCaughtUp,
     blurMature = true,
     downloadLanguage = 'any',
@@ -335,6 +338,7 @@
   });
   let coverButton = $state<HTMLButtonElement>();
   let backFace = $state<HTMLElement>();
+  let factsArea = $state<HTMLDivElement>();
 
   // Makes this the one card showing its back, or gives that up
   function claimBack(showBack: boolean) {
@@ -389,7 +393,10 @@
       errorMessage = null;
     }
     await tick();
-    if (showBack && backFace) backFace.scrollTop = 0;
+    if (showBack) {
+      if (backFace) backFace.scrollTop = 0;
+      if (factsArea) factsArea.scrollTop = 0;
+    }
     if (!moveFocus) return;
     // Without scrolling: the card is already where the user is looking, even if partly off screen
     const options = { preventScroll: true };
@@ -561,7 +568,9 @@
     // The cover is a button, but every other control keeps its own pointer behavior
     const target = event.target as Element;
     if (
-      target.closest('a, button:not(.cover), input, select, textarea, label, form, .back-actions')
+      target.closest(
+        'a, button:not(.cover), input, select, textarea, label, form, .back-actions, .compact-details'
+      )
     )
       return;
     drag = {
@@ -848,6 +857,27 @@
   {/if}
 {/snippet}
 
+{#snippet extraFacts()}
+  {#if anime.meanScore}
+    <div class="fact extra-fact">
+      <dt>Average</dt>
+      <dd>{formatMeanScore(anime.meanScore)}</dd>
+    </div>
+  {/if}
+  {#if anime.rewatching}
+    <div class="fact extra-fact">
+      <dt>Status</dt>
+      <dd>Rewatching</dd>
+    </div>
+  {/if}
+  {#if mounted && anime.nextEpisode}
+    <div class="fact extra-fact">
+      <dt>Next</dt>
+      <dd>Ep {anime.nextEpisode.number}, {formatAirDate(anime.nextEpisode.airsAt)}</dd>
+    </div>
+  {/if}
+{/snippet}
+
 <!-- Following the mouse is decoration only, so it needs no keyboard or screen reader equivalent -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
@@ -861,6 +891,7 @@
 >
   <div
     class="anime-card"
+    class:compact-card={compact}
     class:flipped
     class:turned-back={turnedBack}
     class:dragging
@@ -896,7 +927,7 @@
         const target = event.target as Element;
         if (
           !target.closest(
-            'a, button, input, select, textarea, label, form, .back-actions, .badge-side'
+            'a, button, input, select, textarea, label, form, .back-actions, .badge-side, .compact-details'
           )
         ) {
           flipByClick(!flipped, event);
@@ -1031,6 +1062,7 @@
       -->
       <div
         class="face back tw:card"
+        class:compact
         bind:this={backFace}
         inert={!flipped}
         role="group"
@@ -1047,66 +1079,66 @@
           </a>
         </p>
 
-        <!-- Details retain their height; short cards scroll the whole back to keep fields reachable. -->
-        <div class="facts-area">
-          <dl class="facts">
-            <dt>Watched</dt>
-            <dd>
-              {#if canEdit}
-                <!-- Its form, with the one Save button for the count and the score, is below -->
-                <span class="field-form">
-                  <input
-                    class="tw:input tw:input-xs tw:w-16"
-                    type="number"
-                    name="progress"
-                    form={entryFormId}
-                    min="0"
-                    max={totalEpisodes ?? undefined}
-                    bind:value={watchedDraft}
-                    aria-label="Episodes watched"
-                    required
-                  />
-                  <span>/ {totalEpisodes ?? '?'}</span>
-                </span>
-              {:else}
-                {progressLabel}
-              {/if}
-              {#if airedNote}<span class="aired-note">({airedNote})</span>{/if}
-            </dd>
+        <!-- On phones, details scroll between the title and actions so the controls stay reachable. -->
+        <div class="facts-area" bind:this={factsArea}>
+          <dl class="facts" class:main-facts={compact && canEdit}>
+            <div class="fact main-field" class:editable={canEdit}>
+              <dt>Watched</dt>
+              <dd>
+                {#if canEdit}
+                  <!-- Its form, with the one Save button for the count and the score, is below -->
+                  <span class="field-form">
+                    <input
+                      class="tw:input tw:input-xs tw:w-16"
+                      type="number"
+                      name="progress"
+                      form={entryFormId}
+                      min="0"
+                      max={totalEpisodes ?? undefined}
+                      bind:value={watchedDraft}
+                      aria-label="Episodes watched"
+                      required
+                    />
+                    <span>/ {totalEpisodes ?? '?'}</span>
+                  </span>
+                {:else}
+                  {progressLabel}
+                {/if}
+                {#if airedNote}<span class="aired-note">({airedNote})</span>{/if}
+              </dd>
+            </div>
             {#if canEdit}
-              <dt>Score</dt>
-              <dd>
-                <!-- In the owner's AniList scoring system; "No score" or an empty field clears it -->
-                <span class="field-form">
-                  <ScoreInput
-                    format={scoreFormat}
-                    bind:value={scoreDraft}
-                    label="Your score"
-                    form={entryFormId}
-                  />
-                </span>
-              </dd>
+              <div class="fact main-field editable">
+                <dt>Score</dt>
+                <dd>
+                  <!-- In the owner's AniList scoring system; "No score" or an empty field clears it -->
+                  <span class="field-form">
+                    <ScoreInput
+                      format={scoreFormat}
+                      bind:value={scoreDraft}
+                      label="Your score"
+                      form={entryFormId}
+                    />
+                  </span>
+                </dd>
+              </div>
             {:else if anime.userScore}
-              <dt>Score</dt>
-              <dd>
-                <span aria-hidden="true">{formatScore(anime.userScore, scoreFormat)}</span>
-                <span class="tw:sr-only">{describeScore(anime.userScore, scoreFormat)}</span>
-              </dd>
+              <div class="fact main-field">
+                <dt>Score</dt>
+                <dd>
+                  <span aria-hidden="true">{formatScore(anime.userScore, scoreFormat)}</span>
+                  <span class="tw:sr-only">{describeScore(anime.userScore, scoreFormat)}</span>
+                </dd>
+              </div>
             {/if}
-            {#if anime.meanScore}
-              <!-- AniList's mean score: the average of everyone's scores there -->
-              <dt>Average</dt>
-              <dd>{formatMeanScore(anime.meanScore)}</dd>
-            {/if}
-            {#if anime.rewatching}
-              <dt>Status</dt>
-              <dd>Rewatching</dd>
-            {/if}
-            {#if mounted && anime.nextEpisode}
-              <dt>Next</dt>
-              <dd>Ep {anime.nextEpisode.number}, {formatAirDate(anime.nextEpisode.airsAt)}</dd>
-            {/if}
+            {@render extraFacts()}
           </dl>
+          {#if compact && canEdit && (anime.meanScore || anime.rewatching || (mounted && anime.nextEpisode))}
+            <details class="compact-details">
+              <summary>More details</summary>
+              <dl class="facts">{@render extraFacts()}</dl>
+            </details>
+          {/if}
         </div>
 
         <!--
@@ -1135,6 +1167,7 @@
                   disabled={saving || !entryChanged}
                   onclick={revertDrafts}
                   title="Discard unsaved changes"
+                  aria-label="Reset changes"
                 >
                   <svg
                     width="14"
@@ -1147,7 +1180,7 @@
                     stroke-linejoin="round"
                     aria-hidden="true"><path d="M3 10a9 9 0 1 1 2 9M3 4v6h6" /></svg
                   >
-                  Reset
+                  <span class="entry-action-label">Reset</span>
                 </button>
                 <button
                   class="entry-action entry-save"
@@ -1178,6 +1211,7 @@
                 type="button"
                 class="download-link"
                 aria-haspopup="dialog"
+                aria-label={`Find episode ${nextToWatch} on ${nyaaSite(anime.isAdult)}`}
                 onclick={() =>
                   (nyaaSearch = {
                     title: anime.title,
@@ -1189,9 +1223,14 @@
                     adult: anime.isAdult,
                   })}
               >
-                <!-- Always two lines, one each, so the button is the same size for either site -->
+                <!-- The compact back shortens the visible label; the accessible name keeps the site. -->
                 <span class="download-line"
-                  ><span class="download-words">Find episode</span> {nextToWatch}</span
+                  ><span class="download-words"
+                    ><span class="download-full">Find episode</span><span class="download-short"
+                      >Find ep.</span
+                    ></span
+                  >
+                  {nextToWatch}</span
                 >
                 <span class="download-line download-site">on {nyaaSite(anime.isAdult)}</span>
               </button>
@@ -1796,6 +1835,7 @@
 
   .facts {
     min-width: 0;
+    width: 100%;
     max-width: 100%;
     display: grid;
     align-content: start;
@@ -1808,6 +1848,35 @@
     color: var(--text-accent);
     font-weight: 700;
     text-align: right;
+  }
+
+  .fact {
+    display: contents;
+  }
+
+  .fact.main-field {
+    display: grid;
+    width: 100%;
+    box-sizing: border-box;
+    grid-column: 1 / -1;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding: 8px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 10px;
+    background: var(--you-blue-pale);
+  }
+
+  .main-field dd {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .compact-details,
+  .download-short {
+    display: none;
   }
 
   .facts dd {
@@ -1851,8 +1920,18 @@
       font-size: 0.75rem;
     }
 
-    .facts dd + dt {
+    .fact + .fact dt {
       margin-top: 6px;
+    }
+
+    .fact.main-field {
+      grid-template-columns: minmax(0, 1fr);
+      justify-items: center;
+      gap: 4px;
+      margin-bottom: 8px;
+    }
+    .fact.main-field dt {
+      margin-top: 0;
     }
   }
 
@@ -1997,6 +2076,285 @@
   .download-link:focus-visible {
     background: var(--sea-blue);
     color: #ffffff;
+  }
+
+  /* Small cards keep enough height for the editable back, even when their covers are narrow. */
+  .compact-card .front {
+    min-height: 24rem;
+  }
+
+  @media (min-width: 768px) {
+    .back.compact {
+      --back-padding-y: 12px;
+      --back-padding-x: 8px;
+      gap: 8px;
+      scrollbar-gutter: auto;
+    }
+    .compact .back-title {
+      font-size: 0.85rem;
+      line-height: 1.25;
+    }
+    .compact .facts {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 0.75rem;
+      line-height: 1.3;
+    }
+    .compact .fact {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      align-items: baseline;
+      gap: 6px;
+    }
+    .compact .fact.main-field {
+      grid-template-columns: minmax(0, 1fr);
+      align-items: center;
+      gap: 3px;
+      padding: 6px;
+      margin: 0;
+    }
+    .compact .facts dt {
+      margin: 0;
+      font-size: 0.65rem;
+      text-align: left;
+    }
+    .compact .facts dd {
+      min-width: 0;
+      text-align: right;
+      overflow-wrap: anywhere;
+    }
+    .compact .main-field dt,
+    .compact .main-field dd {
+      text-align: center;
+    }
+    .compact .aired-note {
+      display: block;
+      margin: 3px 0 0;
+      font-size: 0.65rem;
+    }
+    .compact .entry-actions {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      width: 100%;
+      gap: 6px;
+    }
+    .compact .entry-action {
+      min-width: 0;
+      height: 28px;
+      padding-inline: 4px;
+      font-size: 0.7rem;
+    }
+    .compact .entry-action svg {
+      display: none;
+    }
+    .compact .back-actions {
+      gap: 6px;
+    }
+    .compact .download-link {
+      font-size: 0.75rem;
+    }
+    .compact .download-site {
+      font-size: 0.65rem;
+    }
+    .compact .download-full {
+      display: none;
+    }
+    .compact .download-short {
+      display: inline;
+    }
+  }
+
+  @media (max-width: 767px) {
+    .back {
+      --back-padding-y: 16px;
+      --back-padding-x: 10px;
+      --score-control-height: 36px;
+      --score-control-font-size: 1rem;
+      --score-number-width: 3.5rem;
+      --score-control-gap: 4px;
+      gap: 12px;
+      overflow: hidden;
+      scrollbar-gutter: auto;
+    }
+    .back-title {
+      font-size: 0.95rem;
+      text-align: left;
+    }
+    .facts-area {
+      flex: 1;
+      min-height: 0;
+      padding: 3px;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      scrollbar-width: thin;
+    }
+    .facts {
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+      gap: 8px;
+      font-size: 0.8rem;
+      line-height: 1.35;
+    }
+    .fact {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      align-items: baseline;
+      gap: 8px;
+    }
+    .facts dt {
+      text-align: left;
+      font-size: 0.7rem;
+    }
+    .facts dd {
+      min-width: 0;
+      text-align: right;
+      overflow-wrap: anywhere;
+    }
+    .fact + .fact dt {
+      margin-top: 0;
+    }
+    .fact.main-field {
+      grid-template-columns: auto minmax(0, 1fr);
+      justify-items: stretch;
+      margin-bottom: 0;
+    }
+    .field-form {
+      gap: 4px;
+    }
+    .field-form input {
+      width: 3.5rem;
+      min-height: 36px;
+      padding-inline: 6px;
+      font-size: 1rem;
+    }
+    .aired-note {
+      display: block;
+      margin: 4px 0 0;
+      font-size: 0.65rem;
+    }
+    .back-actions {
+      padding-top: 10px;
+      border-top: 1px solid var(--border-subtle);
+      background: var(--surface);
+    }
+    .entry-actions {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      width: 100%;
+      gap: 6px;
+    }
+    .entry-action {
+      min-width: 0;
+      height: 40px;
+      padding-inline: 6px;
+      gap: 4px;
+    }
+    .download-link {
+      min-height: 44px;
+    }
+
+    .back.compact {
+      --back-padding-y: 12px;
+      --back-padding-x: 8px;
+      gap: 8px;
+    }
+    .compact .back-title {
+      font-size: 0.8rem;
+    }
+    .compact .facts-area {
+      flex-direction: column;
+      justify-content: flex-start;
+    }
+    .compact .facts {
+      flex: none;
+    }
+    .compact .fact.main-field {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 3px;
+      padding: 6px;
+    }
+    .compact .main-field dd {
+      text-align: left;
+    }
+    .compact .main-facts > .extra-fact {
+      display: none;
+    }
+    .compact .compact-details {
+      display: block;
+      flex: none;
+      width: 100%;
+      margin-top: 8px;
+      text-align: left;
+    }
+    .compact-details summary {
+      min-height: 32px;
+      padding-block: 6px;
+      color: var(--text-accent);
+      font-size: 0.7rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .compact-details summary:focus-visible {
+      outline: 2px solid var(--you-blue);
+      outline-offset: 1px;
+    }
+    .compact-details[open] > .facts {
+      padding-bottom: 4px;
+    }
+    .compact .back-actions {
+      gap: 6px;
+      padding-top: 8px;
+    }
+    .compact .entry-actions {
+      grid-template-columns: 36px minmax(0, 1fr);
+    }
+    .compact .entry-reset .entry-action-label {
+      display: none;
+    }
+    .compact .entry-reset svg {
+      display: block;
+      width: 16px;
+      height: 16px;
+    }
+    .compact .download-link {
+      min-height: 36px;
+      border-width: 1px;
+      border-radius: 10px;
+      font-size: 0.75rem;
+    }
+    .compact .download-full,
+    .compact .download-site {
+      display: none;
+    }
+    .compact .download-short {
+      display: inline;
+    }
+
+    @container (max-width: 12rem) {
+      .fact.editable {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 4px;
+        padding: 6px;
+      }
+      .editable dd {
+        text-align: left;
+      }
+      .field-form {
+        flex-wrap: wrap;
+      }
+      .fact:not(.editable) {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 2px;
+      }
+      .fact:not(.editable) dd {
+        text-align: left;
+      }
+      .entry-action svg {
+        display: none;
+      }
+    }
   }
 
   /* Without motion, the card simply switches sides */
