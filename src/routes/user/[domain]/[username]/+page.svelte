@@ -19,6 +19,7 @@
   } from '#lib/anime.js';
   import AnimeCard from '#lib/components/AnimeCard.svelte';
   import BacklogBanner from '#lib/components/BacklogBanner.svelte';
+  import EpisodeCalendar from '#lib/components/EpisodeCalendar.svelte';
   import FriendsWatchingDialog from '#lib/components/FriendsWatchingDialog.svelte';
   import FriendsWatchingLoader from '#lib/components/FriendsWatchingLoader.svelte';
   import ListFilters from '#lib/components/ListFilters.svelte';
@@ -35,6 +36,7 @@
   import { countColumns, getVisibleRange, type VisibleRange } from '#lib/virtual-grid.js';
 
   let { data }: { data: AnimePageData } = $props();
+  const calendarView = $derived(page.url.searchParams.get('view') === 'calendar');
 
   let friendMatches = $state<FriendWatchingResult | null>(null);
   const visibleFriendMatches = $derived(
@@ -190,21 +192,26 @@
   }
 
   onMount(() => {
-    // Cards resize with the window, not only with the grid's width, so both are watched
-    const observer = new ResizeObserver(remeasure);
-    if (grid) observer.observe(grid);
     return () => {
-      observer.disconnect();
       clearTimeout(highlightTimer);
       clearTimeout(busyTimer);
       clearTimeout(movedNoteTimer);
     };
   });
 
+  // Reconnect when returning from the calendar: its grid is a new DOM element.
+  $effect(() => {
+    if (!grid) return;
+    const observer = new ResizeObserver(remeasure);
+    observer.observe(grid);
+    return () => observer.disconnect();
+  });
+
   // Measured again when the list becomes long enough, changes length, or the keyboard leaves it,
   // and when the card size setting changes the columns and the row height
   $effect(() => {
     void data.preferences.cardSize;
+    void calendarView;
     if (animeList.length) remeasure();
   });
 
@@ -347,13 +354,16 @@
 <svelte:document onvisibilitychange={onVisibilityChange} />
 
 <svelte:head>
-  <title>{data.username} - Yousoro</title>
-  <meta name="description" content={`${data.username}'s watching list`} />
+  <title>{data.username}{calendarView ? ' · Calendar' : ''} - Yousoro</title>
+  <meta
+    name="description"
+    content={`${data.username}'s ${calendarView ? 'upcoming episode calendar' : 'watching list'}`}
+  />
 </svelte:head>
 
 <section>
   <!-- One compact row, so the cards start high enough for two full rows to fit on screen -->
-  <div class="profile-bar">
+  <div class="profile-bar" class:calendar-profile={calendarView}>
     <div class="profile">
       {#if data.avatarUrl}
         <img class="avatar-img" src={data.avatarUrl} alt={`${data.username}'s profile picture`} />
@@ -362,98 +372,110 @@
         <span class="name">{data.username}</span>
         <span class="profile-links">
           <a href={`/user/anilist/${encodeURIComponent(data.username)}/friends`}>Friends</a>
+          ·
+          <a href={calendarView ? page.url.pathname : `${page.url.pathname}?view=calendar`}
+            >{calendarView ? 'Anime list' : 'Calendar'}</a
+          >
           · <a href={data.userProfileLink} target="_blank">AniList profile ↗</a>
         </span>
       </span>
     </div>
 
     <!-- Updates with every progress change, since the list reloads after each one -->
-    <BacklogBanner
-      animeList={data.watchingList}
-      username={data.username}
-      isOwnList={data.canEdit}
-    />
+    {#if !calendarView}<BacklogBanner
+        animeList={data.watchingList}
+        username={data.username}
+        isOwnList={data.canEdit}
+      />{/if}
   </div>
 
-  {#if data.watchingList.length}
-    <ListFilters
-      counts={sectionCounts}
-      hidden={hiddenSections}
-      onToggle={toggleSection}
-      bind:search
+  {#if calendarView}
+    <EpisodeCalendar
+      anime={data.watchingList}
+      blurMature={data.preferences.blurMature}
+      contextKey={`${page.data.user?.id ?? 'public'}:${data.username}`}
     />
-  {/if}
-  <!-- Tells screen readers how many anime match as the viewer types, as the grid changes silently -->
-  <p class="tw:sr-only" aria-live="polite">
-    {searching ? `${animeList.length} anime ${animeList.length === 1 ? 'matches' : 'match'}` : ''}
-  </p>
-  {#if data.watchingList.length && !animeList.length}
-    <p class="all-hidden">
-      {#if searching}
-        No anime {hiddenMatches ? 'in the shown sections' : 'here'} matches “{search.trim()}”{hiddenMatches
-          ? `, but ${hiddenMatches} in ${hiddenMatches === 1 ? 'a hidden section does' : 'hidden sections do'}`
-          : ''}.
-      {:else}
-        Every anime here is in a section the filters hide.
-      {/if}
+  {:else}
+    {#if data.watchingList.length}
+      <ListFilters
+        counts={sectionCounts}
+        hidden={hiddenSections}
+        onToggle={toggleSection}
+        bind:search
+      />
+    {/if}
+    <!-- Tells screen readers how many anime match as the viewer types, as the grid changes silently -->
+    <p class="tw:sr-only" aria-live="polite">
+      {searching ? `${animeList.length} anime ${animeList.length === 1 ? 'matches' : 'match'}` : ''}
     </p>
-  {/if}
+    {#if data.watchingList.length && !animeList.length}
+      <p class="all-hidden">
+        {#if searching}
+          No anime {hiddenMatches ? 'in the shown sections' : 'here'} matches “{search.trim()}”{hiddenMatches
+            ? `, but ${hiddenMatches} in ${hiddenMatches === 1 ? 'a hidden section does' : 'hidden sections do'}`
+            : ''}.
+        {:else}
+          Every anime here is in a section the filters hide.
+        {/if}
+      </p>
+    {/if}
 
-  {#if page.data.user}
-    <FriendsWatchingLoader
-      contextKey={data.username}
-      viewerId={page.data.user.id}
-      mediaIds={data.watchingList.map((anime) => anime.id)}
-      onresult={(result) => (friendMatches = result)}
-    />
-  {/if}
-  <div
-    class="anime-grid"
-    data-size={data.preferences.cardSize}
-    bind:this={grid}
-    onfocusin={onGridFocusIn}
-    onfocusout={onGridFocusOut}
-    style:padding-top="{range.paddingTop}px"
-    style:padding-bottom="{range.paddingBottom}px"
-  >
-    {#each shownList as anime, i (anime.id)}
-      <!--
+    {#if page.data.user}
+      <FriendsWatchingLoader
+        contextKey={data.username}
+        viewerId={page.data.user.id}
+        mediaIds={data.watchingList.map((anime) => anime.id)}
+        onresult={(result) => (friendMatches = result)}
+      />
+    {/if}
+    <div
+      class="anime-grid"
+      data-size={data.preferences.cardSize}
+      bind:this={grid}
+      onfocusin={onGridFocusIn}
+      onfocusout={onGridFocusOut}
+      style:padding-top="{range.paddingTop}px"
+      style:padding-bottom="{range.paddingBottom}px"
+    >
+      {#each shownList as anime, i (anime.id)}
+        <!--
         Fades out a show that leaves the Watching list, e.g. once AniList marks it completed. A card
         that only scrolled out of view is removed at once, so the rows around it never shift
       -->
-      <div
-        animate:flip={{ duration }}
-        out:fade={{ duration: listIds.has(anime.id) ? 0 : duration / 2 }}
-      >
-        <AnimeCard
-          friendsWatching={page.data.user
-            ? visibleFriendMatches
-              ? (visibleFriendMatches[anime.id] ?? [])
-              : null
-            : undefined}
-          onShowFriends={() =>
-            (friendSelection = {
-              title: anime.title,
-              coverUrl: anime.thumbnailUrl,
-              blurCover: anime.isAdult && data.preferences.blurMature,
-              friends: visibleFriendMatches?.[anime.id] ?? [],
-            })}
-          {anime}
-          {animeLinkFn}
-          canEdit={data.canEdit}
-          onCaughtUp={celebrate}
-          blurMature={data.preferences.blurMature}
-          downloadLanguage={data.preferences.downloadLanguage}
-          downloadVersion={data.preferences.downloadVersion}
-          scoreFormat={data.scoreFormat}
-          position={range.start + i}
-          onConfirmed={confirmSaved}
-          onSaved={followCard}
-          highlighted={highlightId === anime.id}
-        />
-      </div>
-    {/each}
-  </div>
+        <div
+          animate:flip={{ duration }}
+          out:fade={{ duration: listIds.has(anime.id) ? 0 : duration / 2 }}
+        >
+          <AnimeCard
+            friendsWatching={page.data.user
+              ? visibleFriendMatches
+                ? (visibleFriendMatches[anime.id] ?? [])
+                : null
+              : undefined}
+            onShowFriends={() =>
+              (friendSelection = {
+                title: anime.title,
+                coverUrl: anime.thumbnailUrl,
+                blurCover: anime.isAdult && data.preferences.blurMature,
+                friends: visibleFriendMatches?.[anime.id] ?? [],
+              })}
+            {anime}
+            {animeLinkFn}
+            canEdit={data.canEdit}
+            onCaughtUp={celebrate}
+            blurMature={data.preferences.blurMature}
+            downloadLanguage={data.preferences.downloadLanguage}
+            downloadVersion={data.preferences.downloadVersion}
+            scoreFormat={data.scoreFormat}
+            position={range.start + i}
+            onConfirmed={confirmSaved}
+            onSaved={followCard}
+            highlighted={highlightId === anime.id}
+          />
+        </div>
+      {/each}
+    </div>
+  {/if}
 </section>
 
 <FriendsWatchingDialog selection={friendSelection} onclose={() => (friendSelection = null)} />
@@ -562,6 +584,22 @@
     justify-content: center;
     gap: 16px 28px;
     margin-bottom: 20px;
+  }
+  .calendar-profile {
+    justify-content: flex-start;
+    max-width: 1500px;
+    margin: 0 auto 12px;
+    width: 100%;
+  }
+  .calendar-profile .avatar-img {
+    width: 36px;
+    height: 36px;
+  }
+  .calendar-profile .name {
+    font-size: 1rem;
+  }
+  .calendar-profile .profile-links {
+    font-size: 0.75rem;
   }
 
   .profile {

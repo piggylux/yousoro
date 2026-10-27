@@ -17,6 +17,19 @@ shows you're actively watching come first. Once you've watched an episode, mark 
   left; they don't count towards the episodes you're behind on
 - **Next episode countdown**: caught-up anime show when their next episode airs, in your own time
   zone, and the soonest come first
+- **Episode calendar**: browse four weeks of AniList airing times for your Watching and Rewatching
+  anime in your local time zone, with a directional slide between weeks (or no motion when preferred).
+  Busy days preview three episodes; View all opens a scrollable day dialog. The calendar clearly labels
+  the covered dates, missing air dates, and incomplete/unavailable results. Air dates are never estimated
+  and may differ from streaming availability. The catch-up banner stays on the list view.
+  Schedule lookups batch up to 500 media IDs, fetch 50 airings per page with a four-page limit,
+  and respect rate-limit retry timing. Public airing metadata is fresh for one hour on the server
+  and in browser memory, with a visibly labelled fallback retained for up to 24 hours if a refresh
+  fails. Failed refreshes do not extend that retention period. Identical pending lookups coalesce,
+  and complete lookups include negative coverage. Authenticated list data is never stored in this cache.
+  Changing weeks or opening a dialog requires no new requests. Mature-content preferences apply to both views.
+- **Navigation**: quickly switch between your anime, calendar, and friends. Public lists also
+  offer a Calendar link; the calendar URL is the list URL with `?view=calendar`.
 - **Airing status**: anime you're caught up on or have completed say so, and shows with no
   episode info (next episode not scheduled, on hiatus, not aired yet, cancelled) are labelled and
   listed last
