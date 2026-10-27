@@ -31,6 +31,7 @@
       >{new Date(entry.airsAt).toLocaleTimeString(undefined, {
         hour: '2-digit',
         minute: '2-digit',
+        hourCycle: 'h23',
       })}</time
     >
     <span class="title">{entry.anime.title}</span>
