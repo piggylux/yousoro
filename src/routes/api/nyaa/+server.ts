@@ -11,6 +11,7 @@ export async function POST(event: RequestEvent) {
     !body ||
     !title(body.title) ||
     !body.title.trim() ||
+    (body.query !== undefined && (!title(body.query) || !body.query.trim())) ||
     (body.englishTitle != null && !title(body.englishTitle)) ||
     (body.otherTitles !== undefined &&
       (!Array.isArray(body.otherTitles) ||

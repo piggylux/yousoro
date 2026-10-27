@@ -4,6 +4,7 @@
 
   import {
     BIG_BACKLOG,
+    getEpisodeToSearch,
     getEpisodesToWatch,
     getWatchState,
     hasNewEpisode,
@@ -141,8 +142,8 @@
   );
   const episodesToWatch = $derived(getEpisodesToWatch(anime));
   const watchState = $derived(getWatchState(anime));
-  // The next episode to watch, when it has already aired; only offered on the viewer's own list
-  const nextToWatch = $derived(canEdit && episodesToWatch > 0 ? anime.currentEpisode + 1 : null);
+  // Search the next episode on any list, including when the list owner is caught up.
+  const searchEpisode = $derived(getEpisodeToSearch(anime));
   // Only a just-aired episode makes the badge pulse, so the pulse means something. It depends on the
   // viewer's clock, so like the countdowns it waits for the browser. Cards that can't have one
   // don't read the clock, so they aren't updated as it ticks
@@ -454,6 +455,8 @@
   let pendingFlip: { showBack: boolean; moveFocus: boolean } | null = null;
   // A drag ends with a click, which must not turn the card again
   let suppressClick = false;
+  // A drifting press can click a shared ancestor instead of the control it started on.
+  let pressedControl = false;
   let flipperElement = $state<HTMLElement>();
   const DRAG_START_PX = 8;
   // A fingertip drifts further than a mouse while tapping, so a touch must go further to drag
@@ -567,12 +570,12 @@
     if (!event.isPrimary || event.button !== 0 || drag?.active || !cardElement) return;
     // The cover is a button, but every other control keeps its own pointer behavior
     const target = event.target as Element;
-    if (
+    pressedControl = Boolean(
       target.closest(
         'a, button:not(.cover), input, select, textarea, label, form, .back-actions, .compact-details'
       )
-    )
-      return;
+    );
+    if (pressedControl) return;
     drag = {
       pointerId: event.pointerId,
       startX: event.clientX,
@@ -924,6 +927,7 @@
         event.preventDefault();
       }}
       onclick={(event) => {
+        if (pressedControl) return;
         const target = event.target as Element;
         if (
           !target.closest(
@@ -1145,7 +1149,7 @@
           At the bottom when there is room, otherwise after the details in the same scroll area.
           Only there when it holds something, as clicks on it don't turn the card
         -->
-        {#if canEdit || nextToWatch || (errorMessage && flipped)}
+        {#if canEdit || searchEpisode || (errorMessage && flipped)}
           <div class="back-actions">
             {#if canEdit}
               <!--
@@ -1206,18 +1210,18 @@
                 </button>
               </form>
             {/if}
-            {#if nextToWatch}
+            {#if searchEpisode}
               <button
                 type="button"
                 class="download-link"
                 aria-haspopup="dialog"
-                aria-label={`Find episode ${nextToWatch} on ${nyaaSite(anime.isAdult)}`}
+                aria-label={`Find episode ${searchEpisode} on ${nyaaSite(anime.isAdult)}`}
                 onclick={() =>
                   (nyaaSearch = {
                     title: anime.title,
                     englishTitle: anime.englishTitle,
                     otherTitles: anime.otherTitles,
-                    episode: nextToWatch,
+                    episode: searchEpisode,
                     language: downloadLanguage,
                     version: downloadVersion,
                     adult: anime.isAdult,
@@ -1230,7 +1234,7 @@
                       >Find ep.</span
                     ></span
                   >
-                  {nextToWatch}</span
+                  {searchEpisode}</span
                 >
                 <span class="download-line download-site">on {nyaaSite(anime.isAdult)}</span>
               </button>

@@ -61,6 +61,11 @@ describe('Nyaa results endpoint', () => {
     { title: 'Show', episode: 1, otherTitles: [null] },
     { title: 'Show', episode: 1, language: 'invalid' },
     { title: 'Show', episode: 1, version: 'invalid' },
+    { title: 'Show', episode: 1, query: '' },
+    { title: 'Show', episode: 1, query: '   ' },
+    { title: 'Show', episode: 1, query: 123 },
+    { title: 'Show', episode: 1, query: null },
+    { title: 'Show', episode: 1, query: 'x'.repeat(501) },
   ])('rejects malformed searches before fetching: %j', async (body) => {
     const request = event(body);
     await expect(POST(request)).rejects.toMatchObject({ status: 400 });
@@ -72,6 +77,27 @@ describe('Nyaa results endpoint', () => {
     await POST(request);
     expect(String(vi.mocked(request.fetch).mock.calls[0][0])).toMatch(/^https:\/\/nyaa\.si\//);
   });
+
+  it.each([false, true])(
+    'fetches the exact custom query on the expected site (adult: %s)',
+    async (adult) => {
+      const query = '  "Different Show" 12 1080p -batch | Other  ';
+      const request = event({
+        title: 'Show',
+        episode: 1,
+        adult,
+        language: 'french',
+        version: 'dubbed',
+        query,
+      });
+      await POST(request);
+      const url = new URL(String(vi.mocked(request.fetch).mock.calls[0][0]));
+      expect(url.hostname).toBe(adult ? 'sukebei.nyaa.si' : 'nyaa.si');
+      expect(url.searchParams.get('q')).toBe(query.trim());
+      expect(url.searchParams.get('c')).toBe(adult ? '1_1' : '1_3');
+      expect(url.searchParams.get('page')).toBe('rss');
+    }
+  );
 
   it('honors client cooldown without fetching', async () => {
     vi.mocked(takeClientLimit).mockResolvedValue({ allowed: false, retryAfter: 20 });

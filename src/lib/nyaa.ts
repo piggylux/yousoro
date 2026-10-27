@@ -226,6 +226,8 @@ function episodePhrases(titles: { main: string[]; other: string[] }, episode: nu
 }
 
 export type NyaaSearch = {
+  /** A full user-written query, replacing the automatic episode terms but keeping the category. */
+  query?: string;
   title: string;
   /** The English title, searched as thoroughly as `title` */
   englishTitle?: string | null;
@@ -245,6 +247,7 @@ export type NyaaSearch = {
  * the same way doesn't match.
  */
 export function nyaaQuery({
+  query: customQuery,
   title,
   englishTitle,
   otherTitles = [],
@@ -253,6 +256,8 @@ export function nyaaQuery({
   version = 'any',
   adult = false,
 }: NyaaSearch): { category: string; query: string } {
+  const category = adult ? SUKEBEI_ANIME : CATEGORIES[language];
+  if (customQuery !== undefined) return { category, query: customQuery.trim() };
   const main = englishTitle ? [title, englishTitle] : [title];
   const phrases = episodePhrases({ main, other: otherTitles }, episode);
   // When no title can be spelled in a phrase, its words and the episode number still narrow it
@@ -272,7 +277,7 @@ export function nyaaQuery({
   ]
     .filter(Boolean)
     .join(' ');
-  return { category: adult ? SUKEBEI_ANIME : CATEGORIES[language], query };
+  return { category, query };
 }
 
 /** A nyaa.si, or sukebei.nyaa.si, search for one episode, in nyaa.si's own order (newest first) */

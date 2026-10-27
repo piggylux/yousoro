@@ -300,6 +300,16 @@ describe('nyaaQuery', () => {
 });
 
 describe('nyaaSearchUrl', () => {
+  it('uses custom search terms verbatim while preserving the category and safe destination', () => {
+    const query = '  "Other Anime" 12 1080p -batch &c=0_0 #test  ';
+    const url = new URL(
+      nyaaSearchUrl({ title: 'Show', episode: 1, language: 'english', version: 'dubbed', query })
+    );
+    expect(url.origin).toBe('https://nyaa.si');
+    expect(url.searchParams.get('c')).toBe('1_2');
+    expect(url.searchParams.get('q')).toBe(query.trim());
+    expect(url.hash).toBe('');
+  });
   it('opens the search on nyaa.si, with only the category and the query', () => {
     const url = new URL(
       nyaaSearchUrl({ title: 'Show & Friends', episode: 1, language: 'english', version: 'subbed' })

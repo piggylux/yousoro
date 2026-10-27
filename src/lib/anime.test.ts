@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   getBacklog,
+  getEpisodeToSearch,
   getNextUp,
   countBySection,
   getListSection,
@@ -61,6 +62,22 @@ describe('getWatchState', () => {
 
   it('counts a watched count ahead of the aired count as caught up', () => {
     expect(getWatchState(anime({ currentEpisode: 6, numberAiredEpisodes: 5 }))).toBe('caught-up');
+  });
+});
+
+describe('getEpisodeToSearch', () => {
+  it.each([
+    [{ currentEpisode: 3, numberAiredEpisodes: 5 }, 4],
+    [{ currentEpisode: 5, numberAiredEpisodes: 5 }, 6],
+    [{ currentEpisode: 5, numberAiredEpisodes: 5, rewatching: true }, 6],
+    [{ currentEpisode: 6, numberAiredEpisodes: 5 }, 7],
+    [{ currentEpisode: 0, numberAiredEpisodes: 3 }, 1],
+    [{ currentEpisode: 12, numberEpisodes: 12, numberAiredEpisodes: 12 }, null],
+    [{ currentEpisode: 12, numberEpisodes: 12, numberAiredEpisodes: 13 }, null],
+    [{ currentEpisode: 5, numberAiredEpisodes: null }, null],
+    [{ currentEpisode: 0, numberAiredEpisodes: null }, null],
+  ] as const)('selects the correct episode for %j', (overrides, expected) => {
+    expect(getEpisodeToSearch(anime(overrides))).toBe(expected);
   });
 });
 

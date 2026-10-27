@@ -6,9 +6,17 @@
   const heading = $props.id();
   let dialog = $state<HTMLDialogElement>();
   let results = $state<HTMLElement>();
+  let queryInput = $state<HTMLInputElement>();
+  let filterInput = $state<HTMLInputElement>();
   let loading = $state(true);
   let errorMessage = $state('');
   let attempt = $state(0);
+  const suggestedQuery = $derived(`${search.title} ${String(search.episode).padStart(2, '0')}`);
+  let queryDraft = $derived(suggestedQuery);
+  let appliedQuery = $state<string | null>(null);
+  const activeSearch = $derived(
+    appliedQuery === null ? search : { ...search, query: appliedQuery }
+  );
   type Release = {
     id: string;
     title: string;
@@ -37,7 +45,7 @@
   });
   $effect(() => {
     void attempt;
-    const selection = search;
+    const selection = activeSearch;
     const controller = new AbortController();
     loading = true;
     errorMessage = '';
@@ -128,8 +136,8 @@
       <p class="eyebrow">Releases from {site}</p>
       <h2 id={heading}>{search.title}</h2>
       <p id={`${heading}-description`}>
-        Episode {search.episode} ·
-        <a href={nyaaSearchUrl(search)} target="_blank" rel="noreferrer"
+        {appliedQuery === null ? `Episode ${search.episode}` : 'Custom search'} ·
+        <a href={nyaaSearchUrl(activeSearch)} target="_blank" rel="noreferrer"
           >Open full search ↗<span class="tw:sr-only"> (opens in a new tab)</span></a
         >
       </p>
@@ -152,18 +160,111 @@
       >
     </button>
   </header>
+  <form
+    class="search-form"
+    onsubmit={(event) => {
+      event.preventDefault();
+      const query = queryDraft.trim();
+      if (!query) return;
+      appliedQuery = query;
+      filter = '';
+      attempt++;
+    }}
+  >
+    <div class="search-heading">
+      <label for={`${heading}-query`}>Search Nyaa</label>
+      {#if appliedQuery !== null || queryDraft !== suggestedQuery}
+        <button
+          class="search-reset"
+          type="button"
+          aria-label="Reset to automatic episode search"
+          onclick={() => {
+            appliedQuery = null;
+            queryDraft = suggestedQuery;
+            filter = '';
+            attempt++;
+            queryInput?.focus();
+          }}>Reset search</button
+        >
+      {/if}
+    </div>
+    <div class="search-row">
+      <input
+        id={`${heading}-query`}
+        bind:this={queryInput}
+        type="search"
+        bind:value={queryDraft}
+        maxlength="500"
+        required
+        placeholder="Title, episode or release group…"
+        aria-controls={`${heading}-results`}
+      />
+      <button class="search-submit" type="submit" disabled={!queryDraft.trim()}>
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 4.5 4.5" /></svg
+        >
+        Search
+      </button>
+    </div>
+  </form>
   <div class="filter">
-    <label class="tw:sr-only" for={`${heading}-filter`}>Filter releases</label>
+    <div class="filter-heading">
+      <label for={`${heading}-filter`}>Filter loaded results</label>
+      {#if !loading && !errorMessage && releases.length > 0}
+        <p class="result-count" role="status">
+          {filteredReleases.length} of {releases.length} releases
+        </p>
+      {/if}
+    </div>
     <div class="filter-input">
+      <svg
+        class="filter-icon"
+        width="17"
+        height="17"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.8"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"><path d="M4 5h16l-6 7v6l-4 2v-8Z" /></svg
+      >
       <input
         id={`${heading}-filter`}
+        bind:this={filterInput}
         type="search"
         bind:value={filter}
-        placeholder="Title, release group, quality…"
+        placeholder="Filter these results…"
         aria-controls={`${heading}-results`}
       />
       {#if filter}
-        <button type="button" class="clear-filter" onclick={() => (filter = '')}>Clear</button>
+        <button
+          type="button"
+          class="clear-filter"
+          aria-label="Clear filter"
+          onclick={() => {
+            filter = '';
+            filterInput?.focus();
+          }}
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            aria-hidden="true"><path d="m6 6 12 12M6 18 18 6" /></svg
+          >
+        </button>
       {/if}
     </div>
   </div>
@@ -184,13 +285,9 @@
         <button class="retry" type="button" onclick={() => attempt++}>Try again</button>
       </div>
     {:else if releases.length === 0}
-      <p class="message" role="status">
-        No releases found for this episode with your search preferences.
-      </p>
+      <p class="message" role="status">No releases found. Try another search query.</p>
     {:else}
-      <p class="result-count" role="status">
-        {filteredReleases.length} of {releases.length} releases · Newest first · Latest RSS results
-      </p>
+      <p class="result-order">Newest first · Latest RSS results</p>
       {#if filteredReleases.length === 0}
         <p class="message">
           No releases match your filter. Try different words or clear the filter.
@@ -310,17 +407,46 @@
     background: var(--sea-blue);
     color: #ffffff;
   }
-  .filter {
+  .filter,
+  .search-form {
     flex: none;
   }
-  .filter-input {
+  .search-form {
+    padding: 12px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 16px;
+    background: var(--you-blue-pale);
+  }
+  .search-heading,
+  .filter-heading {
     display: flex;
     align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+  }
+  .search-heading {
+    min-height: 28px;
+  }
+  label {
+    display: block;
+    color: var(--text-accent);
+    font-size: 0.7rem;
+    font-weight: 700;
+  }
+  .search-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: 8px;
   }
-  .filter input {
+  .filter-input {
+    position: relative;
+  }
+  .filter input,
+  .search-form input {
     width: 100%;
     min-width: 0;
+    min-height: 44px;
     padding: 10px 14px;
     border: 1px solid var(--border-subtle);
     border-radius: 12px;
@@ -328,13 +454,50 @@
     color: var(--color-base-content);
     font-size: 0.8rem;
   }
+  .search-form input {
+    background: var(--surface);
+  }
+  .filter input {
+    padding-inline: 38px 40px;
+  }
+  .filter input::-webkit-search-cancel-button {
+    display: none;
+  }
+  .filter-icon {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-accent);
+    pointer-events: none;
+  }
   .clear-filter {
-    min-height: 44px;
-    padding: 8px;
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
     border: 0;
     background: transparent;
     color: var(--text-accent);
-    font-size: 0.8rem;
+    border-radius: 8px;
+  }
+  .search-submit:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+  .search-reset {
+    padding: 4px 0;
+    background: transparent;
+    border: 0;
+    color: var(--text-accent);
+    font-size: 0.7rem;
+    text-decoration: underline;
+    text-underline-offset: 3px;
   }
   a:focus-visible,
   input:focus-visible,
@@ -368,6 +531,23 @@
     font-weight: 650;
     text-decoration: none;
   }
+  .search-submit {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 10px 14px;
+    min-height: 44px;
+    border: 1px solid var(--sea-blue);
+    border-radius: 12px;
+    background: var(--sea-blue);
+    color: #ffffff;
+    font-size: 0.8rem;
+    font-weight: 700;
+  }
+  .search-submit svg {
+    flex: none;
+  }
   .retry {
     margin-top: 16px;
   }
@@ -381,6 +561,13 @@
     background: var(--sea-blue);
     border-color: var(--sea-blue);
     color: #ffffff;
+  }
+  .search-submit:not(:disabled):hover {
+    background: var(--navy);
+    border-color: var(--navy);
+  }
+  .clear-filter:hover {
+    background: var(--surface);
   }
   ul {
     list-style: none;
@@ -405,9 +592,15 @@
     color: var(--text-accent);
     opacity: 0.7;
   }
-  .result-count {
+  .result-count,
+  .result-order {
     font-size: 0.65rem;
     opacity: 0.6;
+  }
+  .result-count {
+    flex: none;
+  }
+  .result-order {
     margin-bottom: 12px;
   }
   .release-actions {
@@ -452,6 +645,22 @@
   @media (prefers-reduced-motion: reduce) {
     .downloads a {
       transition: none;
+    }
+  }
+  @media (max-width: 480px) {
+    dialog {
+      padding: 16px;
+    }
+    .search-form input,
+    .filter input {
+      font-size: 1rem;
+    }
+    .search-submit {
+      width: 100%;
+      padding-inline: 12px;
+    }
+    .search-row {
+      grid-template-columns: minmax(0, 1fr);
     }
   }
   @media (max-height: 600px) {
