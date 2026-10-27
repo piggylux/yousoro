@@ -24,10 +24,11 @@
   } from '#lib/card-rotation.js';
   import { clock } from '#lib/clock.js';
   import FriendAvatar from '#lib/components/FriendAvatar.svelte';
+  import NyaaResultsDialog from '#lib/components/NyaaResultsDialog.svelte';
   import ScoreInput from '#lib/components/ScoreInput.svelte';
   import { formatAirDate, formatAirsIn } from '#lib/countdown.js';
   import { flippedCard } from '#lib/flipped-card.svelte.js';
-  import { nyaaSearchUrl, nyaaSite } from '#lib/nyaa.js';
+  import { nyaaSite, type NyaaSearch } from '#lib/nyaa.js';
   import { consumeSavedCounts, rememberSavedCounts } from '#lib/saved-counts.js';
   import {
     DEFAULT_SCORE_FORMAT,
@@ -93,6 +94,7 @@
   }: Props = $props();
 
   const coverBlurred = $derived(anime.isAdult && blurMature);
+  let nyaaSearch = $state<NyaaSearch | null>(null);
 
   // Countdowns use the viewer's clock and time zone, so they only appear once in the browser
   let mounted = $state(false);
@@ -1172,27 +1174,27 @@
               </form>
             {/if}
             {#if nextToWatch}
-              <a
+              <button
+                type="button"
                 class="download-link"
-                href={nyaaSearchUrl({
-                  title: anime.title,
-                  englishTitle: anime.englishTitle,
-                  otherTitles: anime.otherTitles,
-                  episode: nextToWatch,
-                  language: downloadLanguage,
-                  version: downloadVersion,
-                  adult: anime.isAdult,
-                })}
-                target="_blank"
-                rel="noreferrer"
+                aria-haspopup="dialog"
+                onclick={() =>
+                  (nyaaSearch = {
+                    title: anime.title,
+                    englishTitle: anime.englishTitle,
+                    otherTitles: anime.otherTitles,
+                    episode: nextToWatch,
+                    language: downloadLanguage,
+                    version: downloadVersion,
+                    adult: anime.isAdult,
+                  })}
               >
                 <!-- Always two lines, one each, so the button is the same size for either site -->
                 <span class="download-line"
                   ><span class="download-words">Find episode</span> {nextToWatch}</span
                 >
                 <span class="download-line download-site">on {nyaaSite(anime.isAdult)}</span>
-                <span class="tw:sr-only">, opens in a new tab</span>
-              </a>
+              </button>
             {/if}
             {#if errorMessage && flipped}
               <p class="tw:text-error tw:text-sm" role="alert">{errorMessage}</p>
@@ -1203,6 +1205,10 @@
     </div>
   </div>
 </div>
+
+{#if nyaaSearch}
+  <NyaaResultsDialog search={nyaaSearch} onclose={() => (nyaaSearch = null)} />
+{/if}
 
 <style>
   .cover-area {
@@ -1943,6 +1949,7 @@
 
   /* A pill as wide as the card allows, so it's an easy target rather than a line of small text */
   .download-link {
+    cursor: pointer;
     display: flex;
     flex-direction: column;
     align-items: center;
