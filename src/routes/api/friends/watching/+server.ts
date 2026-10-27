@@ -15,11 +15,11 @@ async function read(event: RequestEvent, ids?: number[]) {
   try {
     const limit = await takeClientLimit(event.getClientAddress(), 'read');
     if (!limit.allowed) throw new AniListRateLimitError(limit.retryAfter);
-    return json(
-      ids
-        ? await getFriendsWatching(session.token, session.user.id, ids)
-        : await getSharedAnime(session.token, session.user.id)
-    );
+    const result = ids
+      ? await getFriendsWatching(session.token, session.user.id, ids)
+      : await getSharedAnime(session.token, session.user.id);
+    if (!Array.isArray(result) && result.retryAfter) event.locals.retryAfter = result.retryAfter;
+    return json(result);
   } catch (err) {
     if (err instanceof AniListRateLimitError) {
       event.locals.retryAfter = err.retryAfter;

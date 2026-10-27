@@ -9,6 +9,7 @@ export type FriendWatching = {
 };
 
 export type FriendWatchingResult = {
+  retryAfter?: number;
   matches: Record<number, FriendWatching[]>;
   partial: boolean;
 };

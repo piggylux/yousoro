@@ -45,6 +45,12 @@ shows you're actively watching come first. Once you've watched an episode, mark 
   capped at four pages and labelled as partial.
   Your own avatar appears on other people's lists when you're watching the same anime.
 
+When AniList rate-limits a read, the affected list, Friends lookup, or calendar automatically retries
+up to twice after the supplied cooldown. A countdown shows the retry status. Retries pause in hidden
+tabs, cancel on navigation/account changes, and reuse existing lookup coalescing and caches. Partial
+lookups retain their results while waiting. Progress saves are never replayed automatically; failures
+other than rate limits remain manual retries.
+
 ## Development
 
 Requires [Bun](https://bun.sh). Create an [AniList API client](https://anilist.co/settings/developer)

@@ -45,7 +45,8 @@ export async function load({
   } catch (err) {
     if (err instanceof AniListRateLimitError) {
       locals.retryAfter = Math.max(locals.retryAfter ?? 0, err.retryAfter);
-      if (!isDataRequest) error(429, err.message);
+      if (!isDataRequest)
+        error(429, { message: err.message, retryAt: Date.now() + err.retryAfter * 1000 });
     }
     if (err instanceof AniListNotFoundError) {
       error(404, `There's no AniList user named ${params.username}`);
@@ -54,7 +55,12 @@ export async function load({
     // save. It keeps showing it then (see +page.ts), rather than an error the viewer didn't ask for
     if (!isDataRequest) throw err;
     console.error(err);
-    return { unavailable: true as const, username: params.username, hiddenSections };
+    return {
+      unavailable: true as const,
+      username: params.username,
+      hiddenSections,
+      retryAt: err instanceof AniListRateLimitError ? Date.now() + err.retryAfter * 1000 : 0,
+    };
   }
   const { userId, username, avatarUrl, scoreFormat, animeList } = userAnimeList;
 

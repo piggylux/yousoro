@@ -154,6 +154,7 @@ describe('batched AniList friend matches', () => {
       .mockResolvedValueOnce({ allowed: false, retryAfter: 30 });
     const result = await getFriendsWatching('token', 10, [1]);
     expect(result.partial).toBe(true);
+    expect(result.retryAfter).toBe(30);
     expect(result.matches[1]).toHaveLength(1);
     expect(fetch).toHaveBeenCalledTimes(1);
   });

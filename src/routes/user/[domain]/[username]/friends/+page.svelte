@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
 
+  import AutoReadRetry from '#lib/components/AutoReadRetry.svelte';
   import FriendAvatar from '#lib/components/FriendAvatar.svelte';
   import FriendsWatchingLoader from '#lib/components/FriendsWatchingLoader.svelte';
   import SharedAnimeDialog from '#lib/components/SharedAnimeDialog.svelte';
@@ -34,6 +35,7 @@
     matches = null;
     matchesStatus = 'loading';
     message = '';
+    retryAt = 0;
     if (own && data.friends.length) {
       getOwnSharedAnime(id, showMature)
         .then((list) => {
@@ -113,6 +115,13 @@
   const people = (count: number) =>
     `${count.toLocaleString()} ${count === 1 ? 'person' : 'people'}`;
 </script>
+
+<AutoReadRetry
+  retryKey={`own-friends:${data.user.id}:${data.isOwnPage}`}
+  {retryAt}
+  recovered={anime !== null}
+  onretry={() => refresh++}
+/>
 
 <svelte:head>
   <title>{data.user.name}'s friends - Yousoro</title>

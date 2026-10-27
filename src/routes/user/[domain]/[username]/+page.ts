@@ -19,8 +19,14 @@ export const load: PageLoad = async ({ data, parent }) => {
         ...lastShown,
         watchingList: withoutHiddenMature(lastShown.watchingList, preferences.showMature),
         hiddenSections,
+        retryAt: data.retryAt,
       };
     }
+    if (data.retryAt)
+      error(429, {
+        message: 'AniList is busy. Your list will retry shortly.',
+        retryAt: data.retryAt,
+      });
     error(503, "AniList isn't answering right now, please try again in a moment");
   }
   if (browser) rememberList(data);

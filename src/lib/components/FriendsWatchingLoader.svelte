@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
 
+  import AutoReadRetry from '#lib/components/AutoReadRetry.svelte';
   import { runFriendsLookup } from '#lib/friend-watching.js';
   import type { FriendWatchingResult, FriendsLookupState } from '#lib/types/friend-watching.js';
 
@@ -23,7 +24,14 @@
   let refresh = $state(0);
   let lookup = $state<FriendsLookupState>({ status: 'loading' });
   let now = $state(Date.now());
-  let loadedAt = 0;
+  let loadedAt = $state(0);
+  const autoRetryAt = $derived(
+    lookup.status === 'unavailable'
+      ? lookup.retryAt
+      : lookup.status === 'ready' && lookup.result.retryAfter
+        ? loadedAt + lookup.result.retryAfter * 1000
+        : 0
+  );
   let previous: {
     viewerId: number;
     contextKey: string;
@@ -58,7 +66,15 @@
       void runFriendsLookup(id, ids, (state) => {
         if (!active) return;
         lookup = state;
-        onresult(state.status === 'ready' ? state.result : null);
+        onresult(
+          state.status === 'ready'
+            ? state.result
+            : state.status === 'loading' &&
+                previous?.viewerId === id &&
+                previous.contextKey === context
+              ? previous.result
+              : null
+        );
         onstatus?.(state.status);
         if (state.status === 'ready') {
           previous = {
@@ -110,6 +126,12 @@
     <span>Showing some matches. More friends may be watching.</span>
   {/if}
 </div>
+<AutoReadRetry
+  retryKey={`friends:${viewerId}:${contextKey}:${key}`}
+  retryAt={autoRetryAt}
+  recovered={lookup.status === 'ready' && !lookup.result.partial}
+  onretry={() => refresh++}
+/>
 
 <style>
   .friends-status {

@@ -20,6 +20,7 @@ export interface Api {
 }
 
 export type AnimePageData = {
+  retryAt?: number;
   domain: Domain;
   username: string;
   avatarUrl: string | null;

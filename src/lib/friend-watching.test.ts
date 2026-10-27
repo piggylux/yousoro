@@ -53,6 +53,40 @@ afterEach(() => {
 });
 
 describe('friend lookup reuse', () => {
+  it('keeps matches from earlier batches when a later batch reaches the rate limit', async () => {
+    const ids = Array.from({ length: 1001 }, (_, index) => index + 1);
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(Response.json({ matches: { 1: [friend] }, partial: false }))
+      .mockResolvedValueOnce(
+        Response.json(
+          { matches: { 501: [friend] }, partial: true, retryAfter: 30 },
+          { headers: { 'Retry-After': '30' } }
+        )
+      );
+    const result = await loadFriendsWatching(10, ids);
+    expect(result).toMatchObject({
+      matches: { 1: [friend], 501: [friend] },
+      partial: true,
+      retryAfter: 30,
+    });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(30000);
+    await loadFriendsWatching(10, ids);
+    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(JSON.parse(vi.mocked(fetch).mock.calls[3][1]!.body as string).mediaIds).toEqual([1001]);
+  });
+  it('does not restart the cooldown when cached partial results are reused', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      Response.json(
+        { matches: { 1: [friend] }, partial: true, retryAfter: 30 },
+        { headers: { 'Retry-After': '30' } }
+      )
+    );
+    await loadFriendsWatching(10, [1]);
+    await vi.advanceTimersByTimeAsync(10000);
+    expect((await loadFriendsWatching(10, [1])).retryAfter).toBe(20);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
   it.each([
     { status: 401, source: 'matches', finishCurrentFirst: false },
     { status: 401, source: 'own', finishCurrentFirst: true },

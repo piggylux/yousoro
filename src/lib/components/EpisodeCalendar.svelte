@@ -12,6 +12,7 @@
     startOfWeek,
   } from '#lib/calendar.js';
   import { clock } from '#lib/clock.js';
+  import AutoReadRetry from '#lib/components/AutoReadRetry.svelte';
   import ScheduleDayDialog from '#lib/components/ScheduleDayDialog.svelte';
   import ScheduledEpisodeLink from '#lib/components/ScheduledEpisodeLink.svelte';
   import {
@@ -117,13 +118,14 @@
         if (obsolete) return;
         result = data;
         loadedKey = key;
-        retryUntil = getScheduleRetryAt();
+        retryUntil = getScheduleRetryAt() > Date.now() ? getScheduleRetryAt() : 0;
         timerNow = Date.now();
       })
       .catch((err) => {
         if (obsolete) return;
         unavailable = true;
-        retryUntil = err instanceof ScheduleUnavailable ? err.retryAt : 0;
+        retryUntil =
+          err instanceof ScheduleUnavailable && err.retryAt > Date.now() ? err.retryAt : 0;
         timerNow = Date.now();
       })
       .finally(() => {
@@ -323,6 +325,14 @@
   {blurMature}
   partial={incomplete}
   onclose={() => (selectedDate = null)}
+/>
+<AutoReadRetry
+  retryKey={`schedule:${requestKey}`}
+  retryAt={loading ? 0 : retryUntil}
+  recovered={Boolean(
+    currentResult && !currentResult.partial && !currentResult.stale && !loading && !unavailable
+  )}
+  onretry={() => retryRevision++}
 />
 
 <style>

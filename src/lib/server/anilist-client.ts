@@ -1,3 +1,4 @@
+import { retryAfterSeconds } from '#lib/read-retry.js';
 import { DEFAULT_SCORE_FORMAT, isScoreFormat, type ScoreFormat } from '#lib/score.js';
 import { fingerprint, pauseAniList, takeAniListRequest } from '#lib/server/rate-limit.js';
 import type { AiringStatus } from '#lib/types/anime.js';
@@ -132,16 +133,7 @@ async function sendQuery<T>(
     cache: 'no-store',
   });
   if (response.status === 429) {
-    const retry = response.headers.get('Retry-After');
-    const seconds =
-      retry && /^\d+$/.test(retry)
-        ? Number(retry)
-        : retry
-          ? (Date.parse(retry) - Date.now()) / 1000
-          : 60;
-    const retryAfter = Number.isFinite(seconds)
-      ? Math.max(1, Math.min(300, Math.ceil(seconds)))
-      : 60;
+    const retryAfter = retryAfterSeconds(response.headers.get('Retry-After'));
     await pauseAniList(retryAfter);
     throw new AniListRateLimitError(retryAfter);
   }
@@ -425,7 +417,10 @@ export async function getFriendsWatching(
       { optional: true }
     ).catch((error) => {
       // Keep already-loaded matches if the optional budget runs out mid-pagination.
-      if (page > 1 && error instanceof AniListRateLimitError) return null;
+      if (page > 1 && error instanceof AniListRateLimitError) {
+        result.retryAfter = error.retryAfter;
+        return null;
+      }
       throw error;
     });
     if (!data) {

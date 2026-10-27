@@ -18,6 +18,7 @@
     sortWatchingList,
   } from '#lib/anime.js';
   import AnimeCard from '#lib/components/AnimeCard.svelte';
+  import AutoReadRetry from '#lib/components/AutoReadRetry.svelte';
   import BacklogBanner from '#lib/components/BacklogBanner.svelte';
   import EpisodeCalendar from '#lib/components/EpisodeCalendar.svelte';
   import FriendsWatchingDialog from '#lib/components/FriendsWatchingDialog.svelte';
@@ -362,6 +363,12 @@
 </svelte:head>
 
 <section>
+  <AutoReadRetry
+    retryKey={`page:${page.data.user?.id ?? 'public'}:${page.url.pathname}:${page.url.search}`}
+    retryAt={data.retryAt ?? 0}
+    recovered={!data.retryAt}
+    onretry={reload}
+  />
   <!-- One compact row, so the cards start high enough for two full rows to fit on screen -->
   <div class="profile-bar" class:calendar-profile={calendarView}>
     <div class="profile">

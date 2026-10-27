@@ -33,7 +33,7 @@ export async function load({
   } catch (err) {
     if (err instanceof AniListRateLimitError) {
       locals.retryAfter = Math.max(locals.retryAfter ?? 0, err.retryAfter);
-      error(429, err.message);
+      error(429, { message: err.message, retryAt: Date.now() + err.retryAfter * 1000 });
     }
     if (err instanceof AniListNotFoundError) {
       error(404, `There's no AniList user named ${params.username}`);

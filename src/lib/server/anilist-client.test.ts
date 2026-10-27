@@ -153,7 +153,7 @@ describe('AniList request protection', () => {
   it.each([
     ['45', 45],
     ['invalid', 60],
-    ['900', 300],
+    ['900', 900],
   ])('records a bounded cooldown for Retry-After=%s', async (header, seconds) => {
     vi.mocked(fetch).mockResolvedValue(
       new Response('', { status: 429, headers: { 'Retry-After': String(header) } })

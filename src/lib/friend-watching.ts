@@ -1,3 +1,4 @@
+import { retryAfterSeconds } from '#lib/read-retry.js';
 import type { Anime } from '#lib/types/anime.js';
 import type {
   FriendWatching,
@@ -67,15 +68,16 @@ export class FriendsUnavailable extends Error {
 async function responseData(response: Response, version: number) {
   // Errors from a previous account must not clear the current account or set its cooldown.
   if (version !== generation) throw new FriendsUnavailable('Account changed.');
+  const retry = response.headers.get('Retry-After');
+  if (response.status === 429 || (response.ok && retry))
+    retryAt = Math.max(retryAt, Date.now() + retryAfterSeconds(retry) * 1000);
   if (response.ok) return response.json();
   if (response.status === 401) setFriendsViewer(null);
-  const seconds = Number(response.headers.get('Retry-After'));
-  if (response.status === 429) retryAt = Date.now() + (seconds > 0 ? seconds : 60) * 1000;
   throw new FriendsUnavailable(
     response.status === 401
       ? 'Sign in again to see friends watching.'
       : 'Friends watching is unavailable.',
-    retryAt
+    response.status === 429 ? retryAt : 0
   );
 }
 
@@ -207,7 +209,13 @@ export async function loadFriendsWatching(
     const key = batch.join(',');
     const partial = partials.get(key);
     let data: FriendWatchingResult;
-    if (partial && partial.expiresAt > Date.now()) data = partial.result;
+    if (partial && partial.expiresAt > Date.now())
+      data = partial.result.retryAfter
+        ? {
+            ...partial.result,
+            retryAfter: Math.max(1, Math.ceil((partial.expiresAt - Date.now()) / 1000)),
+          }
+        : partial.result;
     else {
       checkRetry();
       let pending = requests.get(key);
@@ -223,7 +231,11 @@ export async function loadFriendsWatching(
             if (version !== generation) throw new FriendsUnavailable('Account changed.');
             applyOwnUpdates(value, batch, revision);
             const expiresAt = Date.now() + TTL;
-            if (value.partial) partials.set(key, { expiresAt, result: value });
+            if (value.partial)
+              partials.set(key, {
+                expiresAt: value.retryAfter ? Date.now() + value.retryAfter * 1000 : expiresAt,
+                result: value,
+              });
             else
               for (const mediaId of batch) {
                 covered.set(mediaId, { expiresAt, friends: value.matches[mediaId] ?? [] });
@@ -240,6 +252,11 @@ export async function loadFriendsWatching(
     if (version !== generation) throw new FriendsUnavailable('Account changed.');
     Object.assign(result.matches, data.matches);
     result.partial ||= data.partial;
+    if (data.retryAfter) {
+      result.retryAfter = Math.max(result.retryAfter ?? 0, data.retryAfter);
+      // Preserve earlier batches instead of throwing when the next batch checks the cooldown.
+      break;
+    }
   }
   applyOwnUpdates(result, ids, startingRevision);
   return result;

@@ -1,3 +1,4 @@
+import { retryAfterSeconds } from '#lib/read-retry.js';
 import type { ScheduleResult } from '#lib/types/schedule.js';
 
 const cache = new Map<string, { result: ScheduleResult; reuseUntil: number; expiresAt: number }>();
@@ -54,21 +55,15 @@ async function readBatch(
   })
     .then(async (response) => {
       const retry = response.headers.get('Retry-After');
-      let seconds = retry
-        ? /^\d+$/.test(retry)
-          ? Number(retry)
-          : Math.ceil((Date.parse(retry) - Date.now()) / 1000)
-        : 0;
-      if (response.status === 429 && !(seconds > 0)) seconds = 60;
-      if (seconds > 0) retryAt = Math.max(retryAt, Date.now() + Math.min(seconds, 300) * 1000);
+      if (retry || response.status === 429)
+        retryAt = Math.max(retryAt, Date.now() + retryAfterSeconds(retry) * 1000);
       if (!response.ok)
         throw new ScheduleUnavailable(
           'Could not load the full schedule. Your next known episodes are still shown.',
           retryAt
         );
       const data: ScheduleResult = await response.json();
-      if (data.retryAfter)
-        retryAt = Math.max(retryAt, Date.now() + Math.min(data.retryAfter, 300) * 1000);
+      if (data.retryAfter) retryAt = Math.max(retryAt, Date.now() + data.retryAfter * 1000);
       if (cache.size >= 50) cache.delete(cache.keys().next().value!);
       const fetchedAt = data.fetchedAt ?? Date.now();
       cache.set(key, {

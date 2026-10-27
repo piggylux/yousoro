@@ -5,7 +5,10 @@ import type { Preferences } from '#lib/types/preferences.js';
 // for information about these interfaces
 declare global {
   namespace App {
-    // interface Error {}
+    interface Error {
+      message: string;
+      retryAt?: number;
+    }
     interface Locals {
       /** Combined delay from action and load; emitted once by the response hook. */
       retryAfter?: number;
