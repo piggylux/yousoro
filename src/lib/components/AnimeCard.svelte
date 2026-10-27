@@ -1308,6 +1308,13 @@
 
   .front {
     overflow: hidden;
+    /* Keep the positioned friend bubbles inside the front's layer when the card turns. */
+    isolation: isolate;
+  }
+
+  .in-3d .front {
+    /* Give mobile browsers one front layer to hide, only while the card needs 3D. */
+    transform: translateZ(0);
   }
 
   /*
@@ -1629,6 +1636,7 @@
       0 0 0 1px var(--card-edge),
       0 20px 25px -5px var(--card-shadow),
       0 8px 10px -6px var(--card-shadow);
+    -webkit-backface-visibility: hidden;
     backface-visibility: hidden;
     transition: box-shadow 420ms cubic-bezier(0.22, 1, 0.36, 1);
   }
