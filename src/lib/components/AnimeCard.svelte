@@ -23,6 +23,7 @@
     type Rotation,
   } from '#lib/card-rotation.js';
   import { clock } from '#lib/clock.js';
+  import FriendAvatar from '#lib/components/FriendAvatar.svelte';
   import ScoreInput from '#lib/components/ScoreInput.svelte';
   import { formatAirDate, formatAirsIn } from '#lib/countdown.js';
   import { flippedCard } from '#lib/flipped-card.svelte.js';
@@ -37,9 +38,12 @@
     type ScoreFormat,
   } from '#lib/score.js';
   import type { Anime } from '#lib/types/anime.js';
+  import type { FriendWatching } from '#lib/types/friend-watching.js';
   import type { DownloadLanguage, DownloadVersion } from '#lib/types/preferences.js';
 
   type Props = {
+    friendsWatching?: FriendWatching[] | null;
+    onShowFriends?: () => void;
     anime: Anime;
     animeLinkFn: (animeId: number) => string;
     /** Whether the signed-in user can update this anime's progress */
@@ -72,6 +76,8 @@
   };
 
   let {
+    friendsWatching,
+    onShowFriends,
     anime,
     animeLinkFn,
     canEdit = false,
@@ -884,30 +890,56 @@
       <div class="face front tw:card" inert={flipped}>
         <!-- A soft light on the cover where the mouse is -->
         <span class="glare" aria-hidden="true"></span>
-        <button
-          class="cover"
-          bind:this={coverButton}
-          onclick={(event) => flipByClick(true, event)}
-          aria-label={`${anime.title}, show details`}
-        >
-          <!-- Clips the cover's hover zoom to its frame -->
-          <span class="cover-frame" class:mature={coverBlurred}>
-            <img
-              src={anime.thumbnailUrl}
-              alt=""
-              loading="lazy"
-              class:up-to-date={episodesToWatch === 0}
-            />
-            <span class="holo" aria-hidden="true"></span>
-            {#if coverBlurred}
-              <span class="mature-label">18+</span>
-            {/if}
-          </span>
-          <!-- Always two lines tall, so every card is the same height; the full title shows on hover -->
-          <span class="title tw:text-center tw:font-bold tw:line-clamp-2" title={anime.title}
-            >{anime.title}</span
+        <div class="cover-area">
+          <button
+            class="cover"
+            bind:this={coverButton}
+            onclick={(event) => flipByClick(true, event)}
+            aria-label={`${anime.title}, show details`}
           >
-        </button>
+            <!-- Clips the cover's hover zoom to its frame -->
+            <span class="cover-frame" class:mature={coverBlurred}>
+              <img
+                src={anime.thumbnailUrl}
+                alt=""
+                loading="lazy"
+                class:up-to-date={episodesToWatch === 0}
+              />
+              <span class="holo" aria-hidden="true"></span>
+              {#if coverBlurred}
+                <span class="mature-label">18+</span>
+              {/if}
+            </span>
+            <!-- Always two lines tall, so every card is the same height; the full title shows on hover -->
+            <span class="title tw:text-center tw:font-bold tw:line-clamp-2" title={anime.title}
+              >{anime.title}</span
+            >
+          </button>
+          {#if friendsWatching?.length}
+            <button
+              class="friend-presence"
+              type="button"
+              onclick={onShowFriends}
+              aria-haspopup="dialog"
+              aria-label={`Show ${friendsWatching.length} ${friendsWatching.length === 1 ? 'person' : 'people'} watching ${anime.title}`}
+              title={`${friendsWatching
+                .slice(0, 2)
+                .map((friend) => (friend.isViewer ? 'You' : friend.name))
+                .join(
+                  ', '
+                )}${friendsWatching.length > 2 ? ` and ${friendsWatching.length - 2} more` : ''} · View episode progress`}
+            >
+              {#each friendsWatching.slice(0, 2) as friend (friend.id)}
+                <span class="presence-avatar" aria-hidden="true"
+                  ><FriendAvatar {...friend} size={22} /></span
+                >
+              {/each}
+              {#if friendsWatching.length > 2}<span class="presence-more" aria-hidden="true"
+                  >+{friendsWatching.length - 2}</span
+                >{/if}
+            </button>
+          {/if}
+        </div>
         <div class="progression">
           {#if totalEpisodes && barParts}
             <!-- Watched, then aired but not watched yet, then not aired yet -->
@@ -1097,6 +1129,92 @@
 </div>
 
 <style>
+  .cover-area {
+    position: relative;
+    width: 100%;
+  }
+  .friend-presence {
+    position: absolute;
+    right: 6px;
+    bottom: calc(2lh + 8px);
+    z-index: 1;
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0 2px;
+    border-radius: 999px;
+    background: transparent;
+    cursor: pointer;
+  }
+  .presence-avatar {
+    position: relative;
+    display: flex;
+    border-radius: 50%;
+    opacity: 0.88;
+    box-shadow:
+      0 0 0 1.5px rgb(255 255 255 / 0.8),
+      0 2px 5px rgb(0 0 0 / 0.25);
+    transition:
+      opacity 160ms ease,
+      translate 160ms ease,
+      margin-left 160ms ease;
+  }
+  .presence-avatar + .presence-avatar {
+    margin-left: -6px;
+  }
+  .presence-more {
+    position: relative;
+    display: grid;
+    place-items: center;
+    height: 20px;
+    min-width: 20px;
+    margin-left: -4px;
+    padding: 0 2px;
+    border: 1px solid rgb(255 255 255 / 0.35);
+    border-radius: 50%;
+    background: rgb(12 28 47 / 0.65);
+    color: rgb(255 255 255 / 0.95);
+    font-size: 0.53rem;
+    line-height: 1;
+    font-weight: 650;
+    backdrop-filter: blur(6px);
+    transition: background 160ms ease;
+  }
+  .friend-presence:hover .presence-avatar,
+  .friend-presence:focus-visible .presence-avatar {
+    opacity: 1;
+    translate: 0 -1px;
+  }
+  .friend-presence:hover .presence-avatar + .presence-avatar,
+  .friend-presence:focus-visible .presence-avatar + .presence-avatar {
+    margin-left: -2px;
+    translate: 0 -2px;
+  }
+  .friend-presence:hover .presence-more,
+  .friend-presence:focus-visible .presence-more {
+    background: rgb(12 28 47 / 0.9);
+  }
+  .friend-presence:focus-visible {
+    outline: 2px solid var(--you-blue);
+    outline-offset: 2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .presence-avatar,
+    .presence-more {
+      transition: none;
+    }
+    .friend-presence:hover .presence-avatar,
+    .friend-presence:focus-visible .presence-avatar {
+      translate: none;
+    }
+    .friend-presence:hover .presence-avatar + .presence-avatar,
+    .friend-presence:focus-visible .presence-avatar + .presence-avatar {
+      margin-left: -6px;
+      translate: none;
+    }
+  }
   /* Shrinks to its card, and holds the badge and card in place */
   .card-slot {
     position: relative;

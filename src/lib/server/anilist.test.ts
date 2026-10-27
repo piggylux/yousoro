@@ -1,10 +1,12 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 
-import { AniListApi } from '#lib/server/anilist.js';
+let AniListApi: (typeof import('#lib/server/anilist.js'))['AniListApi'];
 
 const cacheNamespace = vi.hoisted(() => ({ value: 0 }));
-beforeEach(() => {
+beforeEach(async () => {
   cacheNamespace.value++;
+  vi.resetModules();
+  ({ AniListApi } = await import('#lib/server/anilist.js'));
 });
 
 vi.mock('#lib/server/rate-limit.js', () => ({
@@ -105,12 +107,13 @@ describe('AniListApi.getUserAnimeList', () => {
   });
 
   it('gives when the latest episode aired, the newest airing of each anime', async () => {
+    const now = Math.floor(Date.now() / 1000);
     answerWith(media({ romaji: 'Koupen-chan', english: null }, []), [
-      { mediaId: 1, airingAt: 2000 },
-      { mediaId: 1, airingAt: 1000 },
+      { mediaId: 1, airingAt: now },
+      { mediaId: 1, airingAt: now - 1000 },
     ]);
     const { animeList } = await new AniListApi().getUserAnimeList('Piggylux');
-    expect(animeList[0].recentEpisodeAiredAt).toBe(2_000_000);
+    expect(animeList[0].recentEpisodeAiredAt).toBe(now * 1000);
   });
 
   it('gives no air time for an anime that hasn’t aired an episode recently', async () => {

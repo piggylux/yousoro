@@ -26,6 +26,11 @@ shows you're actively watching come first. Once you've watched an episode, mark 
 - **Shareable lists**: anyone's watching list is viewable at `/user/anilist/<username>`
 - **Friends**: `/user/anilist/<username>/friends` lists the people a user follows on AniList, with
   a link to each one's watching list
+- **Watching together**: signed-in viewers see their friends watching or rewatching each anime,
+  with avatars and episode progress. Your Friends page also lists the anime you share. Lookups
+  batch anime together and reuse results in browser memory for five minutes; large results are
+  capped at four pages and labelled as partial.
+  Your own avatar appears on other people's lists when you're watching the same anime.
 
 ## Development
 

@@ -33,10 +33,11 @@ export async function takeLimit(key: string, limit: number, seconds = 60, cost =
   return { allowed: true, retryAfter };
 }
 
-export async function takeAniListRequest() {
+export async function takeAniListRequest(optional = false) {
   const retryAfter = Math.ceil((cooldownUntil - Date.now()) / 1000);
   if (retryAfter > 0) return { allowed: false, retryAfter };
-  return takeLimit('anilist', 25);
+  // Social matches and decorative airings leave five slots for lists and progress saves.
+  return takeLimit('anilist', optional ? 20 : 25);
 }
 
 export async function pauseAniList(seconds: number) {

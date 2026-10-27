@@ -1,5 +1,6 @@
 <script lang="ts">
   import BackToTop from '#lib/components/BackToTop.svelte';
+  import { setFriendsViewer } from '#lib/friend-watching.js';
 
   import type { LayoutProps } from './$types';
   import Header from './Header.svelte';
@@ -8,6 +9,10 @@
   import '../app.css';
 
   let { data, children }: LayoutProps = $props();
+
+  $effect(() => {
+    setFriendsViewer(data.user?.id ?? null);
+  });
 
   $effect(() => {
     if (data.preferences.theme === 'system') delete document.documentElement.dataset.theme;

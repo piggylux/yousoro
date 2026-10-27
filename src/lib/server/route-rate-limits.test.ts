@@ -97,13 +97,23 @@ describe('route rate limits', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('charges a list two read units and a friends page five', async () => {
+  it('charges cached public friends visits one read unit without repeating upstream calls', async () => {
     await limits.takeClientLimit(address, 'read', 54);
     expect(await page.load(event())).toMatchObject({ canEdit: true });
+    vi.mocked(fetch).mockImplementation(async (_url, init) => {
+      expect(init?.headers).not.toHaveProperty('Authorization');
+      const { query } = JSON.parse(init!.body as string);
+      return Response.json({
+        data: query.includes('User(name:')
+          ? { User: { id: 1, name: 'Fixture', avatar: null } }
+          : { Page: { pageInfo: { total: 0, hasNextPage: false }, following: [] } },
+      });
+    });
+    for (let i = 0; i < 4; i++) expect(await friends.load(event())).toMatchObject({ friends: [] });
     const request = event();
     await expect(friends.load(request)).rejects.toMatchObject({ status: 429 });
     expect(request.locals.retryAfter).toBeGreaterThan(0);
-    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledTimes(3);
   });
 });
 

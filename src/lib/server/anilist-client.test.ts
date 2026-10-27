@@ -4,6 +4,7 @@ import {
   AniListRateLimitError,
   AniListTokenError,
   getFollowing,
+  getLatestAirings,
   getViewer,
   saveEntry,
 } from '#lib/server/anilist-client.js';
@@ -49,9 +50,61 @@ describe('AniList request protection', () => {
     expect(fetch).toHaveBeenCalledTimes(4);
     await getFollowing('Fixture');
     expect(fetch).toHaveBeenCalledTimes(4);
-    vi.spyOn(Date, 'now').mockReturnValue(now + 30_000);
+    vi.spyOn(Date, 'now').mockReturnValue(now + 300_000);
     await getFollowing('Fixture');
     expect(fetch).toHaveBeenCalledTimes(6);
+  });
+  it('coalesces concurrent reads for one token without reusing them after completion or across tokens', async () => {
+    vi.mocked(fetch).mockImplementation(async () =>
+      Response.json({ data: { Viewer: { id: 1, name: 'Fixture', avatar: null } } })
+    );
+    await Promise.all([getViewer('same-token'), getViewer('same-token')]);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await getViewer('same-token');
+    expect(fetch).toHaveBeenCalledTimes(2);
+    await Promise.all([getViewer('token-a'), getViewer('token-b')]);
+    expect(fetch).toHaveBeenCalledTimes(4);
+  });
+  it('does not let a post-save reload join an older in-flight read', async () => {
+    let resolveOld!: (response: Response) => void;
+    vi.mocked(fetch)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveOld = resolve;
+          })
+      )
+      .mockImplementationOnce(async () =>
+        Response.json({
+          data: { SaveMediaListEntry: { progress: 4, score: 0, status: 'CURRENT' } },
+        })
+      )
+      .mockImplementationOnce(async () =>
+        Response.json({ data: { Viewer: { id: 1, name: 'Fresh', avatar: null } } })
+      );
+    const olderRead = getViewer('read-save-token');
+    await Promise.resolve();
+    await saveEntry('read-save-token', 1, { progress: 4 });
+    expect((await getViewer('read-save-token')).name).toBe('Fresh');
+    resolveOld(Response.json({ data: { Viewer: { id: 1, name: 'Old', avatar: null } } }));
+    await olderRead;
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+  it('reuses public recent-airing results across progress refreshes with changing timestamps and media subsets', async () => {
+    const now = Date.now();
+    vi.spyOn(Date, 'now').mockReturnValue(now);
+    vi.mocked(fetch).mockImplementation(async () =>
+      Response.json({ data: { Page: { airingSchedules: [{ mediaId: 9001, airingAt: 1200 }] } } })
+    );
+    expect(await getLatestAirings([9001, 9002], 1000)).toEqual(new Map([[9001, 1200]]));
+    vi.spyOn(Date, 'now').mockReturnValue(now + 10_000);
+    expect(await getLatestAirings([9001], 1010)).toEqual(new Map([[9001, 1200]]));
+    expect(await getLatestAirings([9002], 1010)).toEqual(new Map());
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(await getLatestAirings([9001], 1200)).toEqual(new Map());
+    vi.spyOn(Date, 'now').mockReturnValue(now + 30_000);
+    await getLatestAirings([9001], 1030);
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
   it('sends updates using the bearer token without accepting a target user ID', async () => {
     vi.mocked(fetch).mockResolvedValue(

@@ -2,19 +2,16 @@ import { error, type Cookies } from '@sveltejs/kit';
 
 import {
   AniListNotFoundError,
-  AniListTokenError,
   AniListRateLimitError,
   getFollowing,
 } from '#lib/server/anilist-client.js';
 import { takeClientLimit } from '#lib/server/rate-limit.js';
-import { clearSession } from '#lib/server/session.js';
 import { isDomain } from '#lib/types/domain.js';
 
 /** @type {import('./$types').PageServerLoad} */
 export async function load({
   params,
   locals,
-  cookies,
   getClientAddress,
 }: {
   params: { username: string; domain: string };
@@ -28,9 +25,11 @@ export async function load({
 
   let result;
   try {
-    const limit = await takeClientLimit(getClientAddress(), 'read', 5);
+    const limit = await takeClientLimit(getClientAddress(), 'read');
     if (!limit.allowed) throw new AniListRateLimitError(limit.retryAfter);
-    result = await getFollowing(params.username, locals.session?.token);
+    // Following is public. Anonymous reads can reuse the five-minute public cache,
+    // including while signed in; private lists and matches still use the viewer's token.
+    result = await getFollowing(params.username);
   } catch (err) {
     if (err instanceof AniListRateLimitError) {
       locals.retryAfter = Math.max(locals.retryAfter ?? 0, err.retryAfter);
@@ -39,11 +38,7 @@ export async function load({
     if (err instanceof AniListNotFoundError) {
       error(404, `There's no AniList user named ${params.username}`);
     }
-    if (!(err instanceof AniListTokenError) || !locals.session) throw err;
-    // The signed-in user's token expired: sign them out and read the public list instead
-    clearSession(cookies);
-    locals.session = null;
-    result = await getFollowing(params.username);
+    throw err;
   }
 
   return {

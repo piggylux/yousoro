@@ -1,9 +1,15 @@
 import { DEFAULT_SCORE_FORMAT, isScoreFormat, type ScoreFormat } from '#lib/score.js';
 import { fingerprint, pauseAniList, takeAniListRequest } from '#lib/server/rate-limit.js';
 import type { AiringStatus } from '#lib/types/anime.js';
+import type { FriendWatchingResult, SharedAnime } from '#lib/types/friend-watching.js';
 
 const ANILIST_URL = 'https://graphql.anilist.co';
 const publicCache = new Map<string, { data: unknown; expiresAt: number }>();
+const pendingReads = new Map<string, Promise<unknown>>();
+const airingCache = new Map<
+  number,
+  { since: number; airingAt: number | null; expiresAt: number }
+>();
 const MAX_CACHE_ENTRIES = 100;
 
 const MEDIA_FIELDS = `
@@ -71,19 +77,46 @@ export class AniListRateLimitError extends Error {
 async function query<T>(
   query: string,
   variables: Record<string, unknown>,
-  token?: string
+  token?: string,
+  options: { cacheTtlMs?: number; optional?: boolean } = {}
 ): Promise<T> {
-  // Only anonymous reads are shared. Authenticated/private results never enter this cache.
-  const cacheKey =
-    !token && query.trimStart().startsWith('query')
-      ? `yousoro:public:${fingerprint(JSON.stringify([query, variables]))}`
-      : null;
+  const readKey = query.trimStart().startsWith('query')
+    ? fingerprint(JSON.stringify([query, variables, token || null]))
+    : null;
+  // Authenticated reads are only coalesced while pending, never stored in the public cache.
+  const cacheKey = !token && readKey ? `yousoro:public:${readKey}` : null;
   if (cacheKey) {
     const cached = publicCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) return cached.data as T;
     publicCache.delete(cacheKey);
   }
-  const budget = await takeAniListRequest();
+  if (readKey && pendingReads.has(readKey)) return pendingReads.get(readKey) as Promise<T>;
+  // A post-save reload must never join a read that started before the write.
+  if (!readKey) pendingReads.clear();
+  const pending = sendQuery<T>(query, variables, token, options.optional)
+    .then((data) => {
+      if (cacheKey) {
+        if (publicCache.size >= MAX_CACHE_ENTRIES)
+          publicCache.delete(publicCache.keys().next().value!);
+        publicCache.set(cacheKey, { data, expiresAt: Date.now() + (options.cacheTtlMs ?? 30_000) });
+      }
+      return data;
+    })
+    .finally(() => {
+      if (!readKey) pendingReads.clear();
+      else if (pendingReads.get(readKey) === pending) pendingReads.delete(readKey);
+    });
+  if (readKey && pendingReads.size < MAX_CACHE_ENTRIES) pendingReads.set(readKey, pending);
+  return pending;
+}
+
+async function sendQuery<T>(
+  query: string,
+  variables: Record<string, unknown>,
+  token?: string,
+  optional = false
+): Promise<T> {
+  const budget = await takeAniListRequest(optional);
   if (!budget.allowed) throw new AniListRateLimitError(budget.retryAfter);
   const response = await fetch(ANILIST_URL, {
     method: 'POST',
@@ -124,12 +157,6 @@ async function query<T>(
     throw new Error(`AniList API returned ${response.status}: ${messages}`);
   }
 
-  if (cacheKey) {
-    if (publicCache.size >= MAX_CACHE_ENTRIES) {
-      publicCache.delete(publicCache.keys().next().value!);
-    }
-    publicCache.set(cacheKey, { data: body.data, expiresAt: Date.now() + 30_000 });
-  }
   return body.data;
 }
 
@@ -198,6 +225,18 @@ export async function getLatestAirings(
   mediaIds: number[],
   since: number
 ): Promise<Map<number, number>> {
+  const latest = new Map<number, number>();
+  const missing = [...new Set(mediaIds)]
+    .sort((a, b) => a - b)
+    .filter((id) => {
+      const cached = airingCache.get(id);
+      if (!cached || cached.expiresAt <= Date.now() || cached.since > since) return true;
+      if (cached.airingAt !== null && cached.airingAt > since) latest.set(id, cached.airingAt);
+      return false;
+    });
+  if (!missing.length) return latest;
+  // Stable timestamps let simultaneous refreshes reuse the same public request too.
+  const querySince = Math.floor(since / 30) * 30;
   const data = await query<{
     Page: { airingSchedules: { mediaId: number; airingAt: number }[] };
   }>(
@@ -214,17 +253,168 @@ export async function getLatestAirings(
         }
       }
     }`,
-    { ids: mediaIds, since }
+    { ids: missing, since: querySince },
+    undefined,
+    { optional: true }
   );
-  const latest = new Map<number, number>();
+  const fetched = new Map<number, number>();
   // Newest first, so each anime's first airing is its latest
   for (const { mediaId, airingAt } of data.Page.airingSchedules) {
-    if (!latest.has(mediaId)) latest.set(mediaId, airingAt);
+    if (!fetched.has(mediaId)) fetched.set(mediaId, airingAt);
+  }
+  for (const id of missing) {
+    if (airingCache.size >= 1000) airingCache.delete(airingCache.keys().next().value!);
+    const airingAt = fetched.get(id) ?? null;
+    airingCache.set(id, { since: querySince, airingAt, expiresAt: Date.now() + 30_000 });
+    if (airingAt !== null && airingAt > since) latest.set(id, airingAt);
   }
   return latest;
 }
 
 export type AniListUser = { id: number; name: string; avatarUrl: string | null };
+
+/** One lookup for all cards, without downloading each friend's list. */
+export async function getFriendsWatching(
+  token: string,
+  viewerId: number,
+  mediaIds: number[]
+): Promise<FriendWatchingResult> {
+  const result: FriendWatchingResult = { matches: {}, partial: false };
+  if (!mediaIds.length) return result;
+  const wanted = new Set(mediaIds);
+  for (let page = 1; page <= 4; page++) {
+    const data = await query<{
+      Viewer?: AniListUserFields | null;
+      self?: {
+        lists: {
+          isCustomList: boolean;
+          entries: {
+            mediaId: number;
+            progress: number;
+            status: string;
+          }[];
+        }[];
+      } | null;
+      Page: {
+        pageInfo: { hasNextPage: boolean };
+        mediaList: {
+          mediaId: number;
+          progress: number;
+          status: string;
+          user: AniListUserFields;
+        }[];
+      };
+    }>(
+      `query ($ids: [Int], $page: Int, $viewerId: Int!, $includeViewer: Boolean!) {
+        Viewer @include(if: $includeViewer) { id name avatar { large } }
+        self: MediaListCollection(userId: $viewerId, type: ANIME, status_in: [CURRENT, REPEATING])
+          @include(if: $includeViewer) {
+          lists { isCustomList entries { mediaId progress status } }
+        }
+        Page(page: $page, perPage: 50) {
+          pageInfo { hasNextPage }
+          mediaList(type: ANIME, isFollowing: true, mediaId_in: $ids,
+            status_in: [CURRENT, REPEATING], sort: MEDIA_ID) {
+            mediaId progress status user { id name avatar { large } }
+          }
+        }
+      }`,
+      { ids: mediaIds, page, viewerId, includeViewer: page === 1 },
+      token,
+      { optional: true }
+    ).catch((error) => {
+      // Keep already-loaded matches if the optional budget runs out mid-pagination.
+      if (page > 1 && error instanceof AniListRateLimitError) return null;
+      throw error;
+    });
+    if (!data) {
+      result.partial = true;
+      break;
+    }
+    if (page === 1 && data.Viewer && data.self) {
+      if (data.Viewer.id !== viewerId)
+        throw new AniListTokenError('Your AniList account changed, please sign in again');
+      for (const list of data.self.lists) {
+        if (list.isCustomList) continue;
+        for (const entry of list.entries) {
+          if (!wanted.has(entry.mediaId) || !['CURRENT', 'REPEATING'].includes(entry.status))
+            continue;
+          const people = (result.matches[entry.mediaId] ??= []);
+          if (!people.some((person) => person.id === viewerId))
+            people.push({
+              ...toUser(data.Viewer),
+              progress: entry.progress,
+              rewatching: entry.status === 'REPEATING',
+              isViewer: true,
+            });
+        }
+      }
+    }
+    const { Page } = data;
+    for (const entry of Page.mediaList) {
+      if (
+        !wanted.has(entry.mediaId) ||
+        entry.user.id === viewerId ||
+        !['CURRENT', 'REPEATING'].includes(entry.status)
+      )
+        continue;
+      const friends = (result.matches[entry.mediaId] ??= []);
+      if (!friends.some((friend) => friend.id === entry.user.id)) {
+        friends.push({
+          ...toUser(entry.user),
+          progress: entry.progress,
+          rewatching: entry.status === 'REPEATING',
+        });
+      }
+    }
+    result.partial = Page.pageInfo.hasNextPage;
+    if (!result.partial) break;
+  }
+  for (const friends of Object.values(result.matches)) {
+    friends.sort(
+      (a, b) => Number(!!b.isViewer) - Number(!!a.isViewer) || a.name.localeCompare(b.name)
+    );
+  }
+  return result;
+}
+
+/** Only the fields needed to compare the viewer with friends; no airing enrichment. */
+export async function getSharedAnime(token: string, userId: number): Promise<SharedAnime[]> {
+  const { MediaListCollection } = await query<{
+    MediaListCollection: {
+      lists: {
+        isCustomList: boolean;
+        entries: {
+          media: {
+            id: number;
+            isAdult: boolean;
+            title: { romaji: string };
+            coverImage?: { large: string | null };
+          };
+        }[];
+      }[];
+    };
+  }>(
+    `query ($userId: Int) {
+      MediaListCollection(userId: $userId, type: ANIME, status_in: [CURRENT, REPEATING]) {
+        lists { isCustomList entries { media { id title { romaji } isAdult coverImage { large } } } }
+      }
+    }`,
+    { userId },
+    token,
+    { optional: true }
+  );
+  return MediaListCollection.lists
+    .filter((list) => !list.isCustomList)
+    .flatMap((list) =>
+      list.entries.map(({ media }) => ({
+        id: media.id,
+        title: media.title.romaji,
+        isAdult: media.isAdult,
+        coverUrl: media.coverImage?.large,
+      }))
+    );
+}
 
 type AniListUserFields = { id: number; name: string; avatar: { large: string | null } | null };
 
@@ -247,7 +437,8 @@ export async function getFollowing(
   const { User } = await query<{ User: AniListUserFields }>(
     'query ($name: String) { User(name: $name) { id name avatar { large } } }',
     { name: userName },
-    token
+    token,
+    { cacheTtlMs: 5 * 60 * 1000 }
   );
 
   const following: AniListUser[] = [];
@@ -266,7 +457,8 @@ export async function getFollowing(
         }
       }`,
       { id: User.id, page },
-      token
+      token,
+      { cacheTtlMs: 5 * 60 * 1000 }
     );
     following.push(...Page.following.map(toUser));
     total = Page.pageInfo.total;

@@ -57,6 +57,7 @@ describe('request security', () => {
     ['/user/anilist/fixture', 'text/html'],
     ['/user/anilist/fixture/__data.json', 'application/json'],
     ['/user/anilist/fixture?/updateEntry', 'application/json'],
+    ['/api/friends/watching', 'application/json'],
   ])('preserves framework responses for %s', async (path, contentType) => {
     const expected = new Response('framework response', {
       status: 429,

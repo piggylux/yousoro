@@ -1,5 +1,6 @@
 <script lang="ts">
   import { beforeNavigate, invalidateAll } from '$app/navigation';
+  import { page } from '$app/state';
   import { onMount, tick } from 'svelte';
   import { flip } from 'svelte/animate';
   import { prefersReducedMotion } from 'svelte/motion';
@@ -18,20 +19,47 @@
   } from '#lib/anime.js';
   import AnimeCard from '#lib/components/AnimeCard.svelte';
   import BacklogBanner from '#lib/components/BacklogBanner.svelte';
+  import FriendsWatchingDialog from '#lib/components/FriendsWatchingDialog.svelte';
+  import FriendsWatchingLoader from '#lib/components/FriendsWatchingLoader.svelte';
   import ListFilters from '#lib/components/ListFilters.svelte';
   import ScorePrompt from '#lib/components/ScorePrompt.svelte';
   import YousoroCelebration from '#lib/components/YousoroCelebration.svelte';
   import { flippedCard } from '#lib/flipped-card.svelte.js';
+  import { recordOwnWatchingEntry, seedOwnAnime, withoutListOwner } from '#lib/friend-watching.js';
   import { hiddenSectionsCookie, toggleHidden } from '#lib/hidden-sections.js';
   import { recordSavedEntry } from '#lib/list-data.js';
   import { nextAiringReloadDelay, planReload, reloadsOnReturn } from '#lib/live-updates.js';
   import type { Anime } from '#lib/types/anime.js';
   import type { AnimePageData } from '#lib/types/api.js';
+  import type { FriendWatching, FriendWatchingResult } from '#lib/types/friend-watching.js';
   import { countColumns, getVisibleRange, type VisibleRange } from '#lib/virtual-grid.js';
 
   let { data }: { data: AnimePageData } = $props();
 
+  let friendMatches = $state<FriendWatchingResult | null>(null);
+  const visibleFriendMatches = $derived(
+    friendMatches ? withoutListOwner(friendMatches.matches, data.username) : null
+  );
+  let friendSelection = $state<{
+    title: string;
+    friends: FriendWatching[];
+    coverUrl?: string;
+    blurCover?: boolean;
+  } | null>(null);
+  const friendsViewerId = $derived(page.data.user?.id ?? null);
+  const friendsPageKey = $derived(`${friendsViewerId}:${data.username}`);
+  $effect(() => {
+    if (data.canEdit && page.data.user)
+      seedOwnAnime(page.data.user.id, data.watchingList, data.preferences.showMature);
+  });
+  $effect(() => {
+    void friendsPageKey;
+    friendSelection = null;
+    friendMatches = null;
+  });
+
   function confirmSaved(saved: Anime, status: string) {
+    if (data.canEdit && page.data.user) recordOwnWatchingEntry(page.data.user, saved, status);
     data = recordSavedEntry(data, saved, status);
   }
 
@@ -311,6 +339,7 @@
   // The prompt covers the page, but Back could still leave it with a score unasked
   beforeNavigate(({ cancel, willUnload }) => {
     if (!willUnload && scoring) cancel();
+    else friendSelection = null;
   });
 </script>
 
@@ -370,6 +399,14 @@
     </p>
   {/if}
 
+  {#if page.data.user}
+    <FriendsWatchingLoader
+      contextKey={data.username}
+      viewerId={page.data.user.id}
+      mediaIds={data.watchingList.map((anime) => anime.id)}
+      onresult={(result) => (friendMatches = result)}
+    />
+  {/if}
   <div
     class="anime-grid"
     data-size={data.preferences.cardSize}
@@ -389,6 +426,18 @@
         out:fade={{ duration: listIds.has(anime.id) ? 0 : duration / 2 }}
       >
         <AnimeCard
+          friendsWatching={page.data.user
+            ? visibleFriendMatches
+              ? (visibleFriendMatches[anime.id] ?? [])
+              : null
+            : undefined}
+          onShowFriends={() =>
+            (friendSelection = {
+              title: anime.title,
+              coverUrl: anime.thumbnailUrl,
+              blurCover: anime.isAdult && data.preferences.blurMature,
+              friends: visibleFriendMatches?.[anime.id] ?? [],
+            })}
           {anime}
           {animeLinkFn}
           canEdit={data.canEdit}
@@ -406,6 +455,8 @@
     {/each}
   </div>
 </section>
+
+<FriendsWatchingDialog selection={friendSelection} onclose={() => (friendSelection = null)} />
 
 {#if movedNote}
   <div class="moved-note" role="status">
