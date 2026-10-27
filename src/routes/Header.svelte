@@ -36,6 +36,15 @@
     navUsername ? `/user/anilist/${encodeURIComponent(navUsername)}` : null
   );
   const calendarView = $derived(page.url.searchParams.get('view') === 'calendar');
+  const activeNav = $derived(
+    listPath && page.url.pathname === listPath
+      ? calendarView
+        ? 1
+        : 0
+      : listPath && page.url.pathname === `${listPath}/friends`
+        ? 2
+        : -1
+  );
   $effect(() => {
     void page.url.pathname;
     void page.url.search;
@@ -93,11 +102,12 @@
       </div>
 
       {#if listPath}
-        <div class="primary-links">
-          <a
-            href={listPath}
-            aria-current={page.url.pathname === listPath && !calendarView ? 'page' : undefined}
-          >
+        <div
+          class="primary-links"
+          class:has-selection={activeNav >= 0}
+          style:--active-tab={Math.max(0, activeNav)}
+        >
+          <a href={listPath} aria-current={activeNav === 0 ? 'page' : undefined}>
             <svg
               viewBox="0 0 24 24"
               fill="none"
@@ -108,10 +118,7 @@
             >
             {user ? 'My anime' : 'Anime list'}
           </a>
-          <a
-            href={`${listPath}?view=calendar`}
-            aria-current={page.url.pathname === listPath && calendarView ? 'page' : undefined}
-          >
+          <a href={`${listPath}?view=calendar`} aria-current={activeNav === 1 ? 'page' : undefined}>
             <svg
               viewBox="0 0 24 24"
               fill="none"
@@ -125,10 +132,7 @@
             >
             Calendar
           </a>
-          <a
-            href={`${listPath}/friends`}
-            aria-current={page.url.pathname === `${listPath}/friends` ? 'page' : undefined}
-          >
+          <a href={`${listPath}/friends`} aria-current={activeNav === 2 ? 'page' : undefined}>
             <svg
               viewBox="0 0 24 24"
               fill="none"
@@ -420,14 +424,35 @@
     color: var(--text-accent);
   }
   .primary-links {
+    position: relative;
+    isolation: isolate;
     grid-column: 2;
     grid-row: 1;
-    display: flex;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     justify-content: center;
     gap: 4px;
   }
+  .primary-links::before {
+    content: '';
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: calc((100% - 8px) / 3);
+    border-radius: 10px;
+    background: linear-gradient(135deg, #1c78b0, #124a7a);
+    transform: translateX(calc(var(--active-tab) * (100% + 4px)));
+    opacity: 0;
+    transition:
+      transform 240ms cubic-bezier(0.22, 1, 0.36, 1),
+      opacity 160ms ease;
+    pointer-events: none;
+  }
+  .primary-links.has-selection::before {
+    opacity: 1;
+  }
   .primary-links a {
     position: relative;
+    z-index: 1;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -450,7 +475,7 @@
   }
   .primary-links a[aria-current='page'] {
     color: #ffffff;
-    background: linear-gradient(135deg, #1c78b0, #124a7a);
+    background: transparent;
   }
   .primary-links a[aria-current='page'] svg {
     color: #b1e8ff;
@@ -459,6 +484,7 @@
     width: 18px;
     height: 18px;
     flex: none;
+    transition: color 160ms ease;
   }
   .primary-links a:focus-visible {
     outline: 3px solid var(--you-blue);
@@ -493,7 +519,6 @@
       width: 100%;
     }
     .primary-links a {
-      flex: 1;
       padding: 0 10px;
       gap: 6px;
       font-size: 0.8rem;
@@ -509,6 +534,12 @@
     }
   }
   @container navigation (max-width: 360px) {
+    .primary-links a {
+      flex-direction: column;
+      gap: 4px;
+      padding: 7px 4px;
+      font-size: 0.75rem;
+    }
     .tw\:navbar-end {
       gap: 0;
     }
@@ -522,7 +553,9 @@
   @media (prefers-reduced-motion: reduce) {
     .utility-link,
     .account-chevron,
-    .primary-links a {
+    .primary-links a,
+    .primary-links svg,
+    .primary-links::before {
       transition: none;
     }
   }
