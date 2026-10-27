@@ -807,7 +807,23 @@
       class:deep={episodesToWatch >= BIG_BACKLOG}
       aria-label={`${newEpisode ? 'New episode. ' : ''}${episodesToWatch} episode${episodesToWatch === 1 ? '' : 's'} to watch`}
     >
-      {#if newEpisode}New ·{/if}
+      {#if newEpisode}
+        <svg class="episode-flame" viewBox="0 0 24 28" fill="none" aria-hidden="true">
+          <path
+            class="flame-outer"
+            d="M13 1C15 8 21 9 21 17a9 9 0 0 1-18 0c0-4 2-7 5-10 0 4 1 5 2 6 3-4 4-8 3-12Z"
+            fill="#ff9438"
+            stroke="#ffd085"
+            stroke-width="1.2"
+            stroke-linejoin="round"
+          />
+          <path
+            class="flame-inner"
+            d="M13 13c0 4 4 5 4 9a5 5 0 0 1-10 0c0-3 3-5 6-9Z"
+            fill="#fff2ad"
+          />
+        </svg>
+      {/if}
       {#key countTicks}
         <span class="count" class:ticked={countTicks > 0}>{episodesToWatch.toLocaleString()}</span>
       {/key}
@@ -931,7 +947,7 @@
             >
               {#each friendsWatching.slice(0, 2) as friend (friend.id)}
                 <span class="presence-avatar" aria-hidden="true"
-                  ><FriendAvatar {...friend} size={22} /></span
+                  ><FriendAvatar {...friend} size={32} /></span
                 >
               {/each}
               {#if friendsWatching.length > 2}<span class="presence-more" aria-hidden="true"
@@ -1130,20 +1146,23 @@
 
 <style>
   .cover-area {
+    --cover-title-gap: 10px;
     position: relative;
     width: 100%;
   }
   .friend-presence {
     position: absolute;
     right: 6px;
-    bottom: calc(2lh + 8px);
+    /* Clear the two-line title and its gap; padding leaves the avatars 12px inside the cover. */
+    bottom: calc(2lh + var(--cover-title-gap) + 8px);
     z-index: 1;
     display: flex;
     justify-content: flex-end;
     align-items: center;
     min-width: 44px;
     min-height: 44px;
-    padding: 0 2px;
+    padding: 4px;
+    border: 0;
     border-radius: 999px;
     background: transparent;
     cursor: pointer;
@@ -1151,67 +1170,76 @@
   .presence-avatar {
     position: relative;
     display: flex;
+    padding: 2px;
+    border: 0;
     border-radius: 50%;
-    opacity: 0.88;
+    background: #ffffff;
     box-shadow:
-      0 0 0 1.5px rgb(255 255 255 / 0.8),
-      0 2px 5px rgb(0 0 0 / 0.25);
+      0 0 0 1px rgb(10 30 50 / 0.25),
+      0 4px 10px rgb(0 0 0 / 0.4),
+      0 10px 20px -8px rgb(0 0 0 / 0.55);
     transition:
-      opacity 160ms ease,
-      translate 160ms ease,
-      margin-left 160ms ease;
+      box-shadow 200ms ease,
+      translate 200ms ease,
+      margin-left 200ms ease;
   }
   .presence-avatar + .presence-avatar {
-    margin-left: -6px;
+    margin-left: -10px;
   }
   .presence-more {
     position: relative;
     display: grid;
     place-items: center;
-    height: 20px;
-    min-width: 20px;
-    margin-left: -4px;
-    padding: 0 2px;
-    border: 1px solid rgb(255 255 255 / 0.35);
+    height: 26px;
+    min-width: 26px;
+    margin-left: -5px;
+    padding: 0 4px;
+    border: 2px solid #ffffff;
     border-radius: 50%;
-    background: rgb(12 28 47 / 0.65);
-    color: rgb(255 255 255 / 0.95);
-    font-size: 0.53rem;
+    background: #163956;
+    box-shadow: 0 3px 8px rgb(0 0 0 / 0.4);
+    color: #effcff;
+    font-size: 0.65rem;
     line-height: 1;
-    font-weight: 650;
-    backdrop-filter: blur(6px);
-    transition: background 160ms ease;
+    font-weight: 750;
+    transition: translate 200ms ease;
   }
   .friend-presence:hover .presence-avatar,
   .friend-presence:focus-visible .presence-avatar {
-    opacity: 1;
-    translate: 0 -1px;
+    translate: 0 -3px;
+    box-shadow:
+      0 0 0 2px var(--you-blue),
+      0 5px 12px rgb(0 0 0 / 0.4),
+      0 8px 18px -6px rgb(73 185 249 / 0.35);
   }
   .friend-presence:hover .presence-avatar + .presence-avatar,
   .friend-presence:focus-visible .presence-avatar + .presence-avatar {
-    margin-left: -2px;
-    translate: 0 -2px;
+    margin-left: -5px;
+    translate: 0 -3px;
   }
   .friend-presence:hover .presence-more,
   .friend-presence:focus-visible .presence-more {
-    background: rgb(12 28 47 / 0.9);
+    translate: 0 -2px;
   }
   .friend-presence:focus-visible {
     outline: 2px solid var(--you-blue);
     outline-offset: 2px;
   }
   @media (prefers-reduced-motion: reduce) {
+    .friend-presence,
     .presence-avatar,
     .presence-more {
       transition: none;
     }
     .friend-presence:hover .presence-avatar,
-    .friend-presence:focus-visible .presence-avatar {
+    .friend-presence:focus-visible .presence-avatar,
+    .friend-presence:hover .presence-more,
+    .friend-presence:focus-visible .presence-more {
       translate: none;
     }
     .friend-presence:hover .presence-avatar + .presence-avatar,
     .friend-presence:focus-visible .presence-avatar + .presence-avatar {
-      margin-left: -6px;
+      margin-left: -10px;
       translate: none;
     }
   }
@@ -1325,6 +1353,13 @@
   .anime-card:not(.flipped, .dragging) .back-side .card-badge::after,
   .flipped:not(.dragging) .front-side .card-badge::after {
     animation: none;
+  }
+
+  .anime-card:not(.flipped, .dragging) .back-side .flame-outer,
+  .anime-card:not(.flipped, .dragging) .back-side .flame-inner,
+  .flipped:not(.dragging) .front-side .flame-outer,
+  .flipped:not(.dragging) .front-side .flame-inner {
+    animation-play-state: paused;
   }
 
   /*
@@ -1837,7 +1872,7 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 10px;
+    gap: var(--cover-title-gap);
     width: 100%;
     cursor: pointer;
   }
@@ -1937,6 +1972,35 @@
 
   .count.ticked {
     animation: count-tick 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  .episode-flame {
+    width: 18px;
+    height: 21px;
+    flex: none;
+    overflow: visible;
+    filter: drop-shadow(0 0 3px rgb(255 148 56 / 0.5));
+  }
+
+  .flame-outer,
+  .flame-inner {
+    transform-box: fill-box;
+    transform-origin: center bottom;
+    animation: flame-flicker 1.2s ease-in-out infinite alternate;
+  }
+
+  .flame-inner {
+    animation-duration: 0.8s;
+    animation-direction: alternate-reverse;
+  }
+
+  @keyframes flame-flicker {
+    from {
+      transform: rotate(-4deg) scale(1.03, 0.94);
+    }
+    to {
+      transform: rotate(4deg) scale(0.95, 1.06);
+    }
   }
 
   @keyframes count-tick {
@@ -2084,6 +2148,11 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
+    .flame-outer,
+    .flame-inner {
+      animation: none;
+    }
+
     .card-badge {
       animation: none;
     }
