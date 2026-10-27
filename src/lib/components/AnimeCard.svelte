@@ -28,7 +28,7 @@
   import { formatAirDate, formatAirsIn } from '#lib/countdown.js';
   import { flippedCard } from '#lib/flipped-card.svelte.js';
   import { nyaaSearchUrl, nyaaSite } from '#lib/nyaa.js';
-  import { countsBeforeSave } from '#lib/saved-counts.js';
+  import { consumeSavedCounts, rememberSavedCounts } from '#lib/saved-counts.js';
   import {
     DEFAULT_SCORE_FORMAT,
     describeScore,
@@ -152,12 +152,22 @@
    */
   let countTicks = $state(0);
   let justCaughtUp = $state(false);
+  let progressTick = 0;
+  let progressFeedback = $state<{ tick: number; gain: number } | null>(null);
   $effect(() => {
-    const before = countsBeforeSave.get(anime.id);
-    if (before === undefined || before === episodesToWatch) return;
-    countsBeforeSave.delete(anime.id);
-    if (episodesToWatch < before) countTicks += 1;
-    justCaughtUp = episodesToWatch === 0;
+    const feedback = consumeSavedCounts(anime.id, {
+      progress: anime.currentEpisode,
+      backlog: episodesToWatch,
+    });
+    if (!feedback) return;
+    if (feedback.backlogDecreased) countTicks += 1;
+    justCaughtUp = feedback.caughtUp;
+    progressFeedback = feedback.gain > 0 ? { tick: ++progressTick, gain: feedback.gain } : null;
+  });
+  $effect(() => {
+    if (!progressFeedback) return;
+    const timer = setTimeout(() => (progressFeedback = null), 900);
+    return () => clearTimeout(timer);
   });
 
   // Badges for anime whose aired episode count isn't known
@@ -747,7 +757,11 @@
           }
           // The card may be replaced as the confirmed progress moves it to a new section.
           if (saved.currentEpisode !== progressBefore)
-            countsBeforeSave.set(anime.id, episodesToWatch);
+            rememberSavedCounts(
+              anime.id,
+              { backlog: episodesToWatch, progress: progressBefore },
+              saved.currentEpisode
+            );
           onConfirmed(saved, String(result.data?.status ?? ''));
         }
         // onConfirmed applies AniList's response; a full list reload adds no useful data.
@@ -972,18 +986,33 @@
               <span class="aired" style:width="{barParts.aired}%"></span>
             </div>
           {/if}
-          <span class="tw:text-sm tw:opacity-70">{progressLabel}</span>
+          <span class="progress-count" aria-live="polite" aria-atomic="true">
+            <span class="tw:sr-only">Episodes watched: </span>
+            {#key progressFeedback?.tick ?? 0}
+              <span class:progress-saved={Boolean(progressFeedback)}>{progressLabel}</span>
+              {#if progressFeedback}<span class="progress-gain" aria-hidden="true"
+                  >+{progressFeedback.gain}</span
+                >{/if}
+            {/key}
+          </span>
           {#if canEdit && (watchState === 'to-watch' || watchState === 'next-episode-unscheduled')}
             <form method="POST" action="?/updateEntry" use:enhance={submitEntry}>
               <input type="hidden" name="mediaId" value={anime.id} />
               <input type="hidden" name="progress" value={anime.currentEpisode + 1} />
               <button
-                class="tw:btn tw:btn-primary tw:btn-xs"
+                class="quick-watch"
+                type="submit"
                 disabled={saving}
+                aria-busy={saving}
                 aria-label={`Mark episode ${anime.currentEpisode + 1} of ${anime.title} as watched`}
+                title={`Mark episode ${anime.currentEpisode + 1} as watched`}
               >
-                {#if saving}<span class="tw:loading tw:loading-spinner tw:loading-xs"
-                  ></span>{:else}+1{/if}
+                {#if saving}<span
+                    class="tw:loading tw:loading-spinner tw:loading-xs"
+                    aria-hidden="true"
+                  ></span>{:else}<span class="quick-watch-label" aria-hidden="true"
+                    ><span class="quick-watch-plus">+</span>1</span
+                  >{/if}
               </button>
             </form>
           {/if}
@@ -1086,7 +1115,7 @@
           <div class="back-actions">
             {#if canEdit}
               <!--
-              Saves the watched count and the score together; Enter in either field saves too. Revert
+              Saves the watched count and the score together; Enter in either field saves too. Reset
               puts both back to what's saved on AniList
             -->
               <form
@@ -1100,13 +1129,44 @@
                 <input type="hidden" name="scoreFormat" value={scoreFormat} />
                 <button
                   type="button"
-                  class="tw:btn tw:btn-ghost tw:btn-xs"
+                  class="entry-action entry-reset"
                   disabled={saving || !entryChanged}
                   onclick={revertDrafts}
+                  title="Discard unsaved changes"
                 >
-                  Revert
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"><path d="M3 10a9 9 0 1 1 2 9M3 4v6h6" /></svg
+                  >
+                  Reset
                 </button>
-                <button class="tw:btn tw:btn-primary tw:btn-xs" disabled={saving || !entryChanged}>
+                <button
+                  class="entry-action entry-save"
+                  type="submit"
+                  disabled={saving || !entryChanged}
+                  aria-busy={saving}
+                >
+                  {#if saving}<span
+                      class="tw:loading tw:loading-spinner tw:loading-xs"
+                      aria-hidden="true"
+                    ></span>{:else}<svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg
+                    >{/if}
                   Save
                 </button>
               </form>
@@ -1790,11 +1850,74 @@
     }
   }
 
-  /* Revert and Save, at the bottom with the other actions */
+  /* Reset and Save, at the bottom with the other actions */
   .entry-actions {
     display: flex;
+    flex-wrap: wrap;
     justify-content: center;
     gap: 8px;
+  }
+  .entry-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-width: 76px;
+    height: 32px;
+    padding: 0 12px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 9px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition:
+      background-color 160ms ease,
+      border-color 160ms ease,
+      box-shadow 160ms ease;
+  }
+  .entry-action svg,
+  .entry-action .tw\:loading {
+    width: 14px;
+    height: 14px;
+    flex: none;
+  }
+  .entry-reset {
+    background: var(--surface);
+    color: var(--text-accent);
+  }
+  .entry-reset:not(:disabled):hover {
+    background: var(--you-blue-pale);
+    border-color: var(--you-blue);
+  }
+  .entry-save {
+    background-color: #155286;
+    background-image: linear-gradient(155deg, rgb(45 157 214 / 0.7), transparent 75%);
+    border-color: rgb(118 209 255 / 0.55);
+    color: #ffffff;
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.25),
+      0 2px 4px rgb(15 61 110 / 0.15);
+  }
+  .entry-save:not(:disabled):hover {
+    background-color: #1b6ba2;
+    border-color: #9ae2ff;
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.35),
+      0 0 0 2px rgb(73 185 249 / 0.12);
+  }
+  .entry-action:not(:disabled):active {
+    box-shadow: inset 0 2px 4px rgb(3 25 48 / 0.2);
+  }
+  .entry-action:focus-visible {
+    outline: 3px solid var(--you-blue);
+    outline-offset: 3px;
+  }
+  .entry-action:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+  .entry-save[aria-busy='true'] {
+    cursor: wait;
   }
 
   .back-actions {
@@ -1894,8 +2017,69 @@
     align-items: center;
     gap: 8px;
     width: 100%;
+    min-height: 28px;
     /* Keeps the progress row at the bottom when a card is stretched to match its neighbours */
     margin-top: auto;
+  }
+  .progression form {
+    flex: none;
+  }
+  .quick-watch {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 42px;
+    height: 28px;
+    padding: 0 8px;
+    border: 1px solid rgb(118 209 255 / 0.55);
+    border-radius: 9px;
+    background-color: #155286;
+    background-image: linear-gradient(155deg, rgb(45 157 214 / 0.7), transparent 75%);
+    color: #ffffff;
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.25),
+      inset 0 -1px 0 rgb(3 25 48 / 0.2),
+      0 2px 4px rgb(15 61 110 / 0.15);
+    font-size: 0.8rem;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    cursor: pointer;
+    transition:
+      background-color 160ms ease,
+      border-color 160ms ease,
+      box-shadow 160ms ease;
+  }
+  .quick-watch-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    line-height: 1;
+  }
+  .quick-watch-plus {
+    color: #bcefff;
+    font-size: 0.95rem;
+    font-weight: 500;
+  }
+  .quick-watch:not(:disabled):hover {
+    background-color: #1b6ba2;
+    border-color: #9ae2ff;
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.35),
+      inset 0 -1px 0 rgb(3 25 48 / 0.15),
+      0 0 0 2px rgb(73 185 249 / 0.12),
+      0 3px 10px rgb(20 95 156 / 0.22);
+  }
+  .quick-watch:not(:disabled):active {
+    background-color: #103e69;
+    box-shadow: inset 0 2px 4px rgb(3 25 48 / 0.3);
+  }
+  .quick-watch:focus-visible {
+    outline: 3px solid var(--you-blue);
+    outline-offset: 3px;
+  }
+  .quick-watch:disabled {
+    opacity: 0.65;
+    cursor: wait;
   }
 
   /* Sits over the bottom of the cover, above the title and progress (108px together) */
@@ -1915,6 +2099,52 @@
     margin-left: auto;
     white-space: nowrap;
   }
+  .progress-count {
+    position: relative;
+    font-size: 0.875rem;
+    color: color-mix(in srgb, var(--color-base-content) 70%, transparent);
+  }
+  .progress-saved {
+    display: inline-block;
+    animation: progress-confirmed 700ms ease-out;
+  }
+  .progress-gain {
+    position: absolute;
+    right: 0;
+    bottom: 100%;
+    padding: 2px 6px;
+    border-radius: 6px;
+    background: var(--you-blue-pale);
+    color: var(--text-accent);
+    font-size: 0.75rem;
+    font-weight: 800;
+    pointer-events: none;
+    animation: progress-rise 900ms ease-out forwards;
+  }
+  @keyframes progress-confirmed {
+    0%,
+    40% {
+      color: var(--text-accent);
+      transform: scale(1.12);
+    }
+    100% {
+      color: inherit;
+      transform: scale(1);
+    }
+  }
+  @keyframes progress-rise {
+    0% {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    25% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+      transform: translateY(-18px);
+    }
+  }
 
   .episode-bar {
     display: flex;
@@ -1929,11 +2159,13 @@
 
   .episode-bar .watched {
     background: var(--text-accent);
+    transition: width 300ms ease;
   }
 
   /* Aired but not watched yet: the backlog the badge counts */
   .episode-bar .aired {
     background: var(--you-blue);
+    transition: width 300ms ease;
   }
 
   /* A white ring and a shadow lift every badge off the cover and the card */
@@ -2156,6 +2388,17 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
+    .quick-watch,
+    .entry-action,
+    .episode-bar .watched,
+    .episode-bar .aired {
+      transition: none;
+    }
+    .progress-saved,
+    .progress-gain {
+      animation: none;
+      color: var(--text-accent);
+    }
     .flame-outer,
     .flame-inner {
       animation: none;
