@@ -8,6 +8,7 @@ vi.mock('$app/env', () => ({ browser: true, building: false }));
 let page: typeof import('../../routes/user/[domain]/[username]/+page.server.js');
 let friends: typeof import('../../routes/user/[domain]/[username]/friends/+page.server.js');
 let limits: typeof import('./rate-limit.js');
+let readPage: (typeof import('./list-page.js'))['loadAnimePage'];
 let address: string;
 let fixtureNumber = 0;
 
@@ -16,6 +17,7 @@ beforeEach(async () => {
   vi.resetModules();
   address = `fixture-${++fixtureNumber}`;
   page = await import('../../routes/user/[domain]/[username]/+page.server.js');
+  ({ loadAnimePage: readPage } = await import('./list-page.js'));
   friends = await import('../../routes/user/[domain]/[username]/friends/+page.server.js');
   limits = await import('./rate-limit.js');
   vi.stubGlobal(
@@ -58,11 +60,19 @@ function event(isDataRequest = false) {
 }
 
 describe('route rate limits', () => {
+  it('defers navigation reads without spending an upstream or client-read slot', async () => {
+    await limits.takeClientLimit(address, 'read', 60);
+    expect(await page.load(event(true) as Parameters<typeof page.load>[0])).toEqual({
+      deferred: true,
+      username: 'Fixture',
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
   it('allows six saves and their refreshes within one minute', async () => {
-    expect(await page.load(event())).toMatchObject({ canEdit: true });
+    expect(await readPage(event())).toMatchObject({ canEdit: true });
     for (let i = 0; i < 6; i++) {
       expect(await page.actions.updateEntry!(event())).toMatchObject({ mediaId: 1, progress: 2 });
-      expect(await page.load(event(true))).toMatchObject({ canEdit: true });
+      expect(await readPage(event(true))).toMatchObject({ canEdit: true });
     }
     expect(fetch).toHaveBeenCalledTimes(13);
   });
@@ -78,14 +88,14 @@ describe('route rate limits', () => {
     expect(request.locals.retryAfter).toBeGreaterThan(0);
     expect(fetch).not.toHaveBeenCalled();
     // Writes do not prevent the current page from refreshing.
-    expect(await page.load(event(true))).toMatchObject({ canEdit: true });
+    expect(await readPage(event(true))).toMatchObject({ canEdit: true });
   });
 
   it('keeps existing list data on a rate-limited refresh and still permits a write', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     await limits.takeClientLimit(address, 'read', 60);
     const request = event(true);
-    expect(await page.load(request)).toMatchObject({ unavailable: true, username: 'Fixture' });
+    expect(await readPage(request)).toMatchObject({ unavailable: true, username: 'Fixture' });
     expect(request.locals.retryAfter).toBeGreaterThan(0);
     expect(fetch).not.toHaveBeenCalled();
     expect(await page.actions.updateEntry!(event())).toMatchObject({ mediaId: 1, progress: 2 });
@@ -93,13 +103,13 @@ describe('route rate limits', () => {
 
   it('throws a framework HTTP error for an exhausted full-page load', async () => {
     await limits.takeClientLimit(address, 'read', 60);
-    await expect(page.load(event())).rejects.toMatchObject({ status: 429 });
+    await expect(readPage(event())).rejects.toMatchObject({ status: 429 });
     expect(fetch).not.toHaveBeenCalled();
   });
 
   it('charges cached public friends visits one read unit without repeating upstream calls', async () => {
     await limits.takeClientLimit(address, 'read', 54);
-    expect(await page.load(event())).toMatchObject({ canEdit: true });
+    expect(await readPage(event())).toMatchObject({ canEdit: true });
     vi.mocked(fetch).mockImplementation(async (_url, init) => {
       expect(init?.headers).not.toHaveProperty('Authorization');
       const { query } = JSON.parse(init!.body as string);
@@ -113,7 +123,7 @@ describe('route rate limits', () => {
     const request = event();
     await expect(friends.load(request)).rejects.toMatchObject({ status: 429 });
     expect(request.locals.retryAfter).toBeGreaterThan(0);
-    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -135,7 +145,7 @@ it('handles a native action and load throttled on the same request without dupli
         user: { id: 1, name: 'Fixture', avatarUrl: null },
       };
       expect(await page.actions.updateEntry!(request)).toMatchObject({ status: 429 });
-      await expect(page.load(request)).rejects.toMatchObject({ status: 429 });
+      await expect(readPage(request)).rejects.toMatchObject({ status: 429 });
       return new Response('framework rate-limit page', { status: 429 });
     },
   });
@@ -191,14 +201,14 @@ it('preserves confirmed progress when a save uses the final upstream slot', asyn
   });
   const client = await import('../../routes/user/[domain]/[username]/+page.js');
   const { recordSavedEntry, getRememberedList } = await import('../list-data.js');
-  const initial = await page.load(event());
+  const initial = await readPage(event());
   if (initial.unavailable === true) throw new Error('Expected loaded list');
   const displayed = { ...initial, preferences: DEFAULT_PREFERENCES };
   await limits.takeLimit('anilist', 25, 60, 22);
   const saved = await page.actions.updateEntry!(event());
   expect(saved).toMatchObject({ progress: 2, score: 8 });
   recordSavedEntry(displayed, { ...displayed.watchingList[0], currentEpisode: 2, userScore: 8 });
-  const unavailable = await page.load(event(true));
+  const unavailable = await readPage(event(true));
   expect(unavailable).toMatchObject({ unavailable: true });
   const fallback = await client.load({
     data: unavailable,

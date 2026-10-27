@@ -528,14 +528,22 @@ const FOLLOWING_MAX_PAGES = 4;
  */
 export async function getFollowing(
   userName: string,
-  token?: string
+  token?: string,
+  knownUser?: AniListUser
 ): Promise<{ user: AniListUser; following: AniListUser[]; total: number }> {
-  const { User } = await query<{ User: AniListUserFields }>(
-    'query ($name: String) { User(name: $name) { id name avatar { large } } }',
-    { name: userName },
-    token,
-    { cacheTtlMs: 5 * 60 * 1000 }
-  );
+  const user =
+    knownUser && knownUser.name.toLowerCase() === userName.toLowerCase()
+      ? knownUser
+      : toUser(
+          (
+            await query<{ User: AniListUserFields }>(
+              'query ($name: String) { User(name: $name) { id name avatar { large } } }',
+              { name: userName },
+              token,
+              { cacheTtlMs: 5 * 60 * 1000 }
+            )
+          ).User
+        );
 
   const following: AniListUser[] = [];
   let total = 0;
@@ -552,7 +560,7 @@ export async function getFollowing(
           following(userId: $id, sort: USERNAME) { id name avatar { large } }
         }
       }`,
-      { id: User.id, page },
+      { id: user.id, page },
       token,
       { cacheTtlMs: 5 * 60 * 1000 }
     );
@@ -561,7 +569,7 @@ export async function getFollowing(
     if (!Page.pageInfo.hasNextPage) break;
   }
 
-  return { user: toUser(User), following, total };
+  return { user, following, total };
 }
 
 /** The user the token belongs to. */

@@ -67,9 +67,9 @@
     scoreFormat?: ScoreFormat;
     /** Where the card is in the list, counting from 0 */
     position?: number;
-    /** Apply the confirmed progress before requesting fresh list data. */
+    /** Apply AniList's confirmed response to the visible list. */
     onConfirmed: (saved: Anime, status: string) => void;
-    /** Called once a save is done and the list reloaded, with where the card was before */
+    /** Called once a save is applied, with where the card was before */
     onSaved?: (animeId: number, positionBefore: number) => void;
     /** Glows for a moment, so the eye finds the card in its new place after a save */
     highlighted?: boolean;
@@ -750,8 +750,8 @@
             countsBeforeSave.set(anime.id, episodesToWatch);
           onConfirmed(saved, String(result.data?.status ?? ''));
         }
-        // Reloads the list, so the card shows what AniList saved
-        await update({ reset: false });
+        // onConfirmed applies AniList's response; a full list reload adds no useful data.
+        await update({ reset: false, refreshAll: result.type !== 'success' });
         if (result.type === 'success') onSaved?.(anime.id, positionBefore);
       } finally {
         saving = false;

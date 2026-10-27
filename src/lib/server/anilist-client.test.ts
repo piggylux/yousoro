@@ -31,6 +31,22 @@ beforeEach(() => {
 });
 
 describe('AniList request protection', () => {
+  it('skips user resolution for a matching known profile but never for a different username', async () => {
+    vi.mocked(fetch).mockImplementation(async (_url, init) => {
+      const { query, variables } = JSON.parse(init!.body as string);
+      if (query.includes('User(name:'))
+        return Response.json({ data: { User: { id: 92, name: 'Other', avatar: null } } });
+      expect([91, 92]).toContain(variables.id);
+      return Response.json({
+        data: { Page: { pageInfo: { total: 0, hasNextPage: false }, following: [] } },
+      });
+    });
+    const known = { id: 91, name: 'Known', avatarUrl: null };
+    expect((await getFollowing('KNOWN', 'test-known', known)).user).toEqual(known);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect((await getFollowing('Other', 'test-known', known)).user.id).toBe(92);
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
   it('expires anonymous cache entries and never caches authenticated results', async () => {
     const now = Date.now();
     vi.spyOn(Date, 'now').mockReturnValue(now);

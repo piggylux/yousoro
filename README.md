@@ -45,6 +45,19 @@ shows you're actively watching come first. Once you've watched an episode, mark 
   capped at four pages and labelled as partial.
   Your own avatar appears on other people's lists when you're watching the same anime.
 
+Successful progress and score saves update the visible list from AniList's confirmed response,
+without fetching the list again. Browser navigation reuses list data for up to one minute (or the
+next known episode's airing time, whichever comes first). This memory cache is scoped to the viewer
+and mature-content preference, clears on account changes/logout, and is bypassed for live refreshes
+and retries. Saves patch cached entries without extending the freshness of the rest of the list.
+Calendar-only list reads skip the recent-airing badge query; returning to the list restores that
+enrichment. Friends pages reuse the signed-in viewer's known profile ID, and overlapping pending
+friend lookups share their common IDs before requesting only the remainder. No authenticated data
+is stored in a shared server cache or persistent browser storage.
+Hovering links preloads code only, so it neither spends AniList requests nor holds stale list data
+outside the browser cache. Confirmed saves patch all cached preference variants, and reads already
+in flight preserve any progress or completion saved after they started.
+
 When AniList rate-limits a read, the affected list, Friends lookup, or calendar automatically retries
 up to twice after the supplied cooldown. A countdown shows the retry status. Retries pause in hidden
 tabs, cancel on navigation/account changes, and reuse existing lookup coalescing and caches. Partial

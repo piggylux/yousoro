@@ -1,6 +1,7 @@
 <script lang="ts">
   import BackToTop from '#lib/components/BackToTop.svelte';
   import { setFriendsViewer } from '#lib/friend-watching.js';
+  import { setListContext } from '#lib/list-data.js';
 
   import type { LayoutProps } from './$types';
   import Header from './Header.svelte';
@@ -12,6 +13,7 @@
 
   $effect(() => {
     setFriendsViewer(data.user?.id ?? null);
+    setListContext(data.user?.id ?? null, data.preferences.showMature);
   });
 
   $effect(() => {

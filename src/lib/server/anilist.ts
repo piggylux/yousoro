@@ -11,13 +11,15 @@ export class AniListApi implements Api {
   /** The signed-in user's token, so their own private entries are visible to them */
   constructor(private token?: string) {}
 
-  async getUserAnimeList(username: string): Promise<UserAnimeList> {
+  async getUserAnimeList(username: string, enrichAirings = true): Promise<UserAnimeList> {
     const { userId, userName, avatarUrl, scoreFormat, entries } = await getWatchingEntries(
       username,
       this.token
     );
 
-    const recentAirings = await getRecentAirings(entries);
+    const recentAirings = enrichAirings
+      ? await getRecentAirings(entries)
+      : new Map<number, number>();
 
     return {
       userId,

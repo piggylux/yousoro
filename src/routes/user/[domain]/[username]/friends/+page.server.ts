@@ -29,7 +29,7 @@ export async function load({
     if (!limit.allowed) throw new AniListRateLimitError(limit.retryAfter);
     // Following is public. Anonymous reads can reuse the five-minute public cache,
     // including while signed in; private lists and matches still use the viewer's token.
-    result = await getFollowing(params.username);
+    result = await getFollowing(params.username, undefined, locals.session?.user);
   } catch (err) {
     if (err instanceof AniListRateLimitError) {
       locals.retryAfter = Math.max(locals.retryAfter ?? 0, err.retryAfter);

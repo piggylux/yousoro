@@ -53,6 +53,67 @@ afterEach(() => {
 });
 
 describe('friend lookup reuse', () => {
+  it('also joins overlapping batches started while waiting for an earlier request', async () => {
+    let releaseFirst!: (response: Response) => void;
+    let releaseLater!: (response: Response) => void;
+    vi.mocked(fetch)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            releaseFirst = resolve;
+          })
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            releaseLater = resolve;
+          })
+      );
+    const first = loadFriendsWatching(10, [1]);
+    const waiting = loadFriendsWatching(10, [1, 2]);
+    const later = loadFriendsWatching(10, [2, 3]);
+    releaseFirst(Response.json({ matches: {}, partial: false }));
+    await first;
+    expect(fetch).toHaveBeenCalledTimes(2);
+    releaseLater(Response.json({ matches: { 2: [friend] }, partial: false }));
+    await later;
+    expect((await waiting).matches[2]).toEqual([friend]);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+  it('joins overlapping requests and fetches only the additional IDs', async () => {
+    let release!: (response: Response) => void;
+    vi.mocked(fetch).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        })
+    );
+    const first = loadFriendsWatching(10, [1, 2]);
+    const second = loadFriendsWatching(10, [2, 3]);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    release(Response.json({ matches: { 2: [friend] }, partial: false }));
+    await first;
+    expect((await second).matches[2]).toEqual([friend]);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(vi.mocked(fetch).mock.calls[1][1]!.body as string).mediaIds).toEqual([3]);
+  });
+  it('retains partial overlapping results without treating missing matches as covered', async () => {
+    let release!: (response: Response) => void;
+    vi.mocked(fetch).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        })
+    );
+    const first = loadFriendsWatching(10, [1, 2]);
+    const second = loadFriendsWatching(10, [2]);
+    release(Response.json({ matches: { 2: [friend] }, partial: true }));
+    await first;
+    expect(await second).toEqual({ matches: { 2: [friend] }, partial: true });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await loadFriendsWatching(10, [2]);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
   it('keeps matches from earlier batches when a later batch reaches the rate limit', async () => {
     const ids = Array.from({ length: 1001 }, (_, index) => index + 1);
     vi.mocked(fetch)

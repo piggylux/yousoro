@@ -77,6 +77,13 @@ afterEach(() => {
 });
 
 describe('AniListApi.getUserAnimeList', () => {
+  it('reads calendar lists without requesting the optional recent-airing badges', async () => {
+    answerWith(media({ romaji: 'Fixture', english: null }, []));
+    const { animeList } = await new AniListApi('token').getUserAnimeList('Fixture', false);
+    expect(animeList[0].currentEpisode).toBe(2);
+    expect(animeList[0].recentEpisodeAiredAt).toBeNull();
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
   it('gives the English title, and the synonyms other than the main titles', async () => {
     answerWith(
       media({ romaji: 'Kanojo no Tomodachi', english: "My Girlfriend's Friend" }, [

@@ -29,7 +29,7 @@
   import { flippedCard } from '#lib/flipped-card.svelte.js';
   import { recordOwnWatchingEntry, seedOwnAnime, withoutListOwner } from '#lib/friend-watching.js';
   import { hiddenSectionsCookie, toggleHidden } from '#lib/hidden-sections.js';
-  import { recordSavedEntry } from '#lib/list-data.js';
+  import { expireRememberedList, recordSavedEntry } from '#lib/list-data.js';
   import { nextAiringReloadDelay, planReload, reloadsOnReturn } from '#lib/live-updates.js';
   import type { Anime } from '#lib/types/anime.js';
   import type { AnimePageData } from '#lib/types/api.js';
@@ -329,7 +329,10 @@
     });
     reloadWhenVisible = plan === 'when-visible';
     if (plan === 'later') busyTimer = setTimeout(reload, BUSY_RETRY_MS);
-    if (plan === 'now') void invalidateAll();
+    if (plan === 'now') {
+      expireRememberedList(data.username);
+      void invalidateAll();
+    }
   }
 
   $effect(() => {

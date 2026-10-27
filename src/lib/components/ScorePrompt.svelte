@@ -62,7 +62,7 @@
           errorMessage = (result.data?.message as string | undefined) ?? 'The update failed';
           return;
         }
-        await update({ reset: false });
+        await update({ reset: false, refreshAll: result.type !== 'success' });
         dialog?.close();
       };
     }}

@@ -196,14 +196,41 @@ export async function loadFriendsWatching(
     if (cached.expiresAt <= Date.now()) partials.delete(key);
   }
   const ids = [...new Set(mediaIds)].sort((a, b) => a - b);
-  const missing = ids.filter((mediaId) => (covered.get(mediaId)?.expiresAt ?? 0) <= Date.now());
   const result: FriendWatchingResult = { matches: {}, partial: false };
+  const wanted = new Set(ids);
+  const joined = new Set<number>();
+  // Reuse the intersecting part of pending batches, including their partial results.
+  // Only IDs absent from both these requests and complete coverage need a new lookup.
+  for (;;) {
+    const overlaps = [...requests].filter(([key]) =>
+      key.split(',').some((value) => {
+        const id = Number(value);
+        return wanted.has(id) && !joined.has(id) && (covered.get(id)?.expiresAt ?? 0) <= Date.now();
+      })
+    );
+    if (!overlaps.length) break;
+    for (const [key, pending] of overlaps) {
+      const data = await pending;
+      if (version !== generation) throw new FriendsUnavailable('Account changed.');
+      for (const mediaId of key.split(',').map(Number)) {
+        if (!wanted.has(mediaId)) continue;
+        joined.add(mediaId);
+        if (data.matches[mediaId]) result.matches[mediaId] = data.matches[mediaId];
+      }
+      result.partial ||= data.partial;
+      if (data.retryAfter) result.retryAfter = Math.max(result.retryAfter ?? 0, data.retryAfter);
+    }
+    // A different overlapping batch may have started while these requests were pending.
+  }
+  const missing = ids.filter(
+    (mediaId) => !joined.has(mediaId) && (covered.get(mediaId)?.expiresAt ?? 0) <= Date.now()
+  );
   for (const mediaId of ids) {
     const cached = covered.get(mediaId);
     if (cached && cached.expiresAt > Date.now()) result.matches[mediaId] = cached.friends;
   }
   // Large lists are split only at the endpoint's input limit, never per card or per friend.
-  for (let start = 0; start < missing.length; start += 500) {
+  for (let start = 0; start < missing.length && !result.retryAfter; start += 500) {
     if (version !== generation) throw new FriendsUnavailable('Account changed.');
     const batch = missing.slice(start, start + 500);
     const key = batch.join(',');

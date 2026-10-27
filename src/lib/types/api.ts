@@ -20,6 +20,8 @@ export interface Api {
 }
 
 export type AnimePageData = {
+  /** Calendar reads omit the optional recent-airing badge lookup. */
+  airingsEnriched?: boolean;
   retryAt?: number;
   domain: Domain;
   username: string;
