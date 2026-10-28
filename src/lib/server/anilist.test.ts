@@ -129,6 +129,40 @@ describe('AniListApi.getUserAnimeList', () => {
     expect(animeList[0].recentEpisodeAiredAt).toBeNull();
   });
 
+  it('lists an anime AniList holds twice once, as last updated, in the first one’s place', async () => {
+    const entry = (id: number, progress: number, updatedAt: number) => ({
+      status: 'CURRENT',
+      progress,
+      score: 0,
+      updatedAt,
+      media: { ...media({ romaji: `Anime ${id}`, english: null }, []), id },
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json({
+          data: {
+            MediaListCollection: {
+              user: { id: 7, name: 'Piggylux', avatar: null, mediaListOptions: null },
+              lists: [
+                {
+                  isCustomList: false,
+                  entries: [entry(1, 1, 100), entry(2, 4, 100), entry(1, 10, 200)],
+                },
+                { isCustomList: true, entries: [entry(1, 10, 200)] },
+              ],
+            },
+          },
+        })
+      )
+    );
+    const { animeList } = await new AniListApi().getUserAnimeList('Piggylux', false);
+    expect(animeList.map(({ id, currentEpisode }) => [id, currentEpisode])).toEqual([
+      [1, 10],
+      [2, 4],
+    ]);
+  });
+
   it('still gives the list when AniList fails to give recent airings', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     answerWith(media({ romaji: 'Koupen-chan', english: null }, []), null);
