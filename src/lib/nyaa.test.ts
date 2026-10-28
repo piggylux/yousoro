@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  matchesPhrase,
+  wordsInclude,
   namesEpisode,
   nyaaQueryPlan,
   packIncludes,
@@ -421,8 +423,10 @@ describe('bounded search plans', () => {
       episode: 4,
     };
     const first = phrases(
-      nyaaQueryPlan(search, { arc: { offset: 48, title: 'Kusuriya no Hitorigoto' }, related: [] })
-        .query
+      nyaaQueryPlan(search, {
+        arc: { offset: 48, title: 'Kusuriya no Hitorigoto', season: 3 },
+        related: [],
+      }).query
     );
     expect(first.indexOf('"Kusuriya no Hitorigoto - 52"')).toBeGreaterThan(-1);
     expect(first.indexOf('"Kusuriya no Hitorigoto - 52"')).toBeLessThan(
@@ -440,14 +444,14 @@ describe('bounded search plans', () => {
     } as const;
     expect(
       nyaaQueryPlan(search, {
-        arc: { offset: 40, title: 'BLEACH: Sennen Kessen-hen' },
+        arc: { offset: 40, title: 'BLEACH: Sennen Kessen-hen', season: 4 },
         related: [],
-      }).wide
+      }).seriesNumber
     ).toEqual({
       query: '(BLEACH Sennen Kessen hen 50) vostfr -batch',
       episode: 50,
     });
-    expect(nyaaQueryPlan(search).wide).toBeUndefined();
+    expect(nyaaQueryPlan(search).seriesNumber).toBeUndefined();
   });
 
   it.each([
@@ -540,10 +544,139 @@ describe('bounded search plans', () => {
       expect(packIncludes('Mob Psycho 100 - 01-12', packs)).toBe(true);
     });
 
+    it('leaves out other titles of a single word, and packs without one of the titles', () => {
+      // "SBR" alone finds unrelated releases, as "[DVD_ISO] Duel Masters - Vol. 1-5"
+      const { packs } = nyaaQueryPlan({
+        title: 'JoJo no Kimyou na Bouken: Steel Ball Run - 2nd & 3rd STAGE',
+        otherTitles: ['SBR', "JoJo's Bizarre Adventure: Part 7"],
+        episode: 5,
+      });
+      expect(packs!.query).not.toContain('"SBR"');
+      expect(packs!.query).toContain(`"JoJo's Bizarre Adventure: Part 7"`);
+      expect(packIncludes('[DVD_ISO] Duel Masters - Vol. 1-5', packs!)).toBe(false);
+      expect(
+        packIncludes(
+          '[Group] JoJo no Kimyou na Bouken: Steel Ball Run - 2nd & 3rd STAGE (01-11)',
+          packs!
+        )
+      ).toBe(true);
+    });
+
     it("takes a pack numbered on from the series' first part", () => {
       const packs = { query: '', episode: 10, season: 1, seriesEpisode: 50 };
       expect(packIncludes('Bleach Sennen Kessen-hen 41-50 [1080p]', packs)).toBe(true);
       expect(packIncludes('Bleach Sennen Kessen-hen 11-26 [1080p]', packs)).toBe(false);
+    });
+  });
+
+  it("searches each title's words without its season, with the episode", () => {
+    const { words } = nyaaQueryPlan({
+      title: 'Sousou no Frieren 2nd Season',
+      englishTitle: "Frieren: Beyond Journey's End Season 2",
+      episode: 9,
+      language: 'french',
+      version: 'subbed',
+    });
+    expect(words!.query).toBe(
+      '((Sousou no Frieren 09)|(Frieren Beyond Journey s End 09)) vostfr -batch'
+    );
+    // Every phrase, beyond the ten a query holds
+    expect(words!.phrases.length).toBeGreaterThan(10);
+    expect(words!.phrases).toContain('"Sousou no Frieren S2 - 09"');
+  });
+
+  it.each([
+    ['[SubsPlease] Sousou no Frieren S2 - 09 (1080p) [A1B2C3D4].mkv', true],
+    ['FRIEREN BEYOND JOURNEYS END S02E09 1080p WEB-DL', true],
+    // The first season's ninth episode
+    ['[SubsPlease] Sousou no Frieren - 09 (1080p)', false],
+    ['[SubsPlease] Sousou no Frieren S2 - 19 (1080p) [09ABCDEF].mkv', false],
+  ])('tells whether "%s" has one of the phrases', (name, matches) => {
+    expect(
+      matchesPhrase(name, ['"Sousou no Frieren S2 - 09"', '"Frieren Beyond Journeys End S02E09"'])
+    ).toBe(matches);
+  });
+
+  it.each([
+    // Spacing, accents and punctuation written differently
+    ['[Erai-raws] Yowaki Max Reijou nanoni - 04 [1080p]', '"Yowaki MAX Reijou Nano ni - 04"', true],
+    ['Cunning Fiance S01E04 SUBFRENCH 1080p', '"Cunning Fiancé S01E04"', true],
+    ['Tougen.Anki.S02E04.VOSTFR.1080p.WEBRiP.x265-KAF', '"Tougen Anki S02E04"', true],
+    ['[Group] Show - 05v2 [1080p]', '"Show - 05"', true],
+    // But never another number, a longer word or another season
+    ['[Group] Show - 050 [1080p]', '"Show - 05"', false],
+    ['[Group] Show - 0.5 Recap', '"Show - 05"', false],
+    ['[Group] Shows - 05', '"Show - 05"', false],
+    ['[Group] Show 2nd Season - 05', '"Show - 05"', false],
+  ])('matches "%s" loosely with %s: %s', (name, phrase, matches) => {
+    expect(matchesPhrase(name, [phrase])).toBe(matches);
+  });
+
+  it('never takes a second season named with a number for an episode of the first', () => {
+    // "Isekai Quartet 2 - 05" is the second season's fifth episode, not the first season's second
+    const plan = nyaaQueryPlan({ title: 'Isekai Quartet', episode: 2 });
+    expect([plan.query, plan.broader].join(' ')).not.toContain('"Isekai Quartet 2"');
+    expect(wordsInclude('[Group] Isekai Quartet 2 - 05 [1080p]', plan.words!)).toBe(false);
+    expect(wordsInclude('[Group] Isekai Quartet - 02 [1080p]', plan.words!)).toBe(true);
+    const { packs } = nyaaQueryPlan({ title: 'Isekai Quartet', episode: 5 });
+    expect(packIncludes('[Group] Isekai Quartet 2 (01-12)', packs!)).toBe(false);
+    expect(packIncludes('[Group] Isekai Quartet (01-12)', packs!)).toBe(true);
+  });
+
+  it('spells a middle dot between words as a space', () => {
+    // As in "[Erai-raws] Tougen Anki: Nikko Kegon no Taki-hen - 04 [1080p CR WEBRip HEVC AAC]"
+    expect(
+      nyaaQuery({ title: 'Tougen Anki: Nikko・Kegon no Taki-hen', episode: 4 }).query
+    ).toContain('"Tougen Anki: Nikko Kegon no Taki-hen - 04"');
+  });
+
+  it("numbers the season with the series' first title, as web releases do", () => {
+    // As in "[Judas] Tougen Anki - S02E04" and "[NanakoRaws] Tougen Anki S2 - 04"
+    const { words } = nyaaQueryPlan(
+      { title: 'Tougen Anki: Nikko・Kegon no Taki-hen', episode: 4 },
+      { arc: { offset: 24, title: 'Tougen Anki', season: 2 }, related: [] }
+    );
+    expect(words!.query).toContain('(Tougen Anki 04)');
+    for (const phrase of [
+      '"Tougen Anki S02E04"',
+      '"Tougen Anki - S02E04"',
+      '"Tougen Anki S2 - 04"',
+    ])
+      expect(words!.phrases).toContain(phrase);
+  });
+
+  describe('on sukebei', () => {
+    const series = { arc: null, related: [], native: '日本語タイトル' };
+    const search = { title: 'Romaji Title', englishTitle: 'English Title', episode: 1 };
+
+    it('also searches the native title, and the number as "#1" and "第1話" write it', () => {
+      const { words } = nyaaQueryPlan({ ...search, adult: true }, series);
+      expect(words!.query).toBe(
+        '((Romaji Title 1)|(Romaji Title 01)|(日本語タイトル 1)|(日本語タイトル 01)|(English Title 1)|(English Title 01)) -batch'
+      );
+      expect(words!.loosely).toEqual({
+        titles: ['Romaji Title', 'English Title', '日本語タイトル'],
+        episode: 1,
+      });
+      // Not on nyaa.si, whose releases this was measured against
+      const plain = nyaaQueryPlan(search, series).words!;
+      expect(plain.query).toBe('((Romaji Title 01)|(English Title 01)) -batch');
+      expect(plain.loosely).toBeUndefined();
+    });
+
+    it.each([
+      ['[Group] 日本語タイトル ＃1 [1080p]', true],
+      ['[Group] 日本語タイトル第1話', true],
+      ['[Group] Romaji Title #1 (720p)', true],
+      ['[Group] Romaji Title [01][1080p]', true],
+      ['[Group] 日本語タイトル 上巻', true],
+      ['[Group] 日本語タイトル ＃2', false],
+      ['[Group] Romaji Title #12', false],
+      ['[Group] 日本語タイトル 下巻', false],
+      ['[Group] Other Show #1', false],
+    ])('tells whether "%s" is episode 1', (name, includes) => {
+      const { words } = nyaaQueryPlan({ ...search, adult: true }, series);
+      expect(wordsInclude(name, words!)).toBe(includes);
     });
   });
 

@@ -181,16 +181,20 @@ describe('AniList request protection', () => {
 });
 
 describe('series', () => {
-  type Part = { title: string; earlier?: [id: number, title: string, episodes: number | null][] };
+  type Part = {
+    title: string;
+    native?: string;
+    earlier?: [id: number, title: string, episodes: number | null][];
+  };
   // Answers AniList's relation queries from a chain of parts, by id
   function serve(parts: Record<number, Part>) {
     vi.mocked(fetch).mockImplementation(async (_url, init) => {
       const { id } = JSON.parse(init!.body as string).variables;
-      const { title, earlier = [] } = parts[id];
+      const { title, native = null, earlier = [] } = parts[id];
       return Response.json({
         data: {
           Media: {
-            title: { romaji: title },
+            title: { romaji: title, native },
             relations: {
               edges: [
                 ...earlier.map(([id, title, episodes]) => ({
@@ -242,13 +246,41 @@ describe('series', () => {
       },
       101: { title: 'BLEACH: Sennen Kessen-hen', earlier: [[100, 'BLEACH', 366]] },
     });
-    expect((await getSeries(104)).arc).toEqual({ offset: 40, title: 'BLEACH: Sennen Kessen-hen' });
+    expect((await getSeries(104)).arc).toEqual({
+      offset: 40,
+      title: 'BLEACH: Sennen Kessen-hen',
+      season: 4,
+    });
     expect(fetch).toHaveBeenCalledTimes(4);
     // With the titles of the series' other TV entries, not its movies or manga
     expect((await getSeries(104)).related).toEqual(['BLEACH: Sennen Kessen-hen - Soukoku-tan']);
     // Kept for the next search
-    expect((await getSeries(104)).arc).toEqual({ offset: 40, title: 'BLEACH: Sennen Kessen-hen' });
+    expect((await getSeries(104)).arc).toEqual({
+      offset: 40,
+      title: 'BLEACH: Sennen Kessen-hen',
+      season: 4,
+    });
     expect(fetch).toHaveBeenCalledTimes(4);
+  });
+
+  it("returns the anime's native title, which sukebei releases often go by", async () => {
+    serve({ 601: { title: 'Show', native: '日本語タイトル' } });
+    expect(await getSeries(601)).toMatchObject({ arc: null, native: '日本語タイトル' });
+  });
+
+  it("names the series with the words its parts' titles share", async () => {
+    serve({
+      712: {
+        title: 'JoJo no Kimyou na Bouken: Steel Ball Run - 2nd & 3rd STAGE',
+        earlier: [[711, 'JoJo no Kimyou na Bouken: Steel Ball Run - 1st STAGE', 1]],
+      },
+      711: { title: 'JoJo no Kimyou na Bouken: Steel Ball Run - 1st STAGE' },
+    });
+    expect((await getSeries(712)).arc).toEqual({
+      offset: 1,
+      title: 'JoJo no Kimyou na Bouken: Steel Ball Run',
+      season: 2,
+    });
   });
 
   it('leaves out the season words the parts share', async () => {
@@ -257,7 +289,7 @@ describe('series', () => {
       202: { title: 'SPY×FAMILY Season 2', earlier: [[201, 'SPY×FAMILY', 25]] },
       201: { title: 'SPY×FAMILY' },
     });
-    expect((await getSeries(203)).arc).toEqual({ offset: 37, title: 'SPY×FAMILY' });
+    expect((await getSeries(203)).arc).toEqual({ offset: 37, title: 'SPY×FAMILY', season: 3 });
   });
 
   it.each([
@@ -296,7 +328,7 @@ describe('series', () => {
       342: { title: 'Show 2nd Season', earlier: [[341, 'Show', 12]] },
       341: { title: 'Show' },
     });
-    expect((await getSeries(342)).arc).toEqual({ offset: 12, title: 'Show' });
+    expect((await getSeries(342)).arc).toEqual({ offset: 12, title: 'Show', season: 2 });
   });
 
   it('counts nothing for now when AniList has no requests to spare, and asks again later', async () => {
@@ -306,6 +338,6 @@ describe('series', () => {
     });
     vi.mocked(takeAniListRequest).mockResolvedValueOnce({ allowed: false, retryAfter: 30 });
     await expect(getSeries(402)).rejects.toBeInstanceOf(AniListRateLimitError);
-    expect((await getSeries(402)).arc).toEqual({ offset: 12, title: 'Show' });
+    expect((await getSeries(402)).arc).toEqual({ offset: 12, title: 'Show', season: 2 });
   });
 });

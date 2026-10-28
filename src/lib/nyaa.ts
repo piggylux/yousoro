@@ -123,12 +123,16 @@ function splitSeason(title: string): { base: string; season: number; guessed: bo
  * brackets too, which release names keep for groups and tags: "[Oshi no Ko]" is "Oshi no Ko"
  */
 function cleanTitle(title: string) {
-  return title
-    .normalize('NFC')
-    .replace(NON_LATIN_BRACKETS, '')
-    .replace(/["\\[\]]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return (
+    title
+      .normalize('NFC')
+      .replace(NON_LATIN_BRACKETS, '')
+      .replace(/["\\[\]]/g, ' ')
+      // A middle dot between words is a space in release names: "Nikko・Kegon" is "Nikko Kegon"
+      .replace(/[・·･]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+  );
 }
 
 // Also without dashes around words, as in "Re:ZERO -Starting Life in Another World-", but keeping
@@ -170,7 +174,11 @@ const enum Rank {
  * ends with the episode number or code, with or without a dash, as release names write it
  */
 function episodePhrases(
-  titles: { main: string[]; other: string[]; arc?: { title: string; episode: number } },
+  titles: {
+    main: string[];
+    other: string[];
+    arc?: { title: string; episode: number; season: number };
+  },
   episode: number
 ) {
   /*
@@ -192,8 +200,8 @@ function episodePhrases(
     add(rank, `"${name} - ${pad(episode)}"`, secondary);
     add(rank > Rank.Dashless ? rank : Rank.Dashless, `"${name} ${pad(episode)}"`, true);
     if (episode < 10) {
+      // Not "Title 2", which is also how a second season can be named: "Title 2 - 05"
       add(Rank.Unpadded, `"${name} - ${episode}"`);
-      add(Rank.Unpadded, `"${name} ${episode}"`, true);
     }
   };
   // Without a dash first, as web releases write codes: "Title S02E05 1080p WEB-DL"
@@ -245,7 +253,16 @@ function episodePhrases(
   // layouts and spellings of it found few releases, and took the place of ones that found more
   if (titles.arc) {
     const title = cleanTitle(titles.arc.title);
-    if (LATIN_TITLE.test(title)) add(Rank.Number, `"${title} - ${pad(titles.arc.episode)}"`);
+    if (LATIN_TITLE.test(title)) {
+      add(Rank.Number, `"${title} - ${pad(titles.arc.episode)}"`);
+      // Or the first part's title with the season the anime is in the series, as web releases
+      // number seasons: "Tougen Anki S02E04" for Tougen Anki: Nikko・Kegon no Taki-hen
+      const { season } = titles.arc;
+      if (season > 1) {
+        withCode(Rank.Season, title, season);
+        withNumber(Rank.Season, `${title} S${season}`);
+      }
+    }
   }
   for (const title of titles.other.map(cleanTitle)) {
     for (const spelling of titleSpellings(title)) {
@@ -300,32 +317,54 @@ export type NyaaSearch = {
  * this one, as many release names number episodes on from earlier parts: the fourth part of
  * Bleach: Thousand-Year Blood War starts at episode 41
  */
-export type NyaaArc = { offset: number; title: string };
+export type NyaaArc = {
+  offset: number;
+  title: string;
+  /** Which part of the series the anime is, which web releases often number as its season */
+  season: number;
+};
 
-/** What a search learns from the anime's other AniList entries, which the server looks up */
-export type NyaaSeries = { arc: NyaaArc | null; related: string[] };
+/** What a search learns from AniList about the anime and its series, which the server looks up */
+export type NyaaSeries = { arc: NyaaArc | null; related: string[]; native?: string | null };
 
 /**
  * A search for the packs of an older series, and the episode they need to include: its number
  * in its own season, and in the whole series when it's numbered on from earlier parts
  */
-export type NyaaPacks = { query: string; episode: number; season: number; seriesEpisode?: number };
+export type NyaaPacks = {
+  query: string;
+  episode: number;
+  season: number;
+  seriesEpisode?: number;
+  /** The title phrases, one of which a pack's name must have */
+  titles?: string[];
+};
 
+/*
+ * A search plan, whose searches run together and add up, as more releases matter more than a
+ * faster answer: each finds some the others don't
+ */
 export type NyaaQueryPlan = {
   category: string;
   /** The most likely phrases */
   query: string;
-  /** Only the first few phrases of `query`, to try instead when nyaa.si takes too long to answer */
+  /** Only the first few phrases of `query`, to try when nyaa.si took too long and found nothing */
   lighter?: string;
-  /** The next most likely phrases, to try when `query` finds nothing */
+  /** The next most likely phrases */
   broader?: string;
   /**
-   * The words of the series' first part and the episode's number in the whole series, for names no
-   * phrase can match, as "Bleach S17E50" numbers a season TVDB's way. Tried before `broader` when
-   * `query` finds nothing, as words answer fast. nyaa.si matches them loosely, even inside
-   * checksums, so only the releases naming `episode` are kept
+   * The words of the titles, without their season, and the episode's number. nyaa.si matches
+   * words loosely and answers them fast, and keeps 75 results, so only the releases one of
+   * `phrases` names are kept: every phrase the search could use, beyond what fits in a query. On
+   * sukebei.nyaa.si, also those holding one of `titles` anywhere that number `episode` their way
    */
-  wide?: { query: string; episode: number };
+  words?: NyaaWords;
+  /**
+   * The words of the series' first part and the episode's number in the whole series, for names no
+   * phrase can match, as "Bleach S17E50" numbers a season TVDB's way. Only the releases naming
+   * `episode` are kept
+   */
+  seriesNumber?: { query: string; episode: number };
   /**
    * Last, for a series released in packs, as older ones are: its titles without the episode,
    * batches allowed, and without the series' other entries whose titles start the same way, as
@@ -361,7 +400,9 @@ export function nyaaQueryPlan(
     {
       main,
       other: otherTitles,
-      arc: arc ? { title: arc.title, episode: arc.offset + episode } : undefined,
+      arc: arc
+        ? { title: arc.title, episode: arc.offset + episode, season: arc.season }
+        : undefined,
     },
     episode
   );
@@ -420,22 +461,142 @@ export function nyaaQueryPlan(
   const plan: NyaaQueryPlan = { category, query: format(first) };
   if (first.length > LIGHTER_PHRASES) plan.lighter = format(first.slice(0, LIGHTER_PHRASES));
   if (broader.length) plan.broader = format(broader);
+  // Searches of their own, as nyaa.si doesn't take a group of words as an alternative to phrases.
+  // sukebei.nyaa.si's releases often go by the anime's native title, and number episodes "#1" or
+  // "第1話", whose word is "1", not "01"
+  const native = adult && series?.native ? series.native : null;
+  const titles = [
+    ...new Set(
+      [main[0], native ?? '', ...main.slice(1), arc?.title ?? ''].map((name) =>
+        searchWords(splitSeason(cleanTitle(name))?.base ?? name)
+      )
+    ),
+  ].filter((words) => words && (adult || LATIN_TITLE.test(words)));
+  const numbers = adult && episode < 10 ? [String(episode), pad(episode)] : [pad(episode)];
+  const formatWords = (groups: string[]) =>
+    `${groups.length > 1 ? `(${groups.join('|')})` : groups[0]} ${filters}`;
+  const groups: string[] = [];
+  for (const words of titles) {
+    for (const number of numbers) {
+      const group = `(${words} ${number})`;
+      if (nyaaQueryLength(formatWords([...groups, group])) <= NYAA_MAX_QUERY_LENGTH)
+        groups.push(group);
+    }
+  }
+  if (groups.length) {
+    // Without the unpadded phrases, as loosely "Title - 2" is also "Title 2 - 05"
+    plan.words = {
+      query: formatWords(groups),
+      phrases: candidates.filter(({ rank }) => rank !== Rank.Unpadded).map(({ phrase }) => phrase),
+    };
+    if (adult) plan.words.loosely = { titles: native ? [...main, native] : main, episode };
+  }
   if (arc) {
-    // A search of its own, as nyaa.si doesn't take a group of words as an alternative to phrases
-    const words = cleanTitle(arc.title)
-      .replace(/[^\p{L}\p{N}]+/gu, ' ')
-      .trim();
+    const words = searchWords(arc.title);
     const query = `(${words} ${arc.offset + episode}) ${filters}`;
     if (words && LATIN_TITLE.test(words) && nyaaQueryLength(query) <= NYAA_MAX_QUERY_LENGTH)
-      plan.wide = { query, episode: arc.offset + episode };
+      plan.seriesNumber = { query, episode: arc.offset + episode };
   }
-  const packs = packsQuery([...main, ...otherTitles], series?.related ?? [], terms);
+  // Another title of a single word is often an abbreviation or the franchise's name, as "SBR" or
+  // "Yugioh", which would find unrelated packs without an episode to narrow it down
+  const packs = packsQuery(
+    [...main, ...otherTitles.filter((other) => cleanTitle(other).includes(' '))],
+    series?.related ?? [],
+    terms
+  );
   if (packs) {
     const season = splitSeason(cleanTitle(title));
-    plan.packs = { query: packs, episode, season: season && !season.guessed ? season.season : 1 };
+    plan.packs = {
+      query: packs.query,
+      episode,
+      season: season && !season.guessed ? season.season : 1,
+      titles: packs.phrases,
+    };
     if (arc) plan.packs.seriesEpisode = arc.offset + episode;
   }
   return plan;
+}
+
+// A title's words for a word search, without the punctuation nyaa.si could take as operators
+const searchWords = (title: string) =>
+  cleanTitle(title)
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+
+/**
+ * A word search's query and what its releases must have. On sukebei.nyaa.si, `loosely` also takes
+ * a name holding one of the titles anywhere, numbering the episode the ways its releases do
+ */
+export type NyaaWords = {
+  query: string;
+  phrases: string[];
+  loosely?: { titles: string[]; episode: number };
+};
+
+// Lowercase, with compatibility forms and without accents: "Fiancé" is "fiance", "＃１" is "#1"
+const folded = (text: string) => text.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase();
+// The same, without spaces and punctuation
+const compact = (text: string) => folded(text).replace(/[\s\p{P}\p{S}]+/gu, '');
+
+/** Whether a word search's release names the episode: with a phrase, or on sukebei, loosely */
+export function wordsInclude(name: string, { phrases, loosely }: NyaaWords): boolean {
+  if (matchesPhrase(name, phrases)) return true;
+  if (!loosely || !loosely.titles.some((title) => compact(name).includes(compact(title))))
+    return false;
+  const { episode } = loosely;
+  const text = name.normalize('NFKC');
+  return (
+    namesEpisode(text, episode) ||
+    // "#1", "第1話" or "第1巻", or "Title 1"
+    new RegExp(`#\\s*0*${episode}(?!\\d)|第\\s*0*${episode}\\s*[話话巻章]`).test(text) ||
+    new RegExp(`(?<![\\p{L}\\p{N}.#-])${episode}(?![\\p{L}\\p{N}]|[.-]\\d)`, 'u').test(text) ||
+    // The first and second of two parts
+    (episode === 1 && /上巻|前[編篇]/.test(text)) ||
+    (episode === 2 && /下巻|後[編篇]/.test(text))
+  );
+}
+
+// Letters and digits, with a single space for whatever spaces and punctuation are between them
+const spaced = (text: string) =>
+  folded(text)
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+
+// A phrase's letters and digits in order, with or without a space between them, but not between
+// two digits written together, so "05" is neither "0.5" nor part of "050". Matched against
+// `spaced` names, as plain spaces compile far faster than Unicode classes
+function loosePattern(phrase: string) {
+  let pattern = '';
+  let previous = '';
+  let apart = false;
+  for (const character of folded(phrase.slice(1, -1))) {
+    if (!/[\p{L}\p{N}]/u.test(character)) {
+      apart = true;
+      continue;
+    }
+    if (previous && (apart || !/\d/.test(previous) || !/\d/.test(character))) pattern += ' ?';
+    pattern += character;
+    previous = character;
+    apart = false;
+  }
+  return pattern;
+}
+// One pattern for all of a search's phrases, as an anime can have hundreds
+const loosePhrases = new WeakMap<string[], RegExp>();
+
+/**
+ * Whether a release name has one of the phrases, ignoring the spaces, punctuation and accents
+ * release names write differently: "Nano ni" is "nanoni", "Re:ZERO" is "Re ZERO", "Fiancé" is
+ * "Fiance", "Tougen.Anki.S02E04" is "Tougen Anki S02E04"
+ */
+export function matchesPhrase(name: string, phrases: string[]): boolean {
+  let pattern = loosePhrases.get(phrases);
+  if (!pattern) {
+    const each = phrases.map(loosePattern).filter(Boolean);
+    pattern = each.length ? new RegExp(`(?<=^| )(?:${each.join('|')})(?:v\\d)?(?= |$)`) : /(?!)/;
+    loosePhrases.set(phrases, pattern);
+  }
+  return pattern.test(spaced(name));
 }
 
 const titleWords = (title: string) =>
@@ -452,7 +613,11 @@ const SEASON_WORD = /^(season|saison|part|cour|the|\d+(st|nd|rd|th)?|s\d+|[ivx]+
  * ("Yu-Gi-Oh!" for "Yu-Gi-Oh! Duel Monsters") would find all of it. So are the words that go on
  * the titles in the series' other entries ("GX" in "Yu☆Gi☆Oh! Duel Monsters GX")
  */
-function packsQuery(titles: string[], related: string[], terms: string): string | null {
+function packsQuery(
+  titles: string[],
+  related: string[],
+  terms: string
+): { query: string; phrases: string[] } | null {
   const names = [...new Set(titles.map(cleanTitle))].filter((title) => LATIN_TITLE.test(title));
   const kept = names.filter(
     (title) => !names.some((other) => startsWithWords(titleWords(other), titleWords(title)))
@@ -479,7 +644,7 @@ function packsQuery(titles: string[], related: string[], terms: string): string 
     seen.add(phrase.toLowerCase());
     phrases.push(phrase);
   }
-  return phrases.length ? format(phrases) : null;
+  return phrases.length ? { query: format(phrases), phrases } : null;
 }
 
 /**
@@ -488,11 +653,19 @@ function packsQuery(titles: string[], related: string[], terms: string): string 
  * says another season, as "S2 (01-48)" numbers its own episodes
  */
 export function packIncludes(name: string, packs: NyaaPacks): boolean {
+  if (packs.titles && !matchesPhrase(name, packs.titles)) return false;
   const seasons = [
     ...name.matchAll(
       /(?<![\p{L}\p{N}])(?:S|Season\s*|Saison\s*)0*(\d{1,2})(?![\p{N}E])|(?<!\p{N})(\d{1,2})(?:st|nd|rd|th)\s+Season/giu
     ),
   ].map(([, season, ordinal]) => Number(season ?? ordinal));
+  // A number from 2 to 9 right after the title, not starting a range, is a season too:
+  // "Isekai Quartet 2 (01-12)"
+  for (const title of packs.titles ?? []) {
+    const after = new RegExp(`(?<=^| )${loosePattern(title)} ([2-9])(?= |$)`).exec(spaced(name));
+    if (after && !new RegExp(`(?<!\\d)${after[1]}\\s*(?:-|~|〜|à|to)\\s*\\d`).test(name))
+      seasons.push(Number(after[1]));
+  }
   if (seasons.length && !seasons.includes(packs.season)) return false;
   // Without a season, the range may number the whole series instead
   const episodes = (seasons.length ? [packs.episode] : [packs.episode, packs.seriesEpisode]).filter(

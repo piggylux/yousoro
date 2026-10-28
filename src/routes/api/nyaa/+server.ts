@@ -4,6 +4,7 @@ import {
   namesEpisode,
   nyaaQueryPlan,
   packIncludes,
+  wordsInclude,
   nyaaQueryLength,
   nyaaSearchUrl,
   NYAA_MAX_QUERY_LENGTH,
@@ -61,6 +62,7 @@ export async function POST(event: RequestEvent) {
     if (series) plan = nyaaQueryPlan(search, series);
   }
   const attempt = async (query: string) => {
+    event.request.signal.throwIfAborted();
     const remaining = deadline - Date.now();
     if (remaining <= 0) throw new DOMException('Search timed out', 'TimeoutError');
     // Build the destination ourselves so this endpoint can only read the two Nyaa feeds.
@@ -68,54 +70,64 @@ export async function POST(event: RequestEvent) {
     url.searchParams.set('page', 'rss');
     return fetchFeed(event, url, Math.min(NYAA_ATTEMPT_TIMEOUT_MS, remaining));
   };
+  // Each search finds releases the others don't, so they run together and their releases add up,
+  // once each. nyaa.si matches words loosely, so a word search keeps only the releases naming the
+  // episode. A search other than the first adds nothing when it fails
+  const searches: { query: string; keep?: (name: string) => boolean }[] = [{ query: plan.query }];
+  if (plan.broader) searches.push({ query: plan.broader });
+  if (plan.words) {
+    const words = plan.words;
+    searches.push({ query: words.query, keep: (name) => wordsInclude(name, words) });
+  }
+  if (plan.seriesNumber) {
+    const { episode } = plan.seriesNumber;
+    searches.push({ query: plan.seriesNumber.query, keep: (name) => namesEpisode(name, episode) });
+  }
+  const read = async (query: string, keep?: (name: string) => boolean) => {
+    const feed = readFeed(await attempt(query), keep);
+    if (feed.head === null) throw new Error('Unreadable feed');
+    return { head: feed.head, items: feed.items };
+  };
   try {
-    let query = plan.query;
-    let feed: Uint8Array<ArrayBuffer>;
-    try {
-      feed = await attempt(query);
-    } catch (cause) {
+    const answers = await Promise.allSettled(
+      searches.map(async ({ query, keep }, index) =>
+        index === 0 || (await another()) ? read(query, keep) : null
+      )
+    );
+    const feeds = answers.flatMap((answer, index) =>
+      answer.status === 'fulfilled' && answer.value
+        ? [{ ...answer.value, query: searches[index].query }]
+        : []
+    );
+    let head = feeds[0]?.head;
+    let found = feeds.flatMap(({ items }) => items);
+    // The full search on nyaa.si opens the one that found the most releases, the first on a tie
+    const [most] = [...feeds].sort((a, b) => b.items.length - a.items.length);
+    let query = most?.items.length ? most.query : plan.query;
+    let inPacks = false;
+    const [first] = answers;
+    if (!found.length && first.status === 'rejected') {
+      const cause = first.reason;
       // nyaa.si answers fewer phrases faster, so the most likely ones alone can still arrive in
       // time. Do not retry upstream failures or rate limits, and never a disconnected browser.
       if (!plan.lighter || event.request.signal.aborted || !isTimeout(cause) || !(await another()))
         throw cause;
       query = plan.lighter;
-      feed = await attempt(query);
+      const feed = await read(query);
       // The phrases left out may have matched, so this isn't a search with no results
-      if (isEmptyFeed(feed)) throw cause;
-    }
-    let empty = isEmptyFeed(feed);
-    // nyaa.si answers words in a tenth of a second and phrases in about a quarter each, so the
-    // series' word search goes before the broader phrases, which it spares when it finds releases.
-    // When it fails, the phrases still answer
-    if (query === plan.query && plan.wide && empty && (await another())) {
-      try {
-        const { episode } = plan.wide;
-        const wide = keepReleases(await attempt(plan.wide.query), (name) =>
-          namesEpisode(name, episode)
-        );
-        if (!isEmptyFeed(wide)) {
-          feed = wide;
-          query = plan.wide.query;
-          empty = false;
-        }
-      } catch (cause) {
-        if (event.request.signal.aborted) throw cause;
-      }
-    }
-    if (query === plan.query && plan.broader && empty && (await another())) {
-      query = plan.broader;
-      feed = await attempt(query);
-      empty = isEmptyFeed(feed);
+      if (!feed.items.length) throw cause;
+      head = feed.head;
+      found = feed.items;
     }
     // No release names the episode alone, as with an older series released in packs. Also a last
     // try, so when it fails, the searches before still answer
-    let inPacks = false;
-    if (plan.packs && query !== plan.lighter && empty && (await another())) {
+    if (!found.length && plan.packs && (await another())) {
+      const packs = plan.packs;
       try {
-        const packs = plan.packs;
-        const found = keepReleases(await attempt(packs.query), (name) => packIncludes(name, packs));
-        if (!isEmptyFeed(found)) {
-          feed = found;
+        const feed = await read(packs.query, (name) => packIncludes(name, packs));
+        head ??= feed.head;
+        if (feed.items.length) {
+          found = feed.items;
           query = packs.query;
           inPacks = true;
         }
@@ -123,12 +135,13 @@ export async function POST(event: RequestEvent) {
         if (event.request.signal.aborted) throw cause;
       }
     }
+    if (head === undefined) throw new Error('No feed');
     const headers: Record<string, string> = {
       'Content-Type': 'application/xml; charset=utf-8',
       'X-Nyaa-Query': encodeURIComponent(query),
     };
     if (inPacks) headers['X-Nyaa-Packs'] = '1';
-    return new Response(feed, { headers });
+    return new Response(mergeFeed(head, found), { headers });
   } catch (cause) {
     if (event.request.signal.aborted) error(499, 'Search cancelled');
     if (isTimeout(cause))
@@ -148,27 +161,30 @@ function lookUpSeries(mediaId: number): Promise<NyaaSeries | null> {
   ]).finally(() => clearTimeout(timer));
 }
 
-// Only the releases whose names `keep` accepts. Entities go first, so "&#39;" isn't episode 39
-function keepReleases(feed: Uint8Array, keep: (name: string) => boolean): Uint8Array<ArrayBuffer> {
-  const xml = new TextDecoder().decode(feed).replace(/<item>[\s\S]*?<\/item>\s*/g, (item) => {
+// A feed's releases, those `keep` accepts, and what comes before them, or null when it isn't a
+// feed. Entities go first in names, so "&#39;" isn't episode 39
+function readFeed(feed: Uint8Array, keep?: (name: string) => boolean) {
+  const xml = new TextDecoder().decode(feed);
+  const end = xml.search(/<item>|<\/channel\s*>/);
+  const items = (xml.match(/<item>[\s\S]*?<\/item>/g) ?? []).filter((item) => {
     const title = /<title>([\s\S]*?)<\/title>/.exec(item)?.[1] ?? '';
-    return keep(title.replace(/&#?\w+;/g, ' ')) ? item : '';
+    return !keep || keep(title.replace(/&#?\w+;/g, ' '));
   });
-  return new TextEncoder().encode(xml);
+  return { head: end < 0 ? null : xml.slice(0, end), items };
+}
+
+// One feed of the releases, each once, newest first as nyaa.si orders a search
+function mergeFeed(head: string, items: string[]) {
+  const id = (item: string) => /<guid[^>]*>([\s\S]*?)<\/guid>/.exec(item)?.[1] ?? item;
+  const published = (item: string) =>
+    Date.parse(/<pubDate>([\s\S]*?)<\/pubDate>/.exec(item)?.[1] ?? '') || 0;
+  const releases = [...new Map(items.map((item) => [id(item), item])).values()];
+  releases.sort((a, b) => published(b) - published(a));
+  return `${head}${releases.join('\n')}</channel></rss>`;
 }
 
 const isTimeout = (cause: unknown) =>
   cause instanceof DOMException && cause.name === 'TimeoutError';
-
-function isEmptyFeed(feed: Uint8Array) {
-  const xml = new TextDecoder().decode(feed);
-  return (
-    /<rss[\s>]/i.test(xml) &&
-    /<channel[\s>]/i.test(xml) &&
-    /<\/channel\s*>/i.test(xml) &&
-    !/<item[\s>]/i.test(xml)
-  );
-}
 
 async function fetchFeed(
   event: RequestEvent,

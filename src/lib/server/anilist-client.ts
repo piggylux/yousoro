@@ -283,13 +283,29 @@ const titleWords = (title: string) =>
     .filter(Boolean);
 
 /**
+ * The first part's title, up to the words the parts share, as release names number the series
+ * under it: "JoJo no Kimyou na Bouken: Steel Ball Run" for its "- 1st STAGE"
+ */
+function seriesTitle(title: string, length: number) {
+  const words: string[] = [];
+  let count = 0;
+  for (const word of title.split(/\s+/)) {
+    if (count === length) break;
+    words.push(word);
+    if (word.replace(/[^\p{L}\p{N}]+$/u, '')) count++;
+  }
+  return words.join(' ').replace(/[\s:\-–—]+$/, '');
+}
+
+/**
  * What an anime's search needs from the other entries of its series. `arc` is the first part of
  * the series it continues, when AniList splits it in several entries, and how many episodes come
  * before it. Earlier TV parts count while their titles start with the words the anime's title
  * shares with the part right before it, less any season words, so the 366 episodes of Bleach
  * don't count for Bleach: Thousand-Year Blood War. Null when there's no earlier part or the count
  * is uncertain, as a wrong count would find another episode. `related` are the titles of the
- * series' other TV entries, as "Yu☆Gi☆Oh! Duel Monsters GX" for Yu☆Gi☆Oh! Duel Monsters
+ * series' other TV entries, as "Yu☆Gi☆Oh! Duel Monsters GX" for Yu☆Gi☆Oh! Duel Monsters, and
+ * `native` the anime's own title in its language, which many sukebei.nyaa.si releases use
  */
 export async function getSeries(mediaId: number): Promise<NyaaSeries> {
   const cached = seriesCache.get(mediaId);
@@ -297,7 +313,7 @@ export async function getSeries(mediaId: number): Promise<NyaaSeries> {
   const part = async (id: number) => {
     const data = await query<{
       Media: {
-        title: { romaji: string };
+        title: { romaji: string; native: string | null };
         relations: {
           edges: {
             relationType: string;
@@ -314,7 +330,7 @@ export async function getSeries(mediaId: number): Promise<NyaaSeries> {
     }>(
       `query ($id: Int) {
         Media(id: $id) {
-          title { romaji }
+          title { romaji native }
           relations {
             edges { relationType node { id type format episodes title { romaji english } } }
           }
@@ -329,6 +345,7 @@ export async function getSeries(mediaId: number): Promise<NyaaSeries> {
     );
     return {
       title: data.Media.title.romaji,
+      native: data.Media.title.native,
       earlier: entries
         .filter(({ relationType }) => relationType === 'PREQUEL')
         .map(({ node }) => node),
@@ -356,7 +373,10 @@ export async function getSeries(mediaId: number): Promise<NyaaSeries> {
       const earlier = current.earlier.filter(({ title }) =>
         series.every((word, index) => titleWords(title.romaji)[index] === word)
       );
-      if (!earlier.length) return offset ? { offset, title: current.title } : null;
+      if (!earlier.length)
+        return offset
+          ? { offset, title: seriesTitle(current.title, series.length), season: count + 1 }
+          : null;
       if (earlier.length > 1) return null;
       if (!earlier[0].episodes) {
         unknownLength = true;
@@ -367,7 +387,7 @@ export async function getSeries(mediaId: number): Promise<NyaaSeries> {
     }
     return null;
   })();
-  const series = { arc, related: first.related };
+  const series = { arc, related: first.related, native: first.native };
   if (seriesCache.size >= 1000) seriesCache.delete(seriesCache.keys().next().value!);
   seriesCache.set(mediaId, {
     series,

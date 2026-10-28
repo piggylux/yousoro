@@ -128,33 +128,78 @@ describe('Nyaa results endpoint', () => {
       const fetch = vi.mocked(request.fetch);
       if (failure === 'offline') fetch.mockRejectedValue(new Error('offline'));
       else
-        fetch.mockResolvedValue(
+        fetch.mockImplementation(async () =>
           failure === 'upstream error'
             ? new Response('blocked', { status: 503 })
             : new Response('x'.repeat(2_000_001))
         );
       await expect(POST(request)).rejects.toMatchObject({ status: 502 });
-      expect(fetch).toHaveBeenCalledOnce();
     }
   );
 
   const queriesOf = (request: RequestEvent) =>
     vi.mocked(request.fetch).mock.calls.map(([url]) => new URL(String(url)).searchParams.get('q'));
+  // Answers each search by its query, as they run together
+  const answer = (
+    request: RequestEvent,
+    byQuery: (query: string, options?: RequestInit) => Promise<Response>
+  ) =>
+    vi
+      .mocked(request.fetch)
+      .mockImplementation((url, options) =>
+        byQuery(new URL(String(url)).searchParams.get('q')!, options)
+      );
+  const release = (id: number, title: string, date: string) =>
+    `<item><title>${title}</title><guid isPermaLink="true">https://nyaa.si/view/${id}</guid><pubDate>${date}</pubDate></item>`;
+  const feedOf = (...items: string[]) =>
+    `<rss version="2.0"><channel><title>Nyaa</title>${items.join('')}</channel></rss>`;
 
-  it('tries the broader query only when the first feed is empty', async () => {
+  it("merges every search's releases, once each, newest first", async () => {
     const search = { title: 'Main Title', otherTitles: ['Other Title'], episode: 5 };
-    const { query, broader } = nyaaQueryPlan(search);
+    const plan = nyaaQueryPlan(search);
+    const older = release(1, 'Main Title - 05 [720p]', 'Mon, 01 Jan 2024 00:00:00 -0000');
+    const shared = release(2, 'Main Title S01E05 1080p', 'Tue, 02 Jan 2024 00:00:00 -0000');
+    const newest = release(3, 'Main Title 05 [1080p]', 'Thu, 04 Jan 2024 00:00:00 -0000');
+    const named = release(4, 'Main Title - S01E05 WEB', 'Wed, 03 Jan 2024 00:00:00 -0000');
+    // A word search finds this one only through its checksum
+    const loose = release(5, 'Main Title - 15 [05ABCDEF]', 'Fri, 05 Jan 2024 00:00:00 -0000');
     const request = event(search);
-    vi.mocked(request.fetch).mockResolvedValueOnce(new Response(emptyFeed));
+    answer(request, async (query) =>
+      query === plan.query
+        ? new Response(feedOf(older, shared))
+        : query === plan.broader
+          ? new Response(feedOf(newest, shared))
+          : new Response(feedOf(named, loose))
+    );
     const response = await POST(request);
-    expect(await response.text()).toBe(feed);
-    expect(decodeURIComponent(response.headers.get('X-Nyaa-Query')!)).toBe(broader);
-    expect(queriesOf(request)).toEqual([query, broader]);
+    expect(await response.text()).toBe(
+      feedOf(newest, named, shared, older).replace(/<\/item>(?=<item>)/g, '</item>\n')
+    );
+    expect(queriesOf(request)).toEqual([plan.query, plan.broader, plan.words!.query]);
+    expect(decodeURIComponent(response.headers.get('X-Nyaa-Query')!)).toBe(plan.query);
     // One read for each request to nyaa.si, as it's made
-    expect(vi.mocked(takeClientLimit).mock.calls).toEqual([
-      ['127.0.0.1', 'read'],
-      ['127.0.0.1', 'read'],
-    ]);
+    expect(takeClientLimit).toHaveBeenCalledTimes(3);
+  });
+
+  it('opens the full search that found the most releases', async () => {
+    const search = { title: 'Main Title', episode: 5 };
+    const plan = nyaaQueryPlan(search);
+    const date = 'Mon, 01 Jan 2024 00:00:00 -0000';
+    const request = event(search);
+    answer(
+      request,
+      async (query) =>
+        new Response(
+          query === plan.words!.query
+            ? feedOf(
+                release(1, 'Main.Title.S01E05.1080p', date),
+                release(2, 'Main Title - 05', date)
+              )
+            : emptyFeed
+        )
+    );
+    const response = await POST(request);
+    expect(decodeURIComponent(response.headers.get('X-Nyaa-Query')!)).toBe(plan.words!.query);
   });
 
   it('stops trying once the client has no reads left', async () => {
@@ -162,36 +207,31 @@ describe('Nyaa results endpoint', () => {
       .mockResolvedValueOnce({ allowed: true, retryAfter: 60 })
       .mockResolvedValue({ allowed: false, retryAfter: 60 });
     const request = event();
-    vi.mocked(request.fetch).mockResolvedValue(new Response(emptyFeed));
+    vi.mocked(request.fetch).mockImplementation(async () => new Response(emptyFeed));
     expect(await (await POST(request)).text()).toBe(emptyFeed);
     expect(request.fetch).toHaveBeenCalledOnce();
   });
 
-  it('returns empty results after the broader query and the packs found nothing', async () => {
+  it('returns empty results once every search and the packs found nothing', async () => {
     const search = { title: 'Show', episode: 1 };
-    const { query, broader, packs } = nyaaQueryPlan(search);
+    const { query, broader, words, packs } = nyaaQueryPlan(search);
     const request = event(search);
     vi.mocked(request.fetch).mockImplementation(async () => new Response(emptyFeed));
     expect(await (await POST(request)).text()).toBe(emptyFeed);
-    expect(queriesOf(request)).toEqual([query, broader, packs!.query]);
+    expect(queriesOf(request)).toEqual([query, broader, words!.query, packs!.query]);
   });
 
-  const packFeed = `<rss version="2.0"><channel><title>Nyaa</title>${[
-    'Show (01-12) [1080p]',
-    'Show (13-24) [1080p]',
-    'Show S2 (01-12) [1080p]',
-  ]
-    .map((title) => `<item><title>${title}</title><link>x</link></item>`)
-    .join('')}</channel></rss>`;
+  const packFeed = feedOf(
+    ...['Show (01-12) [1080p]', 'Show (13-24) [1080p]', 'Show S2 (01-12) [1080p]'].map(
+      (title, index) => release(index + 1, title, 'Mon, 01 Jan 2024 00:00:00 -0000')
+    )
+  );
 
   it('finally searches packs, keeping those that include the episode', async () => {
     const search = { title: 'Show', episode: 5 };
     const { packs } = nyaaQueryPlan(search);
     const request = event(search);
-    vi.mocked(request.fetch)
-      .mockResolvedValueOnce(new Response(emptyFeed))
-      .mockResolvedValueOnce(new Response(emptyFeed))
-      .mockResolvedValueOnce(new Response(packFeed));
+    answer(request, async (query) => new Response(query === packs!.query ? packFeed : emptyFeed));
     const response = await POST(request);
     const xml = await response.text();
     expect(xml).toContain('Show (01-12)');
@@ -202,11 +242,12 @@ describe('Nyaa results endpoint', () => {
   });
 
   it('answers no releases when the packs search fails', async () => {
-    const request = event({ title: 'Show', episode: 5 });
-    vi.mocked(request.fetch)
-      .mockResolvedValueOnce(new Response(emptyFeed))
-      .mockResolvedValueOnce(new Response(emptyFeed))
-      .mockResolvedValueOnce(new Response('blocked', { status: 503 }));
+    const search = { title: 'Show', episode: 5 };
+    const { packs } = nyaaQueryPlan(search);
+    const request = event(search);
+    answer(request, async (query) =>
+      query === packs!.query ? new Response('blocked', { status: 503 }) : new Response(emptyFeed)
+    );
     const response = await POST(request);
     expect(await response.text()).toBe(emptyFeed);
     expect(response.headers.get('X-Nyaa-Packs')).toBeNull();
@@ -214,7 +255,7 @@ describe('Nyaa results endpoint', () => {
 
   it('does not rewrite or retry an empty custom search', async () => {
     const request = event({ title: 'Show', episode: 1, query: 'Custom 01' });
-    vi.mocked(request.fetch).mockResolvedValue(new Response(emptyFeed));
+    vi.mocked(request.fetch).mockImplementation(async () => new Response(emptyFeed));
     expect(await (await POST(request)).text()).toBe(emptyFeed);
     expect(request.fetch).toHaveBeenCalledOnce();
   });
@@ -227,68 +268,95 @@ describe('Nyaa results endpoint', () => {
   });
 
   it('does not retry upstream rate limiting', async () => {
-    const request = event();
-    vi.mocked(request.fetch).mockResolvedValue(new Response('', { status: 429 }));
+    const search = { title: 'Show', episode: 1 };
+    const { lighter, packs } = nyaaQueryPlan(search);
+    const request = event(search);
+    vi.mocked(request.fetch).mockImplementation(async () => new Response('', { status: 429 }));
     await expect(POST(request)).rejects.toMatchObject({ status: 502 });
-    expect(request.fetch).toHaveBeenCalledOnce();
+    expect(queriesOf(request)).not.toContain(lighter);
+    expect(queriesOf(request)).not.toContain(packs!.query);
   });
 
   const stalledFetch = (_url: unknown, options?: RequestInit) =>
     new Promise<Response>((_resolve, reject) => {
       const signal = options?.signal;
+      // As fetch does, for a request aborted before it starts too
+      if (signal?.aborted) reject(signal.reason);
       signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
     });
 
-  it('retries a timed-out search with its lighter query', async () => {
+  it('retries a timed-out search with its lighter query when nothing else was found', async () => {
     vi.useFakeTimers();
     const search = { title: 'Show', episode: 1 };
     const { query, lighter } = nyaaQueryPlan(search);
     const request = event(search);
-    vi.mocked(request.fetch).mockImplementationOnce(stalledFetch);
+    answer(request, async (asked, options) =>
+      asked === query
+        ? stalledFetch(asked, options)
+        : new Response(asked === lighter ? feed : emptyFeed)
+    );
     const response = POST(request);
     await vi.advanceTimersByTimeAsync(NYAA_ATTEMPT_TIMEOUT_MS);
     expect(await (await response).text()).toBe(feed);
     expect(decodeURIComponent((await response).headers.get('X-Nyaa-Query')!)).toBe(lighter);
-    expect(queriesOf(request)).toEqual([query, lighter]);
+    expect(queriesOf(request).at(-1)).toBe(lighter);
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('answers with the other searches when the first times out', async () => {
+    vi.useFakeTimers();
+    const search = { title: 'Show', episode: 1 };
+    const { query, lighter } = nyaaQueryPlan(search);
+    const request = event(search);
+    answer(request, async (asked, options) =>
+      asked === query ? stalledFetch(asked, options) : new Response(feed)
+    );
+    const response = POST(request);
+    await vi.advanceTimersByTimeAsync(NYAA_ATTEMPT_TIMEOUT_MS);
+    expect(await (await response).text()).toBe(feed);
+    expect(queriesOf(request)).not.toContain(lighter);
   });
 
   it('stops stalled upstream requests at the total deadline', async () => {
     vi.useFakeTimers();
-    const request = event();
+    const search = { title: 'Show', episode: 1 };
+    const { lighter } = nyaaQueryPlan(search);
+    const request = event(search);
     vi.mocked(request.fetch).mockImplementation(stalledFetch);
     const outcome = POST(request).catch((error) => error);
     await vi.advanceTimersByTimeAsync(NYAA_SEARCH_TIMEOUT_MS);
     expect(await outcome).toMatchObject({ status: 504 });
-    expect(request.fetch).toHaveBeenCalledTimes(2);
+    expect(queriesOf(request).at(-1)).toBe(lighter);
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('does not report no matches when one query timed out and the other was empty', async () => {
+  it('does not report no matches when the first search timed out and the others were empty', async () => {
     vi.useFakeTimers();
-    const request = event();
-    vi.mocked(request.fetch)
-      .mockImplementationOnce(stalledFetch)
-      .mockResolvedValueOnce(new Response(emptyFeed));
+    const search = { title: 'Show', episode: 1 };
+    const { query } = nyaaQueryPlan(search);
+    const request = event(search);
+    answer(request, async (asked, options) =>
+      asked === query ? stalledFetch(asked, options) : new Response(emptyFeed)
+    );
     const outcome = POST(request).catch((error) => error);
     await vi.advanceTimersByTimeAsync(NYAA_ATTEMPT_TIMEOUT_MS);
     expect(await outcome).toMatchObject({ status: 504 });
-    expect(request.fetch).toHaveBeenCalledTimes(2);
   });
 
-  it('gives the fallback only the remaining total budget', async () => {
+  it('gives the last search only the remaining total budget', async () => {
     vi.useFakeTimers();
-    const request = event();
-    vi.mocked(request.fetch)
-      .mockImplementationOnce(async () => {
-        vi.setSystemTime(Date.now() + 10000);
-        return new Response(emptyFeed);
-      })
-      .mockImplementation(stalledFetch);
-    const outcome = POST(request).catch((error) => error);
+    const search = { title: 'Show', episode: 1 };
+    const { packs } = nyaaQueryPlan(search);
+    const request = event(search);
+    answer(request, async (asked, options) => {
+      if (asked === packs!.query) return stalledFetch(asked, options);
+      vi.setSystemTime(Date.now() + 10000);
+      return new Response(emptyFeed);
+    });
+    const outcome = POST(request);
     await vi.advanceTimersByTimeAsync(2000);
-    expect(await outcome).toMatchObject({ status: 504 });
-    expect(request.fetch).toHaveBeenCalledTimes(2);
+    // The packs search timed out, so the searches before answer: no releases
+    expect(await (await outcome).text()).toBe(emptyFeed);
     expect(vi.getTimerCount()).toBe(0);
   });
 
@@ -306,8 +374,10 @@ describe('Nyaa results endpoint', () => {
   });
 
   it('propagates browser cancellation without trying a fallback', async () => {
+    const search = { title: 'Show', episode: 1 };
+    const { lighter, packs } = nyaaQueryPlan(search);
     const controller = new AbortController();
-    const request = event(undefined, controller.signal);
+    const request = event(search, controller.signal);
     let started!: () => void;
     const entered = new Promise<void>((resolve) => {
       started = resolve;
@@ -320,12 +390,13 @@ describe('Nyaa results endpoint', () => {
     await entered;
     controller.abort();
     expect(await outcome).toMatchObject({ status: 499 });
-    expect(request.fetch).toHaveBeenCalledOnce();
+    expect(queriesOf(request)).not.toContain(lighter);
+    expect(queriesOf(request)).not.toContain(packs!.query);
   });
 
   describe('series numbered on from an earlier part', () => {
     const search = { title: 'Show 2nd Season', episode: 3, mediaId: 42 };
-    const series = { arc: { offset: 12, title: 'Show' }, related: [] };
+    const series = { arc: { offset: 12, title: 'Show', season: 2 }, related: [] };
 
     it("also looks for the episode's number in the whole series", async () => {
       vi.mocked(getSeries).mockResolvedValue(series);
@@ -360,55 +431,56 @@ describe('Nyaa results endpoint', () => {
       expect(vi.getTimerCount()).toBe(0);
     });
 
-    const item = (title: string) => `<item><title>${title}</title><link>x</link></item>`;
-    const wideFeed = `<rss version="2.0"><channel><title>Nyaa</title>${[
-      'Show S17E15 VOSTFR 1080p WEB-DL',
-      'Show 2nd Season - 07 [1080p][15F3DC8F]',
-      'Show S17E14 VOSTFR 1080p WEB-DL',
-    ]
-      .map(item)
-      .join('')}</channel></rss>`;
-
-    it("searches the series' number before more phrases, keeping only the releases naming it", async () => {
+    it("adds the series search's releases that name the episode", async () => {
       vi.mocked(getSeries).mockResolvedValue(series);
       const plan = nyaaQueryPlan(search, series);
+      const date = 'Mon, 01 Jan 2024 00:00:00 -0000';
       const request = event(search);
-      vi.mocked(request.fetch)
-        .mockResolvedValueOnce(new Response(emptyFeed))
-        .mockResolvedValueOnce(new Response(wideFeed));
-      const response = await POST(request);
-      const xml = await response.text();
+      answer(request, async (query) =>
+        query === plan.seriesNumber!.query
+          ? new Response(
+              feedOf(
+                release(1, 'Show S17E15 VOSTFR 1080p WEB-DL', date),
+                release(2, 'Show 2nd Season - 07 [1080p][15F3DC8F]', date),
+                release(3, 'Show S17E14 VOSTFR 1080p WEB-DL', date)
+              )
+            )
+          : new Response(
+              query === plan.query ? feedOf(release(4, 'Show S2 - 03 [1080p]', date)) : emptyFeed
+            )
+      );
+      const xml = await (await POST(request)).text();
+      expect(xml).toContain('Show S2 - 03');
       expect(xml).toContain('Show S17E15');
       expect(xml).not.toContain('15F3DC8F');
       expect(xml).not.toContain('S17E14');
-      // The slower broader phrases are spared
-      expect(queriesOf(request)).toEqual([plan.query, plan.wide!.query]);
-      expect(decodeURIComponent(response.headers.get('X-Nyaa-Query')!)).toBe(plan.wide!.query);
-      expect(takeClientLimit).toHaveBeenCalledTimes(2);
     });
 
-    it.each([
-      ['fails', () => new Response('blocked', { status: 503 })],
-      ['names other episodes only', () => new Response(wideFeed.replace('S17E15', 'S17E16'))],
-    ])('tries the broader phrases when the series search %s', async (_case, wide) => {
-      vi.mocked(getSeries).mockResolvedValue(series);
-      const plan = nyaaQueryPlan(search, series);
-      const request = event(search);
-      vi.mocked(request.fetch)
-        .mockResolvedValueOnce(new Response(emptyFeed))
-        .mockResolvedValueOnce(wide())
-        .mockResolvedValueOnce(new Response(feed));
-      const response = await POST(request);
-      expect(await response.text()).toBe(feed);
-      expect(queriesOf(request)).toEqual([plan.query, plan.wide!.query, plan.broader]);
-      expect(decodeURIComponent(response.headers.get('X-Nyaa-Query')!)).toBe(plan.broader);
-    });
-
-    it('never searches the series when the phrases find releases', async () => {
-      vi.mocked(getSeries).mockResolvedValue(series);
-      const request = event(search);
-      await POST(request);
-      expect(request.fetch).toHaveBeenCalledOnce();
+    it('keeps sukebei releases named with the native title and the episode its way', async () => {
+      const adult = { ...search, adult: true };
+      const native = { arc: null, related: [], native: '日本語タイトル' };
+      vi.mocked(getSeries).mockResolvedValue(native);
+      const plan = nyaaQueryPlan(adult, native);
+      const date = 'Mon, 01 Jan 2024 00:00:00 -0000';
+      const request = event(adult);
+      answer(
+        request,
+        async (query) =>
+          new Response(
+            query === plan.words!.query
+              ? feedOf(
+                  release(1, '[Group] 日本語タイトル 第3話', date),
+                  release(2, '[Group] 日本語タイトル ＃4', date)
+                )
+              : emptyFeed
+          )
+      );
+      const xml = await (await POST(request)).text();
+      expect(xml).toContain('第3話');
+      expect(xml).not.toContain('＃4');
+      expect(String(vi.mocked(request.fetch).mock.calls[0][0])).toMatch(
+        /^https:\/\/sukebei\.nyaa\.si\//
+      );
     });
 
     it('never asks AniList for a custom search or a client over its limit', async () => {
