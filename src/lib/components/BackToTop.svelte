@@ -41,17 +41,18 @@
     place-items: center;
     width: 44px;
     height: 44px;
-    border-radius: 50%;
-    background: var(--sea-blue);
-    color: #ffffff;
-    box-shadow: 0 6px 16px -4px rgb(15 61 110 / 0.5);
+    border-radius: var(--radius-control);
+    background: var(--surface);
+    color: var(--text-heading);
+    box-shadow: var(--shadow-popover);
     cursor: pointer;
     transition: background-color 0.2s ease-out;
+    border: 1px solid var(--border-subtle);
   }
 
   .back-to-top:hover,
   .back-to-top:focus-visible {
-    background: var(--navy);
+    background: var(--you-blue-pale);
   }
 
   .back-to-top:focus-visible {

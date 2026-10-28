@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { CalendarEpisode } from '#lib/calendar.js';
+  import CloseButton from '#lib/components/CloseButton.svelte';
   import ScheduledEpisodeLink from '#lib/components/ScheduledEpisodeLink.svelte';
   import { closeOnBackdrop } from '#lib/dialog.js';
   let {
@@ -45,23 +46,7 @@
             : ''}
         </p>
       </div>
-      <button
-        class="close-button"
-        type="button"
-        aria-label="Close day schedule"
-        onclick={() => dialog?.close()}
-      >
-        <svg
-          width="20"
-          height="20"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.8"
-          stroke-linecap="round"
-          aria-hidden="true"><path d="m6 6 12 12M6 18 18 6" /></svg
-        >
-      </button>
+      <CloseButton label="Close day schedule" onclick={() => dialog?.close()} />
     </header>
     <ul bind:this={episodeList} aria-label="Scheduled episodes">
       {#each selection.episodes as entry (`${entry.anime.id}:${entry.episode}`)}<li>
@@ -76,12 +61,12 @@
     margin: auto;
     width: min(calc(100vw - 32px), 32rem);
     max-height: 80dvh;
-    padding: 20px;
+    padding: var(--dialog-padding);
     border: 1px solid var(--border-subtle);
-    border-radius: 22px;
+    border-radius: var(--radius-panel);
     background: var(--surface);
     color: var(--color-base-content);
-    box-shadow: 0 30px 90px rgb(3 16 35 / 0.35);
+    box-shadow: var(--shadow-dialog);
     overflow: hidden;
   }
   dialog[open] {
@@ -90,8 +75,7 @@
     gap: 16px;
   }
   dialog::backdrop {
-    background: rgb(5 18 38 / 0.5);
-    backdrop-filter: blur(6px);
+    background: var(--backdrop);
   }
   header {
     display: flex;
@@ -105,33 +89,13 @@
   }
   h2 {
     font-size: 1.2rem;
-    font-weight: 800;
+    font-weight: 600;
     color: var(--text-heading);
     margin: 4px 0;
   }
   p {
     color: var(--text-accent);
     font-size: 0.75rem;
-  }
-  .close-button {
-    display: grid;
-    place-items: center;
-    width: 44px;
-    height: 44px;
-    flex: none;
-    padding: 0;
-    border: 1px solid var(--border-subtle);
-    border-radius: 12px;
-    background: transparent;
-    color: var(--text-accent);
-    cursor: pointer;
-  }
-  .close-button:hover {
-    background: var(--you-blue-pale);
-  }
-  button:focus-visible {
-    outline: 3px solid var(--you-blue);
-    outline-offset: 2px;
   }
   ul {
     min-height: 0;
@@ -155,10 +119,8 @@
   @media (max-height: 600px) {
     dialog {
       max-height: calc(100dvh - 24px);
-      overflow-y: auto;
     }
     ul {
-      flex: none;
       max-height: 50dvh;
     }
   }

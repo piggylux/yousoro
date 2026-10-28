@@ -49,7 +49,7 @@
     align-items: center;
     gap: 10px;
     padding: 8px;
-    border-radius: 12px;
+    border-radius: var(--radius-control);
     color: var(--color-base-content);
     text-decoration: none;
     min-width: 0;

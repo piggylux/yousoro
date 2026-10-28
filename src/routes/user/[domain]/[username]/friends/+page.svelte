@@ -126,13 +126,8 @@
 <section class="friends-page">
   <header class="friends-header">
     <div class="heading-copy">
-      <span class="eyebrow"
-        >{data.isOwnPage ? 'Your anime circle' : `${data.user.name}'s circle`}</span
-      >
       <h1>
-        {data.isOwnPage ? 'Your friends' : `${data.user.name}'s friends`}<span class="heading-dot"
-          >.</span
-        >
+        {data.isOwnPage ? 'Your friends' : `${data.user.name}'s friends`}
       </h1>
       <p class="summary">
         {people(data.total)}
@@ -147,8 +142,7 @@
 
   {#if data.friends.length === 0}
     <div class="empty-state">
-      <span class="empty-symbol" aria-hidden="true">✦</span>
-      <h2>Your circle starts here</h2>
+      <h2>No friends yet</h2>
       <p>
         {data.isOwnPage
           ? 'Follow people on AniList to see what you’re watching together.'
@@ -223,7 +217,7 @@
     <ul class="friends-grid">
       {#each visibleFriends as friend (friend.id)}
         {@const shared = sharedWith(friend.id)}
-        <li class="friend-tile" style={`--friend-hue: ${(friend.id * 47 + 190) % 360}`}>
+        <li class="friend-tile">
           <a
             class="friend-profile"
             href={listUrl(friend.name)}
@@ -316,30 +310,19 @@
     gap: 24px;
     margin-bottom: 22px;
   }
-  .eyebrow {
-    display: block;
-    color: var(--text-accent);
-    text-transform: uppercase;
-    letter-spacing: 0.16em;
-    font-size: 0.65rem;
-    font-weight: 800;
-    margin-bottom: 8px;
-  }
   h1 {
     color: var(--text-heading);
-    font-size: clamp(1.8rem, 4vw, 2.25rem);
-    font-weight: 800;
-    letter-spacing: -0.055em;
-    line-height: 1.1;
+    font-size: 1.75rem;
+    font-weight: 600;
+    letter-spacing: -0.025em;
+    line-height: 1.25;
     overflow-wrap: anywhere;
-  }
-  .heading-dot {
-    color: var(--you-blue);
   }
   .summary {
     margin-top: 10px;
     font-size: 0.86rem;
-    opacity: 0.65;
+    opacity: 1;
+    color: var(--text-accent);
   }
   .back-link {
     display: inline-flex;
@@ -347,15 +330,16 @@
     gap: 10px;
     padding: 10px 16px;
     border: 1px solid var(--border-subtle);
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--surface) 65%, transparent);
+    border-radius: var(--radius-control);
+    background: var(--surface);
     color: var(--text-accent);
     font-size: 0.8rem;
     font-weight: 600;
     flex: none;
   }
   .back-link:hover {
-    background: var(--surface);
+    background: var(--you-blue-pale);
+    border-color: var(--you-blue);
   }
   .friends-toolbar {
     display: flex;
@@ -368,26 +352,27 @@
     display: inline-flex;
     flex-wrap: wrap;
     gap: 4px;
-    padding: 5px;
+    padding: 3px;
     border: 1px solid var(--border-subtle);
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--surface) 45%, transparent);
+    border-radius: var(--radius-control);
+    background: var(--surface-muted);
   }
   .view-switch button {
     display: flex;
     align-items: center;
     gap: 8px;
     padding: 8px 14px;
-    border-radius: 999px;
-    font-size: 0.75rem;
+    border-radius: 4px;
+    font-size: 0.8125rem;
     color: var(--text-accent);
     font-weight: 650;
     cursor: pointer;
+    min-height: 40px;
   }
   .view-switch button.active {
     background: var(--surface);
-    color: var(--text-heading);
-    box-shadow: 0 2px 8px rgb(15 61 110 / 0.1);
+    color: var(--you-blue);
+    box-shadow: none;
   }
   .view-switch button:disabled {
     opacity: 0.45;
@@ -408,9 +393,10 @@
     padding: 10px 14px;
     width: 220px;
     border: 1px solid var(--border-subtle);
-    border-radius: 999px;
+    border-radius: var(--radius-control);
     color: var(--text-accent);
-    background: color-mix(in srgb, var(--surface) 70%, transparent);
+    background: var(--surface);
+    min-height: 44px;
   }
   .friend-search:focus-within {
     outline: 2px solid var(--you-blue);
@@ -441,28 +427,16 @@
     padding: 14px;
     min-width: 0;
     overflow: hidden;
-    border: 1px solid color-mix(in srgb, var(--border-subtle) 70%, var(--surface));
-    border-radius: 16px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-panel);
     background: var(--surface);
-    box-shadow: 0 4px 16px -10px rgb(15 61 110 / 0.2);
-    transition:
-      translate 200ms ease,
-      box-shadow 200ms ease;
-  }
-  .friend-tile::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: radial-gradient(
-      ellipse at 0 50%,
-      hsl(var(--friend-hue) 70% 65% / 0.1),
-      transparent 70%
-    );
-    pointer-events: none;
+    box-shadow: none;
+    transition: border-color 150ms ease;
   }
   .friend-tile:hover {
-    translate: 0 -2px;
-    box-shadow: 0 8px 22px -12px rgb(15 61 110 / 0.3);
+    translate: none;
+    box-shadow: none;
+    border-color: var(--you-blue);
   }
   .friend-profile {
     position: relative;
@@ -491,19 +465,20 @@
     white-space: nowrap;
     color: var(--text-heading);
     font-size: 0.88rem;
-    font-weight: 750;
+    font-weight: 600;
     letter-spacing: -0.025em;
   }
   .friend-identity > span {
     color: var(--text-accent);
-    font-size: 0.62rem;
+    font-size: 0.75rem;
     line-height: 1.4;
-    opacity: 0.7;
+    opacity: 1;
   }
   .friend-profile:hover .friend-identity strong {
     color: var(--text-accent);
     text-decoration: underline;
     text-underline-offset: 3px;
+    font-weight: 600;
   }
   .shared-section {
     position: relative;
@@ -529,12 +504,13 @@
   .view-shared {
     padding: 2px 0;
     border-radius: 4px;
-    font-size: 0.6rem;
+    font-size: 0.75rem;
     line-height: 1.4;
     color: var(--text-accent);
     cursor: pointer;
     text-decoration: underline;
     text-underline-offset: 3px;
+    min-height: 28px;
   }
   .no-shared {
     display: flex;
@@ -545,10 +521,10 @@
     position: relative;
     padding: 8px 10px;
     border: 1px solid var(--border-subtle);
-    border-radius: 999px;
+    border-radius: var(--radius-control);
     color: var(--text-accent);
-    background: color-mix(in srgb, var(--you-blue-pale) 60%, transparent);
-    font-size: 0.64rem;
+    background: var(--surface);
+    font-size: 0.75rem;
     font-weight: 650;
     white-space: nowrap;
   }
@@ -575,12 +551,6 @@
   .empty-state {
     padding: 60px 20px;
     text-align: center;
-  }
-  .empty-symbol {
-    display: block;
-    color: var(--you-blue);
-    font-size: 2rem;
-    margin-bottom: 16px;
   }
   .empty-state h2 {
     color: var(--text-heading);
@@ -626,7 +596,7 @@
     .view-switch {
       width: max-content;
       max-width: 100%;
-      border-radius: 20px;
+      border-radius: var(--radius-control);
     }
     .view-switch button {
       padding: 8px 11px;

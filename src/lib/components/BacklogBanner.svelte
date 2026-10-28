@@ -84,20 +84,32 @@
         </p>
       </div>
     {:else if mood === 'caught-up'}
-      <span class="count celebrate">⚓</span>
+      <span class="count celebrate">
+        <svg
+          viewBox="0 0 24 24"
+          width="28"
+          height="28"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <circle cx="12" cy="5" r="3" />
+          <path d="M12 22V8M8 11h8M5 12H2a10 10 0 0 0 20 0h-3" />
+        </svg>
+      </span>
       <div>
-        <!-- "Yousoro!", You Watanabe's sailor's call, which the app is named after -->
         <p class="headline">
-          ヨーソロー! {isOwnList ? "You're all caught up!" : `${username} is all caught up!`}
+          {isOwnList ? "You're all caught up!" : `${username} is all caught up!`}
         </p>
         <p class="detail">
           {#if nextUp}
             Next up: <strong>{nextUp.anime.title}</strong> ep {nextUp.episode}
             {#if mounted}{formatAirsIn(nextUp.airsAt, clock.now)}{/if}
           {:else}
-            {isOwnList
-              ? 'Every aired episode watched. Enjoy the break until the next one drops.'
-              : 'Every aired episode watched.'}
+            Every aired episode watched.
           {/if}
         </p>
       </div>
@@ -115,26 +127,32 @@
 </section>
 
 <style>
-  /* The blues come from the app theme in app.css; sky blue is only the accent bar and border */
+  /* A compact summary shares the same surface as other panels. */
   .banner {
-    --accent: var(--you-blue);
     flex: 0 1 40rem;
     max-width: 100%;
-    padding: 12px 18px;
+    padding: 12px 16px;
     border: 1px solid var(--border-subtle);
-    border-left: 4px solid var(--accent);
     border-radius: var(--radius-box, 1rem);
-    background: var(--you-blue-pale);
+    background: var(--surface);
     color: var(--text-heading);
-    box-shadow: 0 1px 3px rgb(15 61 110 / 0.08);
+    box-shadow: none;
     /* The layout adapts to the banner's own width, wherever the page puts it */
     container-type: inline-size;
   }
 
   .empty {
-    --accent: var(--color-base-300);
     border-color: var(--color-base-300);
     background: var(--color-base-100);
+  }
+
+  .caught-up {
+    background: var(--color-success);
+    border-color: color-mix(in srgb, var(--color-success-content) 25%, var(--border-subtle));
+  }
+
+  .caught-up .celebrate {
+    color: var(--color-success-content);
   }
 
   .content {
@@ -145,9 +163,9 @@
 
   .count {
     flex: none;
-    color: var(--text-accent);
+    color: var(--text-heading);
     font-size: 1.75rem;
-    font-weight: 800;
+    font-weight: 600;
     line-height: 1;
     font-variant-numeric: tabular-nums;
   }

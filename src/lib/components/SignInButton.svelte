@@ -56,98 +56,50 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    gap: 16px;
     min-height: 44px;
     max-width: 100%;
     padding: 10px 18px;
-    border: 1px solid light-dark(#2778b5, #83cfff);
-    border-radius: 10px;
-    background: light-dark(var(--sea-blue), var(--you-blue));
-    color: light-dark(#ffffff, #0f304f);
-    box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.22),
-      0 2px 5px rgb(15 48 79 / 0.15);
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
+    background: var(--action);
+    color: var(--action-content);
     font-size: 0.875rem;
     font-weight: 600;
-    line-height: 1.4;
     cursor: pointer;
-    transition:
-      background-color 0.15s ease-out,
-      translate 0.15s ease-out,
-      box-shadow 0.15s ease-out;
+    transition: background-color 150ms ease;
   }
-
-  .arrow {
-    display: grid;
-    place-items: center;
-    flex: none;
-    margin-left: 14px;
-    padding-left: 12px;
-    border-left: 1px solid currentColor;
-    border-color: color-mix(in srgb, currentColor 25%, transparent);
-  }
-
-  .arrow svg {
-    transition: translate 0.15s ease-out;
-  }
-
   .sign-in:hover {
-    background: light-dark(var(--navy), #9fdcff);
+    background: var(--action-hover);
   }
-
-  .sign-in:focus-visible {
-    outline: 2px solid var(--text-heading);
-    outline-offset: 3px;
+  .arrow {
+    display: flex;
   }
-
-  .sign-in:active {
-    background: light-dark(#0b2e53, #7dccfb);
-    translate: 0 0;
-    box-shadow: inset 0 1px 3px rgb(15 48 79 / 0.15);
+  .arrow svg {
+    transition: transform 150ms ease;
   }
-
-  @media (hover: hover) {
-    .sign-in:not(.compact):hover {
-      translate: 0 -1px;
-      box-shadow:
-        inset 0 1px 0 rgb(255 255 255 / 0.22),
-        0 4px 8px rgb(15 48 79 / 0.2);
-    }
-
-    .sign-in:hover .arrow svg {
-      translate: 2px 0;
-    }
+  .sign-in:hover .arrow svg {
+    transform: translateX(2px);
   }
-
-  .sign-in:not(.compact):active {
-    translate: 0 0;
-  }
-
   .compact {
     flex-shrink: 0;
-    max-width: none;
     padding: 8px 14px;
     border-color: var(--border-subtle);
-    background: transparent;
-    box-shadow: none;
-    color: var(--text-accent);
-    font-size: 0.8rem;
+    background: var(--surface);
+    color: var(--text-heading);
     white-space: nowrap;
   }
-
-  .compact:hover,
-  .compact:active {
-    background: var(--you-blue-pale);
+  .compact:hover {
+    background: var(--surface-muted);
   }
-
   @media (prefers-reduced-motion: reduce) {
     .sign-in,
     .arrow svg {
       transition: none;
     }
 
-    .sign-in:not(.compact):hover,
     .sign-in:hover .arrow svg {
-      translate: none;
+      transform: none;
     }
   }
 </style>

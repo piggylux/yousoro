@@ -166,14 +166,12 @@
 <section class="calendar" aria-label="Episode schedule">
   <div class="calendar-heading">
     <div>
-      <p class="eyebrow">This week and beyond</p>
       <h1>Episode calendar</h1>
       <p class="description">Airing times from AniList · {timezone || 'Your local time zone'}</p>
     </div>
   </div>
   {#if start && week}
     <div class="coverage">
-      <span class="coverage-badge">4-week schedule</span>
       <p>
         {dateLabel(start)} – {dateLabel(addCalendarDays(start, 27))}, {addCalendarDays(
           start,
@@ -182,8 +180,7 @@
       </p>
     </div>
     <p class="schedule-note">
-      Confirmed AniList air dates only; unannounced episodes are not estimated. Times may change and
-      differ from streaming availability.
+      Confirmed air dates only. Dates may change, and streaming availability can differ.
     </p>
     {#if loading}<p class="notice" role="status">
         Loading the four-week schedule. Showing next known episodes while it loads.
@@ -241,9 +238,7 @@
         </button>
       {/each}
     </div>
-    <p class="week-hint" id="{heading}-week-hint">
-      Select a date range · This week and the next three weeks are available.
-    </p>
+    <p class="week-hint" id="{heading}-week-hint">Select a week to see its airing schedule.</p>
     <div class="week-summary" aria-live="polite" aria-atomic="true">
       <h2>{dateLabel(week)} – {dateLabel(addCalendarDays(week, 6))}</h2>
       <span
@@ -335,10 +330,6 @@
           ? 'No air dates to show yet. The schedule above is incomplete.'
           : 'No confirmed episodes this week. Browse another week within the loaded range.'}
       </p>{/if}
-    <p class="cache-note">
-      Schedule data stays fresh for one hour. If AniList is unavailable, saved air dates can be
-      shown for up to 24 hours with a warning. Reload the page to check for updates.
-    </p>
     {#if !incomplete && unscheduled.length}
       <details class="unscheduled">
         <summary>
@@ -421,18 +412,11 @@
   .calendar-heading {
     margin: 1rem 0 1.5rem;
   }
-  .eyebrow {
-    color: var(--text-accent);
-    font-size: 0.7rem;
-    font-weight: 800;
-    text-transform: uppercase;
-    letter-spacing: 0.13em;
-  }
   h1 {
     color: var(--text-heading);
-    font-size: clamp(1.6rem, 3vw, 2.2rem);
-    font-weight: 800;
-    letter-spacing: -0.04em;
+    font-size: 1.75rem;
+    font-weight: 600;
+    letter-spacing: -0.025em;
     margin: 0.25rem 0;
   }
   .description,
@@ -449,9 +433,9 @@
     gap: 4px;
     padding: 5px;
     border: 1px solid var(--border-subtle);
-    border-radius: 20px;
-    background: light-dark(rgb(255 255 255 / 0.65), rgb(5 21 38 / 0.4));
-    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06);
+    border-radius: var(--radius-panel);
+    background: var(--surface);
+    box-shadow: none;
     max-width: 680px;
     margin-top: 20px;
   }
@@ -462,11 +446,9 @@
     left: 5px;
     width: calc((100% - 10px - 12px) / 4);
     height: calc(100% - 10px);
-    border-radius: 15px;
-    background: linear-gradient(135deg, #1c78b0, #124a7a);
-    box-shadow:
-      0 4px 12px -5px rgb(15 61 110 / 0.55),
-      inset 0 1px 0 rgb(255 255 255 / 0.2);
+    border-radius: var(--radius-control);
+    background: var(--you-blue-pale);
+    box-shadow: none;
     transform: translateX(calc(var(--selected-week) * (100% + 4px)));
     transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
     pointer-events: none;
@@ -482,7 +464,7 @@
     min-height: 64px;
     padding: 10px 14px;
     border: 0;
-    border-radius: 15px;
+    border-radius: var(--radius-control);
     background: transparent;
     color: var(--text-heading);
     text-align: left;
@@ -490,7 +472,7 @@
   }
   .week-choice[aria-pressed='true'] {
     background: transparent;
-    color: #ffffff;
+    color: var(--you-blue);
   }
   .week-choice-label {
     font-size: 0.7rem;
@@ -502,7 +484,7 @@
     color: var(--text-accent);
   }
   .week-choice[aria-pressed='true'] .week-choice-dates {
-    color: #ffffff;
+    color: var(--you-blue);
   }
   .week-hint {
     font-size: 0.75rem;
@@ -513,8 +495,8 @@
     min-height: 44px;
     min-width: 44px;
     padding: 0 14px;
-    border-radius: 999px;
-    font-weight: 700;
+    border-radius: var(--radius-control);
+    font-weight: 600;
     cursor: pointer;
   }
   button:hover {
@@ -538,21 +520,10 @@
     font-size: 0.75rem;
     color: var(--text-accent);
   }
-  .coverage-badge {
-    padding: 5px 10px;
-    border-radius: 999px;
-    background: var(--you-blue-pale);
-    font-weight: 750;
-  }
   .schedule-note {
     margin: 10px 0 20px;
     max-width: 80ch;
     line-height: 1.6;
-  }
-  .cache-note {
-    margin-top: 16px;
-    font-size: 0.75rem;
-    opacity: 0.65;
   }
   .notice {
     display: flex;
@@ -570,6 +541,8 @@
   }
   .notice button {
     background: var(--surface);
+    border-radius: var(--radius-control);
+    font-weight: 600;
   }
   .week-summary {
     margin-bottom: 1rem;
@@ -598,7 +571,7 @@
     flex-direction: column;
     border: 1px solid var(--border-subtle);
     background: var(--surface);
-    border-radius: 18px;
+    border-radius: var(--radius-panel);
     min-height: 320px;
     min-width: 0;
     overflow: hidden;
@@ -642,8 +615,8 @@
     border-radius: 50%;
   }
   .today .day-number {
-    background: var(--you-blue);
-    color: #0f304f;
+    background: var(--action);
+    color: var(--action-content);
   }
   .today-label {
     padding: 2px 5px;
@@ -737,10 +710,10 @@
   }
   .unscheduled {
     border: 1px solid var(--border-subtle);
-    border-radius: 18px;
+    border-radius: var(--radius-panel);
     padding: 16px;
     margin-top: 20px;
-    background: light-dark(rgb(73 185 249 / 0.04), rgb(73 185 249 / 0.06));
+    background: var(--surface);
   }
   summary {
     display: flex;

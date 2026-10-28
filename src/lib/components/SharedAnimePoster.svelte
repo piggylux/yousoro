@@ -55,7 +55,7 @@
     display: block;
     overflow: hidden;
     aspect-ratio: 3 / 4;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     background: linear-gradient(
       155deg,
       hsl(var(--poster-hue) 50% 55%),

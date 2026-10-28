@@ -240,13 +240,12 @@
     container: navigation / inline-size;
     position: relative;
     z-index: 20;
-    margin: 8px 12px 0;
-    border: 1px solid light-dark(rgb(255 255 255 / 0.9), rgb(141 208 255 / 0.16));
-    border-radius: 16px;
-    background: linear-gradient(115deg, light-dark(#ffffff, #18324b), light-dark(#f2faff, #10253c));
-    box-shadow:
-      0 4px 18px -12px rgb(9 42 77 / 0.3),
-      inset 0 1px 0 rgb(255 255 255 / 0.08);
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    background: var(--surface);
+    box-shadow: none;
+    border-bottom: 1px solid var(--border-subtle);
   }
   nav {
     display: grid;
@@ -255,7 +254,7 @@
     gap: 16px;
     max-width: 1600px;
     margin: 0 auto;
-    padding: 7px 16px;
+    padding: 8px 24px;
   }
   nav.has-links {
     grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
@@ -280,7 +279,7 @@
     align-items: center;
     gap: 10px;
     min-height: 44px;
-    border-radius: 14px;
+    border-radius: var(--radius-control);
     text-decoration: none;
   }
   .brand-emblem {
@@ -289,23 +288,21 @@
     width: 36px;
     height: 36px;
     flex: none;
-    border: 1px solid rgb(131 211 255 / 0.35);
-    border-radius: 11px;
-    background: linear-gradient(145deg, #237fb6, #103e69);
-    color: #ecfaff;
-    box-shadow:
-      0 4px 10px -4px rgb(20 95 156 / 0.5),
-      inset 0 1px 0 rgb(255 255 255 / 0.25);
+    border: 0;
+    border-radius: var(--radius-control);
+    background: var(--you-blue-pale);
+    color: var(--you-blue);
+    box-shadow: none;
   }
   .brand-type {
     color: var(--text-heading);
     font-size: 1.1rem;
-    font-weight: 850;
-    letter-spacing: -0.045em;
+    font-weight: 700;
+    letter-spacing: -0.025em;
     line-height: 1.1;
   }
   .brand-dot {
-    color: var(--text-accent);
+    color: var(--you-blue);
   }
   .utility-link {
     display: grid;
@@ -313,7 +310,7 @@
     min-width: 44px;
     height: 44px;
     color: var(--text-accent);
-    border-radius: 14px;
+    border-radius: var(--radius-control);
     transition: background 160ms ease;
   }
   .utility-link:hover {
@@ -340,7 +337,7 @@
     min-height: 44px;
     padding: 5px 8px 5px 5px;
     border: 1px solid var(--border-subtle);
-    border-radius: 999px;
+    border-radius: var(--radius-control);
     list-style: none;
     background: var(--surface);
     color: var(--text-accent);
@@ -369,9 +366,9 @@
     padding: 8px;
     list-style: none;
     border: 1px solid var(--border-subtle);
-    border-radius: 18px;
+    border-radius: var(--radius-panel);
     background: var(--surface);
-    box-shadow: 0 14px 36px -10px rgb(5 25 47 / 0.4);
+    box-shadow: var(--shadow-popover);
     color: var(--text-heading);
   }
   .account-name {
@@ -438,8 +435,8 @@
     position: absolute;
     inset: 0 auto 0 0;
     width: calc((100% - 8px) / 3);
-    border-radius: 10px;
-    background: linear-gradient(135deg, #1c78b0, #124a7a);
+    border-radius: var(--radius-control);
+    background: var(--you-blue-pale);
     transform: translateX(calc(var(--active-tab) * (100% + 4px)));
     opacity: 0;
     transition:
@@ -459,9 +456,9 @@
     gap: 8px;
     min-height: 44px;
     padding: 0 16px;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     font-size: 0.85rem;
-    font-weight: 700;
+    font-weight: 600;
     color: var(--text-accent);
     text-decoration: none;
     white-space: nowrap;
@@ -474,11 +471,11 @@
     background: var(--you-blue-pale);
   }
   .primary-links a[aria-current='page'] {
-    color: #ffffff;
+    color: var(--you-blue);
     background: transparent;
   }
   .primary-links a[aria-current='page'] svg {
-    color: #b1e8ff;
+    color: currentColor;
   }
   .primary-links svg {
     width: 18px;
@@ -499,12 +496,6 @@
       grid-row: 2;
       grid-column: 1 / -1;
       justify-self: center;
-    }
-  }
-  @media (max-width: 600px) {
-    header {
-      margin: 6px 8px 0;
-      border-radius: 16px;
     }
   }
   @container navigation (max-width: 600px) {

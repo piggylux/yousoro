@@ -2,6 +2,7 @@
   import { enhance } from '$app/forms';
   import { onMount } from 'svelte';
 
+  import CloseButton from '#lib/components/CloseButton.svelte';
   import ScoreInput from '#lib/components/ScoreInput.svelte';
   import { scoreChoices, type ScoreFormat } from '#lib/score.js';
   import type { Anime } from '#lib/types/anime.js';
@@ -25,7 +26,11 @@
   let saving = $state(false);
   let errorMessage = $state<string | null>(null);
 
-  onMount(() => dialog?.showModal());
+  onMount(() => {
+    dialog?.showModal();
+    // Keep the rating field as the starting point while the close control stays keyboard-accessible.
+    dialog?.querySelector<HTMLElement>('[name="score"]')?.focus();
+  });
 </script>
 
 <!--
@@ -39,55 +44,60 @@
   aria-describedby="score-prompt-question"
   onclose={onClose}
 >
-  <span class="cover-frame" class:mature={anime.isAdult && blurMature}>
-    <img src={anime.thumbnailUrl} alt="" />
-  </span>
+  <header class="prompt-header">
+    <!-- "Yousoro!", You Watanabe's sailor's call, which the app is named after -->
+    <p class="greeting" aria-hidden="true">⚓ ヨーソロー!</p>
+    <CloseButton label="Close rating prompt" onclick={() => dialog?.close()} />
+  </header>
+  <div class="prompt-content">
+    <span class="cover-frame" class:mature={anime.isAdult && blurMature}>
+      <img src={anime.thumbnailUrl} alt="" />
+    </span>
 
-  <!-- "Yousoro!", You Watanabe's sailor's call, which the app is named after -->
-  <p class="greeting" aria-hidden="true">⚓ ヨーソロー!</p>
-  <h2 id="score-prompt-title" class="heading">
-    You finished <span class="title">{anime.title}</span>
-  </h2>
-  <p id="score-prompt-question" class="question">What did you think of it?</p>
+    <h2 id="score-prompt-title" class="heading">
+      You finished <span class="title">{anime.title}</span>
+    </h2>
+    <p id="score-prompt-question" class="question">What did you think of it?</p>
 
-  <form
-    method="POST"
-    action="?/updateEntry"
-    use:enhance={() => {
-      saving = true;
-      errorMessage = null;
-      return async ({ result, update }) => {
-        saving = false;
-        if (result.type === 'failure') {
-          errorMessage = (result.data?.message as string | undefined) ?? 'The update failed';
-          return;
-        }
-        await update({ reset: false, refreshAll: result.type !== 'success' });
-        dialog?.close();
-      };
-    }}
-  >
-    <input type="hidden" name="mediaId" value={anime.id} />
-    <input type="hidden" name="scoreFormat" value={format} />
-    <div class="field">
-      <ScoreInput {format} bind:value={score} label="Your score" size="large" />
-    </div>
-    <p class="note">Your score is saved to your AniList list.</p>
+    <form
+      method="POST"
+      action="?/updateEntry"
+      use:enhance={() => {
+        saving = true;
+        errorMessage = null;
+        return async ({ result, update }) => {
+          saving = false;
+          if (result.type === 'failure') {
+            errorMessage = (result.data?.message as string | undefined) ?? 'The update failed';
+            return;
+          }
+          await update({ reset: false, refreshAll: result.type !== 'success' });
+          dialog?.close();
+        };
+      }}
+    >
+      <input type="hidden" name="mediaId" value={anime.id} />
+      <input type="hidden" name="scoreFormat" value={format} />
+      <div class="field">
+        <ScoreInput {format} bind:value={score} label="Your score" size="large" />
+      </div>
+      <p class="note">Your score is saved to your AniList list.</p>
 
-    {#if errorMessage}
-      <p class="tw:text-error tw:text-sm" role="alert">{errorMessage}</p>
-    {/if}
+      {#if errorMessage}
+        <p class="tw:text-error tw:text-sm" role="alert">{errorMessage}</p>
+      {/if}
 
-    <div class="actions">
-      <button type="button" class="tw:btn tw:btn-ghost" onclick={() => dialog?.close()}>
-        Maybe later
-      </button>
-      <button class="tw:btn tw:btn-primary" disabled={saving || !score}>
-        {#if saving}<span class="tw:loading tw:loading-spinner tw:loading-xs"></span>{/if}
-        Save score
-      </button>
-    </div>
-  </form>
+      <div class="actions">
+        <button type="button" class="tw:btn tw:btn-ghost" onclick={() => dialog?.close()}>
+          Maybe later
+        </button>
+        <button class="tw:btn tw:btn-primary" disabled={saving || !score}>
+          {#if saving}<span class="tw:loading tw:loading-spinner tw:loading-xs"></span>{/if}
+          Save score
+        </button>
+      </div>
+    </form>
+  </div>
 </dialog>
 
 <style>
@@ -95,17 +105,40 @@
   .score-prompt {
     margin: auto;
     width: min(22rem, calc(100vw - 32px));
-    padding: 28px 24px 22px;
+    padding: var(--dialog-padding);
+    max-height: calc(100dvh - 32px);
+    overflow: hidden;
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-box, 1rem);
     background: var(--you-blue-pale);
     color: var(--text-heading);
-    box-shadow: 0 16px 40px rgb(15 61 110 / 0.35);
+    box-shadow: var(--shadow-dialog);
     text-align: center;
   }
 
+  .score-prompt[open] {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .prompt-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex: none;
+    gap: 12px;
+  }
+
+  .prompt-content {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 4px;
+  }
+
   .score-prompt::backdrop {
-    background: rgb(15 61 110 / 0.35);
+    background: var(--backdrop);
   }
 
   .cover-frame {
@@ -153,7 +186,7 @@
     -webkit-line-clamp: 3;
     line-clamp: 3;
     font-size: 1.2rem;
-    font-weight: 800;
+    font-weight: 600;
   }
 
   .question {

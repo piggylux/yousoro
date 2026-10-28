@@ -1,6 +1,7 @@
 <script lang="ts">
   import { prefersReducedMotion } from 'svelte/motion';
 
+  import CloseButton from '#lib/components/CloseButton.svelte';
   import SettingsForm from '#lib/components/SettingsForm.svelte';
   import type { Preferences } from '#lib/types/preferences.js';
 
@@ -40,30 +41,26 @@
   <div class="panel">
     <div class="panel-header">
       <h2 id="settings-drawer-title" class="heading">Settings</h2>
-      <button
-        class="tw:btn tw:btn-ghost tw:btn-sm tw:btn-circle"
-        aria-label="Close settings"
-        onclick={() => (open = false)}
-      >
-        ✕
-      </button>
+      <CloseButton label="Close settings" onclick={() => (open = false)} />
     </div>
-    <SettingsForm {preferences} shown={open} />
+    <div class="settings-content">
+      <SettingsForm {preferences} shown={open} />
+    </div>
   </div>
 </dialog>
 
 <style>
   /* A full-height panel along the right edge, over the dimmed page */
   .drawer {
-    width: min(26rem, 100vw);
+    width: min(30rem, 100vw);
     max-width: 100vw;
     height: 100dvh;
     max-height: 100dvh;
     margin: 0 0 0 auto;
     padding: 0;
     border: none;
-    background: var(--you-blue-pale);
-    box-shadow: -8px 0 24px rgb(15 61 110 / 0.2);
+    background: var(--surface);
+    box-shadow: var(--shadow-dialog);
   }
 
   /* The page behind stays where it is while the drawer is open */
@@ -72,7 +69,7 @@
   }
 
   .drawer::backdrop {
-    background: rgb(15 61 110 / 0.35);
+    background: var(--backdrop);
   }
 
   /* Slides in from the right as it opens, and back out as it closes */
@@ -107,8 +104,15 @@
   }
 
   .panel {
+    display: flex;
+    flex-direction: column;
     height: 100%;
-    padding: 20px;
+    padding: var(--dialog-padding);
+    overflow: hidden;
+  }
+
+  .settings-content {
+    min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
   }
@@ -117,12 +121,14 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex: none;
+    gap: 12px;
     margin-bottom: 16px;
   }
 
   .heading {
     color: var(--text-heading);
-    font-size: 1.35rem;
-    font-weight: 800;
+    font-size: 1.5rem;
+    font-weight: 600;
   }
 </style>

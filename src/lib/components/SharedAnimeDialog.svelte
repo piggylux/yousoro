@@ -1,4 +1,5 @@
 <script lang="ts">
+  import CloseButton from '#lib/components/CloseButton.svelte';
   import FriendAvatar from '#lib/components/FriendAvatar.svelte';
   import SharedAnimePoster from '#lib/components/SharedAnimePoster.svelte';
   import { closeOnBackdrop } from '#lib/dialog.js';
@@ -61,12 +62,7 @@
           {selection.anime.length}{partial ? '+' : ''} shared anime · links open in a new tab
         </p>
       </div>
-      <button
-        type="button"
-        class="close"
-        aria-label="Close shared anime"
-        onclick={() => dialog?.close()}>×</button
-      >
+      <CloseButton label="Close shared anime" onclick={() => dialog?.close()} />
     </header>
     <input
       class="search"
@@ -103,12 +99,12 @@
     width: min(calc(100vw - 32px), 42rem);
     height: var(--dialog-height);
     max-height: 85dvh;
-    padding: 22px;
+    padding: var(--dialog-padding);
     border: 1px solid var(--border-subtle);
-    border-radius: 22px;
+    border-radius: var(--radius-panel);
     background: var(--surface);
     color: var(--color-base-content);
-    box-shadow: 0 30px 100px rgb(3 16 35 / 0.35);
+    box-shadow: var(--shadow-dialog);
     overflow: hidden;
   }
   dialog[open] {
@@ -117,13 +113,12 @@
     gap: 16px;
   }
   dialog::backdrop {
-    background: rgb(5 18 38 / 0.5);
-    backdrop-filter: blur(8px);
+    background: var(--backdrop);
   }
   header {
     display: flex;
     gap: 12px;
-    align-items: center;
+    align-items: flex-start;
     flex: none;
   }
   .heading-copy {
@@ -131,36 +126,24 @@
     min-width: 0;
   }
   .eyebrow {
-    font-size: 0.55rem;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    font-weight: 800;
+    font-size: 0.75rem;
+    letter-spacing: normal;
+    text-transform: none;
+    font-weight: 600;
     color: var(--text-accent);
     margin-bottom: 3px;
   }
   h2 {
     color: var(--text-heading);
     font-size: 1.15rem;
-    font-weight: 800;
-    letter-spacing: -0.035em;
+    font-weight: 600;
+    letter-spacing: normal;
     overflow-wrap: anywhere;
   }
   header p:last-child {
     margin-top: 4px;
-    font-size: 0.65rem;
+    font-size: 0.75rem;
     opacity: 0.65;
-  }
-  .close {
-    flex: none;
-    display: grid;
-    place-items: center;
-    height: 32px;
-    width: 32px;
-    border-radius: 50%;
-    background: var(--you-blue-pale);
-    color: var(--text-accent);
-    font-size: 1.25rem;
-    cursor: pointer;
   }
   .search {
     flex: none;
@@ -185,7 +168,7 @@
     scrollbar-width: thin;
   }
   .result-count {
-    font-size: 0.65rem;
+    font-size: 0.75rem;
     opacity: 0.6;
     margin-bottom: 12px;
   }

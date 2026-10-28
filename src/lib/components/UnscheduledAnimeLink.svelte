@@ -47,7 +47,7 @@
     height: 100%;
     padding: 10px;
     border: 1px solid var(--border-subtle);
-    border-radius: 14px;
+    border-radius: var(--radius-control);
     background: var(--surface);
     color: var(--color-base-content);
   }

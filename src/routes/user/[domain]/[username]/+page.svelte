@@ -20,6 +20,7 @@
   import AnimeCard from '#lib/components/AnimeCard.svelte';
   import AutoReadRetry from '#lib/components/AutoReadRetry.svelte';
   import BacklogBanner from '#lib/components/BacklogBanner.svelte';
+  import CloseButton from '#lib/components/CloseButton.svelte';
   import EpisodeCalendar from '#lib/components/EpisodeCalendar.svelte';
   import FriendsWatchingDialog from '#lib/components/FriendsWatchingDialog.svelte';
   import FriendsWatchingLoader from '#lib/components/FriendsWatchingLoader.svelte';
@@ -79,6 +80,7 @@
    * titles are folded once per list, so each keystroke only compares them
    */
   let search = $state('');
+  let filters = $state<{ focusSearch(): void }>();
   const words = $derived(searchWords(search));
   const searching = $derived(words.length > 0);
   const searchIndexes = $derived(
@@ -253,17 +255,17 @@
     highlightTimer = setTimeout(() => (highlightId = null), 2200);
 
     // Where the card's row is in the grid, whether or not it's rendered: rows are all the same
-    // height, and the padding of a virtual list stands in for the rows not rendered. Its badge
-    // sticks out into the gap above, so that counts as part of the card
+    // height, and the padding of a virtual list stands in for the rows not rendered. Leave a
+    // row gap above the card so it has some breathing room after scrolling.
     const shape = measureShape();
     if (!grid || !shape) return;
     const top = grid.getBoundingClientRect().top + window.scrollY;
     const cardTop = top + Math.floor(index / shape.columns) * shape.rowStride;
-    const fromBadge = cardTop - shape.rowGap;
+    const fromTop = cardTop - shape.rowGap;
     const toBottom = cardTop + shape.rowStride - shape.rowGap;
-    if (fromBadge >= window.scrollY && toBottom <= window.scrollY + window.innerHeight) return;
+    if (fromTop >= window.scrollY && toBottom <= window.scrollY + window.innerHeight) return;
     window.scrollTo({
-      top: Math.max(0, fromBadge - (window.innerHeight - (toBottom - fromBadge)) / 2),
+      top: Math.max(0, fromTop - (window.innerHeight - (toBottom - fromTop)) / 2),
       behavior: prefersReducedMotion.current ? 'instant' : 'smooth',
     });
   }
@@ -406,6 +408,7 @@
   {:else}
     {#if data.watchingList.length}
       <ListFilters
+        bind:this={filters}
         counts={sectionCounts}
         hidden={hiddenSections}
         onToggle={toggleSection}
@@ -417,15 +420,48 @@
       {searching ? `${animeList.length} anime ${animeList.length === 1 ? 'matches' : 'match'}` : ''}
     </p>
     {#if data.watchingList.length && !animeList.length}
-      <p class="all-hidden">
-        {#if searching}
-          No anime {hiddenMatches ? 'in the shown sections' : 'here'} matches “{search.trim()}”{hiddenMatches
-            ? `, but ${hiddenMatches} in ${hiddenMatches === 1 ? 'a hidden section does' : 'hidden sections do'}`
-            : ''}.
-        {:else}
-          Every anime here is in a section the filters hide.
-        {/if}
-      </p>
+      <div class="empty-results">
+        <h2>
+          {searching
+            ? hiddenMatches
+              ? 'Matches in hidden sections'
+              : 'No matching anime'
+            : 'All sections are hidden'}
+        </h2>
+        <p>
+          {#if hiddenMatches}
+            {hiddenMatches} matching anime {hiddenMatches === 1 ? 'is' : 'are'} in hidden sections.
+          {:else if searching}
+            Try another title, or clear your search to see the list.
+          {:else}
+            Choose a section above, or show them all.
+          {/if}
+        </p>
+        <div class="empty-actions">
+          {#if searching}
+            <button
+              type="button"
+              class="tw:btn tw:btn-sm"
+              onclick={() => {
+                search = '';
+                filters?.focusSearch();
+              }}>Clear search</button
+            >
+          {/if}
+          {#if hiddenSections.length}
+            <button
+              type="button"
+              class="tw:btn tw:btn-sm"
+              onclick={() => {
+                hiddenSections = [];
+                document.cookie = hiddenSectionsCookie(hiddenSections);
+                dismissMovedNote();
+                filters?.focusSearch();
+              }}>Show all sections</button
+            >
+          {/if}
+        </div>
+      </div>
     {/if}
 
     {#if page.data.user}
@@ -501,14 +537,7 @@
     >
       Show {LIST_SECTION_LABELS[movedNote.section]}
     </button>
-    <button
-      type="button"
-      class="tw:btn tw:btn-xs tw:btn-ghost"
-      aria-label="Dismiss"
-      onclick={dismissMovedNote}
-    >
-      ✕
-    </button>
+    <CloseButton label="Dismiss notification" onclick={dismissMovedNote} />
   </div>
 {/if}
 
@@ -546,10 +575,10 @@
     width: max-content;
     max-width: calc(100vw - 32px);
     padding: 8px 8px 8px 14px;
-    border: 2px solid var(--you-blue);
-    border-radius: 12px;
-    background: var(--you-blue-pale);
-    box-shadow: 0 6px 18px rgb(15 61 110 / 0.2);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-panel);
+    background: var(--surface);
+    box-shadow: var(--shadow-popover);
     color: var(--text-heading);
     font-size: 0.9rem;
     translate: -50% 0;
@@ -557,9 +586,15 @@
   }
 
   .show-section {
+    flex: none;
     border-color: var(--text-accent);
     background: var(--sea-blue);
     color: #ffffff;
+  }
+
+  .moved-note > span {
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
 
   .show-section:hover {
@@ -580,19 +615,41 @@
     }
   }
 
-  .all-hidden {
-    margin: 24px 0;
+  .empty-results {
+    max-width: 36rem;
+    margin: 24px auto;
+    padding: 32px 16px;
     color: var(--text-accent);
     text-align: center;
+  }
+
+  .empty-results h2 {
+    margin-bottom: 8px;
+    color: var(--text-heading);
+    font-size: 1.125rem;
+    font-weight: 600;
+  }
+
+  .empty-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 12px;
+    margin-top: 20px;
+  }
+
+  .empty-actions button {
+    min-height: 44px;
+    padding-inline: 16px;
   }
 
   .profile-bar {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    justify-content: center;
+    justify-content: space-between;
     gap: 16px 28px;
-    margin-bottom: 20px;
+    margin-bottom: 24px;
   }
   .calendar-profile {
     justify-content: flex-start;
@@ -601,14 +658,17 @@
     width: 100%;
   }
   .calendar-profile .avatar-img {
-    width: 36px;
-    height: 36px;
+    width: 44px;
+    height: 44px;
+    box-shadow: none;
   }
   .calendar-profile .name {
     font-size: 1rem;
   }
   .calendar-profile .profile-links {
     font-size: 0.75rem;
+    opacity: 1;
+    color: var(--text-accent);
   }
 
   .profile {
@@ -618,10 +678,10 @@
   }
 
   .avatar-img {
-    width: 56px;
-    height: 56px;
+    width: 44px;
+    height: 44px;
     border-radius: 50%;
-    box-shadow: 0 4px 12px rgb(0 0 0 / 0.15);
+    box-shadow: none;
   }
 
   .name {
@@ -632,7 +692,8 @@
 
   .profile-links {
     font-size: 0.85rem;
-    opacity: 0.65;
+    opacity: 1;
+    color: var(--text-accent);
   }
 
   .profile-links a:hover,
@@ -651,7 +712,7 @@
       minmax(min(var(--card-width), 100%), var(--card-width))
     );
     justify-content: center;
-    /* Rows leave room for the badges above each card */
+    /* Status badges stay inside the cards; gaps separate rows evenly. */
     gap: 28px 24px;
   }
 
@@ -670,15 +731,15 @@
 
   /*
    * On larger screens, large cards shrink with the window height (down to 200px wide) so two full
-   * rows fit without scrolling. A card is its 3:4 cover plus 108px of title and progress, and the
-   * grid starts about 242px down the page, below the filters; 282px also counts the gap between rows
+   * rows fit without scrolling. A card is its 3:4 cover plus about 146px of status, title, and
+   * progress. The grid starts about 242px down the page, below the filters; 282px counts the row gap
    * and a little slack.
    * Medium cards are about seven eighths of that size and small ones three quarters, so more fit in
    * a row
    */
   @media (min-width: 768px) {
     .anime-grid {
-      --two-rows-width: calc(20px + 0.75 * ((100svh - 282px) / 2 - 108px));
+      --two-rows-width: calc(20px + 0.75 * ((100svh - 282px) / 2 - 146px));
       --card-width: clamp(175px, calc(0.87 * var(--two-rows-width)), 260px);
     }
 

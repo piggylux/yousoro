@@ -1,4 +1,5 @@
 <script lang="ts">
+  import CloseButton from '#lib/components/CloseButton.svelte';
   import FriendAvatar from '#lib/components/FriendAvatar.svelte';
   import { closeOnBackdrop } from '#lib/dialog.js';
   import type { FriendWatching } from '#lib/types/friend-watching.js';
@@ -30,22 +31,6 @@
   {onclose}
 >
   {#if selection}
-    <button
-      type="button"
-      class="close-dialog"
-      onclick={() => dialog?.close()}
-      aria-label="Close friends"
-    >
-      <svg
-        width="18"
-        height="18"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.8"
-        aria-hidden="true"><path d="m6 6 12 12M6 18 18 6" /></svg
-      >
-    </button>
     <header>
       {#if selection.coverUrl}<span class="anime-cover"
           ><img
@@ -62,6 +47,7 @@
           {selection.friends.length === 1 ? 'person on this anime' : 'people on this anime'}
         </p>
       </div>
+      <CloseButton label="Close friends" onclick={() => dialog?.close()} />
     </header>
     <ul>
       {#each selection.friends as friend (friend.id)}
@@ -74,7 +60,7 @@
               >
               <span>{friend.rewatching ? '↻ Rewatching' : 'Watching'}</span>
             </span>
-            <span class="episode"><small>EPISODE</small><strong>{friend.progress}</strong></span>
+            <span class="episode"><small>Episode</small><strong>{friend.progress}</strong></span>
             <span class="row-arrow" aria-hidden="true">↗</span>
           </a>
         </li>
@@ -88,39 +74,29 @@
     margin: auto;
     width: min(calc(100vw - 32px), 29rem);
     max-height: min(80vh, 650px);
-    overflow: auto;
-    padding: 28px 22px 16px;
+    overflow: hidden;
+    padding: var(--dialog-padding);
     border: 1px solid var(--border-subtle);
-    border-radius: 24px;
+    border-radius: var(--radius-panel);
     background: var(--surface);
     color: var(--color-base-content);
-    box-shadow: 0 30px 100px rgb(3 16 35 / 0.35);
+    box-shadow: var(--shadow-dialog);
   }
   dialog[open] {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
     animation: arrive 180ms ease-out;
   }
   dialog::backdrop {
-    background: rgb(5 18 38 / 0.5);
-    backdrop-filter: blur(8px);
-  }
-  .close-dialog {
-    position: absolute;
-    top: 14px;
-    right: 14px;
-    display: grid;
-    place-items: center;
-    width: 30px;
-    height: 30px;
-    border-radius: 50%;
-    background: var(--you-blue-pale);
-    color: var(--text-accent);
-    cursor: pointer;
+    background: var(--backdrop);
   }
   header {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 16px;
-    padding: 6px 18px 24px 4px;
+    padding-bottom: 16px;
+    flex: none;
     border-bottom: 1px solid var(--border-subtle);
   }
   .anime-cover {
@@ -149,25 +125,26 @@
     place-items: center;
     color: white;
     font-size: 0.7rem;
-    font-weight: 800;
+    font-weight: 600;
     text-shadow: 0 1px 5px black;
   }
   .heading-copy {
+    flex: 1;
     min-width: 0;
   }
   .eyebrow {
     margin-bottom: 6px;
-    text-transform: uppercase;
+    text-transform: none;
     color: var(--text-accent);
-    letter-spacing: 0.12em;
-    font-size: 0.6rem;
-    font-weight: 800;
+    letter-spacing: normal;
+    font-size: 0.75rem;
+    font-weight: 600;
   }
   h2 {
     font-size: 1.25rem;
     line-height: 1.25;
-    font-weight: 800;
-    letter-spacing: -0.035em;
+    font-weight: 600;
+    letter-spacing: normal;
     color: var(--text-heading);
     overflow-wrap: anywhere;
   }
@@ -178,7 +155,10 @@
   }
   ul {
     list-style: none;
-    padding: 10px 0 0;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 4px 0;
   }
   li + li {
     border-top: 1px solid color-mix(in srgb, var(--border-subtle) 50%, transparent);
@@ -194,8 +174,7 @@
   a:hover {
     background: var(--you-blue-pale);
   }
-  a:focus-visible,
-  button:focus-visible {
+  a:focus-visible {
     outline: 3px solid var(--you-blue);
     outline-offset: 2px;
   }
@@ -231,13 +210,13 @@
   .episode small {
     display: block;
     font-size: 0.48rem;
-    letter-spacing: 0.08em;
+    letter-spacing: normal;
     font-weight: 700;
     opacity: 0.65;
   }
   .episode strong {
     font-size: 0.95rem;
-    font-weight: 800;
+    font-weight: 600;
     font-variant-numeric: tabular-nums;
   }
   .row-arrow {

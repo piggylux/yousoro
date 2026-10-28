@@ -1,5 +1,4 @@
-/* Tailwind and daisyUI classes are written with a tw: prefix (tw:flex, tw:btn), which sets them
-   apart from the project's own CSS classes */
+/* Tailwind and daisyUI utilities use tw:; product styles stay unprefixed. */
 @import 'tailwindcss' prefix(tw);
 @plugin 'daisyui' {
   themes:
@@ -7,23 +6,43 @@
     dark --prefersdark;
 }
 
-/*
- * You Watanabe's sky blue, with navy and sea tones. Text and surfaces follow the active
- * color scheme; the brand colors stay constant for badges and other filled controls.
- */
+/* One palette and shape scale for pages, controls, and overlays in both themes. */
 :root {
-  --you-blue: #49b9f9;
-  --you-blue-pale: light-dark(#eef8ff, #142b42);
-  --sea-blue: #145f9c;
-  --navy: #0f3d6e;
-  --surface: light-dark(#ffffff, #1b3048);
-  --border-subtle: light-dark(#cdeafd, #36546f);
-  --text-heading: light-dark(#0f3d6e, #e1f2ff);
-  --text-accent: light-dark(#145f9c, #9fdcff);
+  --you-blue: light-dark(#2463a6, #8ab8ef);
+  --you-blue-pale: light-dark(#edf3fa, #243247);
+  --sea-blue: #245c98;
+  --navy: #194574;
+  --surface: light-dark(#ffffff, #1b1e24);
+  --surface-muted: light-dark(#f7f8fa, #23272f);
+  --border-subtle: light-dark(#dcdfe5, #383e49);
+  --text-heading: light-dark(#202630, #eceef2);
+  --text-accent: light-dark(#596474, #acb6c5);
+  --action: light-dark(#245c98, #8ab8ef);
+  --action-hover: light-dark(#194574, #a8ccf5);
+  --action-content: light-dark(#ffffff, #132238);
+  --radius-control: 8px;
+  --radius-panel: 12px;
+  --radius-box: var(--radius-panel);
+  --radius-field: var(--radius-control);
+  --radius-selector: 4px;
+  --dialog-padding: 20px;
+  --shadow-popover: 0 8px 24px rgb(0 0 0 / 0.14);
+  --shadow-dialog: 0 20px 60px rgb(0 0 0 / 0.24);
+  --backdrop: rgb(10 15 23 / 0.48);
   --color-base-100: var(--surface);
-  --color-base-200: light-dark(#f3f8fc, #16283d);
-  --color-base-300: light-dark(#dce9f3, #36546f);
-  --color-base-content: light-dark(#1f2937, #e1edf7);
-  --color-primary: var(--you-blue);
-  --color-primary-content: #0f304f;
+  --color-base-200: var(--surface-muted);
+  --color-base-300: var(--border-subtle);
+  --color-base-content: var(--text-heading);
+  --color-primary: var(--action);
+  --color-primary-content: var(--action-content);
+  --color-success: light-dark(#e8f3ed, #20382d);
+  --color-success-content: light-dark(#286346, #a2d9b8);
+  --color-neutral: var(--surface-muted);
+  --color-neutral-content: var(--text-accent);
+}
+
+@media (max-width: 480px) {
+  :root {
+    --dialog-padding: 16px;
+  }
 }

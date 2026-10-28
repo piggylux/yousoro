@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { SCORE_SCALES, scoreChoices, type ScoreFormat } from '#lib/score.js';
+  import { formatScore, SCORE_SCALES, scoreChoices, type ScoreFormat } from '#lib/score.js';
 
   type Props = {
     /** The list owner's AniList score format, which the field follows */
@@ -37,7 +37,14 @@
       aria-label={label}
     >
       {#each choices as choice (choice.value)}
-        <option value={choice.value}>{choice.label}</option>
+        <option value={choice.value} aria-label={choice.label}>
+          {#if size === 'small' && choice.value > 0}
+            {choice.value}/{scale.max}
+            {format === 'POINT_5' ? '★' : formatScore(choice.value, format)}
+          {:else}
+            {choice.label}
+          {/if}
+        </option>
       {/each}
     </select>
   {:else}
@@ -65,6 +72,7 @@
     align-items: center;
     gap: var(--score-control-gap, 6px);
     max-width: 100%;
+    min-width: 0;
   }
 
   /* At most as wide as the room there is; a long choice is cut short rather than overflow */

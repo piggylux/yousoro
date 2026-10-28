@@ -1,4 +1,5 @@
 <script lang="ts">
+  import CloseButton from '#lib/components/CloseButton.svelte';
   import { closeOnBackdrop } from '#lib/dialog.js';
   import { nyaaSearchUrl, nyaaSite, type NyaaSearch } from '#lib/nyaa.js';
 
@@ -142,118 +143,49 @@
         >
       </p>
     </div>
-    <button
-      class="close-button"
-      type="button"
-      aria-label="Close Nyaa results"
-      onclick={() => dialog?.close()}
-    >
-      <svg
-        width="18"
-        height="18"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.8"
-        stroke-linecap="round"
-        aria-hidden="true"><path d="m6 6 12 12M6 18 18 6" /></svg
-      >
-    </button>
+    <CloseButton label="Close Nyaa results" onclick={() => dialog?.close()} />
   </header>
-  <form
-    class="search-form"
-    onsubmit={(event) => {
-      event.preventDefault();
-      const query = queryDraft.trim();
-      if (!query) return;
-      appliedQuery = query;
-      filter = '';
-      attempt++;
-    }}
-  >
-    <div class="search-heading">
-      <label for={`${heading}-query`}>Search Nyaa</label>
-      {#if appliedQuery !== null || queryDraft !== suggestedQuery}
-        <button
-          class="search-reset"
-          type="button"
-          aria-label="Reset to automatic episode search"
-          onclick={() => {
-            appliedQuery = null;
-            queryDraft = suggestedQuery;
-            filter = '';
-            attempt++;
-            queryInput?.focus();
-          }}>Reset search</button
-        >
-      {/if}
-    </div>
-    <div class="search-row">
-      <input
-        id={`${heading}-query`}
-        bind:this={queryInput}
-        type="search"
-        bind:value={queryDraft}
-        maxlength="500"
-        required
-        placeholder="Title, episode or release group…"
-        aria-controls={`${heading}-results`}
-      />
-      <button class="search-submit" type="submit" disabled={!queryDraft.trim()}>
-        <svg
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.8"
-          stroke-linecap="round"
-          aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 4.5 4.5" /></svg
-        >
-        Search
-      </button>
-    </div>
-  </form>
-  <div class="filter">
-    <div class="filter-heading">
-      <label for={`${heading}-filter`}>Filter loaded results</label>
-      {#if !loading && !errorMessage && releases.length > 0}
-        <p class="result-count" role="status">
-          {filteredReleases.length} of {releases.length} releases
-        </p>
-      {/if}
-    </div>
-    <div class="filter-input">
-      <svg
-        class="filter-icon"
-        width="17"
-        height="17"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.8"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        aria-hidden="true"><path d="M4 5h16l-6 7v6l-4 2v-8Z" /></svg
-      >
-      <input
-        id={`${heading}-filter`}
-        bind:this={filterInput}
-        type="search"
-        bind:value={filter}
-        placeholder="Filter these results…"
-        aria-controls={`${heading}-results`}
-      />
-      {#if filter}
-        <button
-          type="button"
-          class="clear-filter"
-          aria-label="Clear filter"
-          onclick={() => {
-            filter = '';
-            filterInput?.focus();
-          }}
-        >
+  <div class="dialog-body">
+    <form
+      class="search-form"
+      onsubmit={(event) => {
+        event.preventDefault();
+        const query = queryDraft.trim();
+        if (!query) return;
+        appliedQuery = query;
+        filter = '';
+        attempt++;
+      }}
+    >
+      <div class="search-heading">
+        <label for={`${heading}-query`}>Search Nyaa</label>
+        {#if appliedQuery !== null || queryDraft !== suggestedQuery}
+          <button
+            class="search-reset"
+            type="button"
+            aria-label="Reset to automatic episode search"
+            onclick={() => {
+              appliedQuery = null;
+              queryDraft = suggestedQuery;
+              filter = '';
+              attempt++;
+              queryInput?.focus();
+            }}>Reset search</button
+          >
+        {/if}
+      </div>
+      <div class="search-row">
+        <input
+          id={`${heading}-query`}
+          bind:this={queryInput}
+          type="search"
+          bind:value={queryDraft}
+          maxlength="500"
+          required
+          placeholder="Title, episode or release group…"
+          aria-controls={`${heading}-results`}
+        />
+        <button class="search-submit" type="submit" disabled={!queryDraft.trim()}>
           <svg
             width="16"
             height="16"
@@ -262,73 +194,129 @@
             stroke="currentColor"
             stroke-width="1.8"
             stroke-linecap="round"
-            aria-hidden="true"><path d="m6 6 12 12M6 18 18 6" /></svg
+            aria-hidden="true"
+            ><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 4.5 4.5" /></svg
           >
+          Search
         </button>
-      {/if}
-    </div>
-  </div>
-  <section
-    bind:this={results}
-    id={`${heading}-results`}
-    aria-label="Nyaa releases"
-    aria-busy={loading}
-  >
-    {#if loading}
-      <p class="message" role="status">
-        <span class="tw:loading tw:loading-spinner tw:loading-sm" aria-hidden="true"></span> Searching
-        for releases…
-      </p>
-    {:else if errorMessage}
-      <div class="message">
-        <p role="alert">{errorMessage}</p>
-        <button class="retry" type="button" onclick={() => attempt++}>Try again</button>
       </div>
-    {:else if releases.length === 0}
-      <p class="message" role="status">No releases found. Try another search query.</p>
-    {:else}
-      <p class="result-order">Newest first · Latest RSS results</p>
-      {#if filteredReleases.length === 0}
-        <p class="message">
-          No releases match your filter. Try different words or clear the filter.
-        </p>
-      {/if}
-      <ul>
-        {#each filteredReleases as release}
-          <li>
-            <a
-              class="release-title"
-              href={`https://${site}/view/${release.id}`}
-              target="_blank"
-              rel="noreferrer"
-              >{release.title}<span class="tw:sr-only"> (opens in a new tab)</span></a
+    </form>
+    <div class="filter">
+      <div class="filter-heading">
+        <label for={`${heading}-filter`}>Filter loaded results</label>
+        {#if !loading && !errorMessage && releases.length > 0}
+          <p class="result-count" role="status">
+            {filteredReleases.length} of {releases.length} releases
+          </p>
+        {/if}
+      </div>
+      <div class="filter-input">
+        <svg
+          class="filter-icon"
+          width="17"
+          height="17"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"><path d="M4 5h16l-6 7v6l-4 2v-8Z" /></svg
+        >
+        <input
+          id={`${heading}-filter`}
+          bind:this={filterInput}
+          type="search"
+          bind:value={filter}
+          placeholder="Filter these results…"
+          aria-controls={`${heading}-results`}
+        />
+        {#if filter}
+          <button
+            type="button"
+            class="clear-filter"
+            aria-label="Clear filter"
+            onclick={() => {
+              filter = '';
+              filterInput?.focus();
+            }}
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              aria-hidden="true"><path d="m6 6 12 12M6 18 18 6" /></svg
             >
-            <p class="metadata">
-              {release.size}{release.date ? ` · ${release.date}` : ''}
-            </p>
-            <div class="release-actions">
-              <div class="swarm-stats">
-                <span class="stat seeders">
-                  <strong>{release.seeders || '—'}</strong>
-                  <span>Seeders</span>
-                </span>
-                <span class="stat leechers">
-                  <strong>{release.leechers || '—'}</strong>
-                  <span>Leechers</span>
-                </span>
+          </button>
+        {/if}
+      </div>
+    </div>
+    <section
+      bind:this={results}
+      id={`${heading}-results`}
+      aria-label="Nyaa releases"
+      aria-busy={loading}
+    >
+      {#if loading}
+        <p class="message" role="status">
+          <span class="tw:loading tw:loading-spinner tw:loading-sm" aria-hidden="true"></span> Searching
+          for releases…
+        </p>
+      {:else if errorMessage}
+        <div class="message">
+          <p role="alert">{errorMessage}</p>
+          <button class="retry" type="button" onclick={() => attempt++}>Try again</button>
+        </div>
+      {:else if releases.length === 0}
+        <p class="message" role="status">No releases found. Try another search query.</p>
+      {:else}
+        <p class="result-order">Newest first · Latest RSS results</p>
+        {#if filteredReleases.length === 0}
+          <p class="message">
+            No releases match your filter. Try different words or clear the filter.
+          </p>
+        {/if}
+        <ul>
+          {#each filteredReleases as release}
+            <li>
+              <a
+                class="release-title"
+                href={`https://${site}/view/${release.id}`}
+                target="_blank"
+                rel="noreferrer"
+                >{release.title}<span class="tw:sr-only"> (opens in a new tab)</span></a
+              >
+              <p class="metadata">
+                {release.size}{release.date ? ` · ${release.date}` : ''}
+              </p>
+              <div class="release-actions">
+                <div class="swarm-stats">
+                  <span class="stat seeders">
+                    <strong>{release.seeders || '—'}</strong>
+                    <span>Seeders</span>
+                  </span>
+                  <span class="stat leechers">
+                    <strong>{release.leechers || '—'}</strong>
+                    <span>Leechers</span>
+                  </span>
+                </div>
+                <div class="downloads">
+                  {#if release.magnet}<a href={release.magnet}>Magnet</a>{/if}
+                  <a href={`https://${site}/download/${release.id}.torrent`} rel="noreferrer"
+                    >Torrent</a
+                  >
+                </div>
               </div>
-              <div class="downloads">
-                {#if release.magnet}<a href={release.magnet}>Magnet</a>{/if}
-                <a href={`https://${site}/download/${release.id}.torrent`} rel="noreferrer"
-                  >Torrent</a
-                >
-              </div>
-            </div>
-          </li>
-        {/each}
-      </ul>
-    {/if}
-  </section>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </section>
+  </div>
 </dialog>
 
 <style>
@@ -336,12 +324,12 @@
     margin: auto;
     width: min(calc(100vw - 32px), 42rem);
     max-height: 85dvh;
-    padding: 22px;
+    padding: var(--dialog-padding);
     border: 1px solid var(--border-subtle);
-    border-radius: 22px;
+    border-radius: var(--radius-panel);
     background: var(--surface);
     color: var(--color-base-content);
-    box-shadow: 0 30px 100px rgb(3 16 35 / 0.35);
+    box-shadow: var(--shadow-dialog);
     overflow: hidden;
   }
   dialog[open] {
@@ -350,12 +338,14 @@
     gap: 16px;
   }
   dialog::backdrop {
-    background: rgb(5 18 38 / 0.5);
-    backdrop-filter: blur(8px);
+    background: var(--backdrop);
+  }
+  .dialog-body {
+    display: contents;
   }
   header {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 12px;
     flex: none;
   }
@@ -365,22 +355,22 @@
   }
   h2 {
     font-size: 1.15rem;
-    font-weight: 800;
+    font-weight: 600;
     color: var(--text-heading);
-    letter-spacing: -0.035em;
+    letter-spacing: normal;
     overflow-wrap: anywhere;
   }
   .eyebrow {
-    font-size: 0.55rem;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    font-weight: 800;
+    font-size: 0.75rem;
+    letter-spacing: normal;
+    text-transform: none;
+    font-weight: 600;
     color: var(--text-accent);
     margin-bottom: 3px;
   }
   header p:last-child {
     margin-top: 4px;
-    font-size: 0.65rem;
+    font-size: 0.75rem;
     opacity: 0.65;
   }
   a {
@@ -390,22 +380,6 @@
   }
   button {
     cursor: pointer;
-  }
-  .close-button {
-    display: grid;
-    place-items: center;
-    width: 32px;
-    height: 32px;
-    flex: none;
-    padding: 0;
-    border: 0;
-    border-radius: 50%;
-    background: var(--you-blue-pale);
-    color: var(--text-accent);
-  }
-  .close-button:hover {
-    background: var(--sea-blue);
-    color: #ffffff;
   }
   .filter,
   .search-form {
@@ -594,7 +568,7 @@
   }
   .result-count,
   .result-order {
-    font-size: 0.65rem;
+    font-size: 0.75rem;
     opacity: 0.6;
   }
   .result-count {
@@ -632,15 +606,15 @@
   }
   .stat strong {
     font-size: 1rem;
-    font-weight: 800;
+    font-weight: 600;
     line-height: 1.2;
     font-variant-numeric: tabular-nums;
   }
   .stat > span {
     font-size: 0.5rem;
     font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    letter-spacing: normal;
+    text-transform: none;
   }
   @media (prefers-reduced-motion: reduce) {
     .downloads a {
@@ -648,9 +622,6 @@
     }
   }
   @media (max-width: 480px) {
-    dialog {
-      padding: 16px;
-    }
     .search-form input,
     .filter input {
       font-size: 1rem;
@@ -666,10 +637,17 @@
   @media (max-height: 600px) {
     dialog {
       max-height: calc(100dvh - 24px);
+    }
+    .dialog-body {
+      display: block;
+      min-height: 0;
       overflow-y: auto;
+      overscroll-behavior: contain;
+    }
+    .dialog-body > * + * {
+      margin-top: 16px;
     }
     section {
-      flex: none;
       max-height: 50dvh;
     }
   }

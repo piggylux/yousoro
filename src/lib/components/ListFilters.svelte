@@ -16,6 +16,10 @@
   let { counts, hidden, onToggle, search = $bindable() }: Props = $props();
 
   let searchInput = $state<HTMLInputElement>();
+
+  export function focusSearch() {
+    searchInput?.focus();
+  }
   // Words typed before the page's script took over are in the field but not in `search` yet
   onMount(() => {
     if (searchInput && searchInput.value !== search) search = searchInput.value;
@@ -53,12 +57,7 @@
   <div class="list-filters" role="group" aria-label="Sections to show">
     {#each sections as section (section)}
       {@const shown = !hidden.includes(section)}
-      <button
-        type="button"
-        class="chip {section}"
-        aria-pressed={shown}
-        onclick={() => onToggle(section)}
-      >
+      <button type="button" class="chip" aria-pressed={shown} onclick={() => onToggle(section)}>
         <span class="check" aria-hidden="true">{shown ? '✓' : ''}</span>
         {LIST_SECTION_LABELS[section]}
         <span class="count">{counts[section].toLocaleString()}</span>
@@ -72,27 +71,28 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    justify-content: center;
+    justify-content: space-between;
     gap: 10px 16px;
-    /* Clear space above the first row, whose badges stick out above the cards */
-    margin: 0 0 60px;
+    /* Separate the toolbar from the first row of cards. */
+    margin: 0 0 32px;
+    padding: 16px 0;
+    border-top: 1px solid var(--border-subtle);
   }
 
   .list-filters {
     display: flex;
     flex-wrap: wrap;
-    justify-content: center;
+    justify-content: flex-start;
     gap: 8px;
   }
 
-  /* A pill like the chips beside it, outlined in You's sky blue */
   .search {
     width: 14rem;
     max-width: 100%;
-    height: 2rem;
+    height: 40px;
     padding: 0 14px;
-    border: 2px solid var(--you-blue);
-    border-radius: 999px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-control);
     background: var(--surface);
     color: var(--text-heading);
     font-size: 0.85rem;
@@ -114,68 +114,35 @@
     }
   }
 
-  /*
-   * Each chip has the colours of its section's badge, so the two are easy to match up. A shown
-   * section's chip looks like the badge; a hidden one's is only outlined and dashed
-   */
   .chip {
-    --chip-background: var(--sea-blue);
-    --chip-text: #ffffff;
-    --chip-border: var(--sea-blue);
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    min-height: 2rem;
+    min-height: 40px;
     padding: 0 12px 0 10px;
-    border: 2px solid var(--chip-border);
-    border-radius: 999px;
-    background: var(--chip-background);
-    color: var(--chip-text);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-control);
+    background: var(--surface);
+    color: var(--text-heading);
     font-size: 0.85rem;
-    font-weight: 700;
+    font-weight: 500;
     cursor: pointer;
     transition:
       background-color 0.15s ease-out,
       color 0.15s ease-out;
   }
 
-  /* Like the "behind" badge: sea blue, with You's sky blue as a halo */
-  .chip.behind {
-    background: linear-gradient(135deg, #1872b8, var(--sea-blue));
-    box-shadow: 0 0 0 2px rgb(73 185 249 / 0.35);
-  }
-
-  /* Like the rewatch badge: sea blue on white, outlined in sky blue */
-  .chip.rewatching {
-    --chip-background: var(--surface);
-    --chip-text: var(--text-accent);
-    --chip-border: var(--you-blue);
-  }
-
-  /* Like the caught-up and completed badges */
-  .chip.caught-up {
-    --chip-background: var(--color-success);
-    --chip-text: var(--color-success-content);
-    --chip-border: var(--color-success);
-  }
-
-  /* Like the badges of anime without episode info */
-  .chip.other {
-    --chip-background: var(--color-neutral);
-    --chip-text: var(--color-neutral-content);
-    --chip-border: var(--color-neutral);
-  }
-
   .chip[aria-pressed='false'] {
-    border-color: var(--text-accent);
-    border-style: dashed;
-    background: var(--surface);
+    border-color: var(--border-subtle);
+    border-style: solid;
+    background: transparent;
     box-shadow: none;
     color: var(--text-accent);
   }
 
   .chip:hover {
-    filter: brightness(1.08);
+    filter: none;
+    background: var(--you-blue-pale);
   }
 
   .chip:focus-visible {
@@ -189,17 +156,33 @@
     text-align: center;
   }
 
-  /* A tint of the chip's own text colour, so it suits every chip */
+  /* Counts use a quiet neutral surface and stable numeric spacing. */
   .count {
     padding: 0 6px;
     border-radius: 999px;
-    background: color-mix(in srgb, currentColor 18%, transparent);
+    background: var(--surface-muted);
     font-size: 0.75rem;
+    color: var(--text-accent);
+    font-variant-numeric: tabular-nums;
   }
 
   @media (prefers-reduced-motion: reduce) {
     .chip {
       transition: none;
+    }
+  }
+  .chip[aria-pressed='true'] {
+    border-color: var(--you-blue);
+    background: var(--you-blue-pale);
+  }
+  .check {
+    color: var(--you-blue);
+  }
+
+  @media (pointer: coarse) {
+    .search,
+    .chip {
+      min-height: 44px;
     }
   }
 </style>

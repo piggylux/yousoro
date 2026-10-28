@@ -135,10 +135,13 @@
   const totalEpisodes = $derived(anime.numberEpisodes || null);
   const progressLabel = $derived(`${anime.currentEpisode} / ${totalEpisodes ?? '?'}`);
   // How many episodes have aired, on the card's back, unless that's all of them
-  const airedNote = $derived(
+  const airedEpisodes = $derived(
     anime.numberAiredEpisodes && anime.numberAiredEpisodes !== totalEpisodes
-      ? `${anime.numberAiredEpisodes.toLocaleString()} aired`
+      ? anime.numberAiredEpisodes
       : null
+  );
+  const hasExtraFacts = $derived(
+    Boolean(airedEpisodes || anime.meanScore || anime.rewatching || (mounted && anime.nextEpisode))
   );
   const episodesToWatch = $derived(getEpisodesToWatch(anime));
   const watchState = $derived(getWatchState(anime));
@@ -572,7 +575,7 @@
     const target = event.target as Element;
     pressedControl = Boolean(
       target.closest(
-        'a, button:not(.cover), input, select, textarea, label, form, .back-actions, .compact-details'
+        'a, button:not(.cover), input, select, textarea, label, form, .back-actions, .card-status, .compact-details'
       )
     );
     if (pressedControl) return;
@@ -802,10 +805,12 @@
   }}
 />
 
-<!-- Every badge sits in the same place, centered on top of the card, so they're easy to scan -->
+<!-- Status stays inside the card at a consistent inset, on either side. -->
 {#snippet badge()}
   {#if watchState === 'completed'}
-    <span class="card-badge tw:badge tw:badge-success">✓ Completed</span>
+    <span class="card-badge tw:badge tw:badge-success"
+      ><span class="badge-label">✓ Completed</span></span
+    >
   {:else if watchState === 'caught-up'}
     <span
       class="card-badge tw:badge tw:badge-success"
@@ -813,11 +818,11 @@
       title={countdown?.date}
       aria-label={countdown?.spoken}
     >
-      ✓ {countdown?.label ?? 'Caught up'}
+      <span class="badge-label">✓ {countdown?.label ?? 'Caught up'}</span>
     </span>
   {:else if noEpisodeInfo}
     <span class="card-badge tw:badge tw:badge-neutral" title={noEpisodeInfo.title}>
-      {noEpisodeInfo.label}
+      <span class="badge-label">{noEpisodeInfo.label}</span>
     </span>
   {:else if watchState === 'to-watch' && anime.rewatching}
     <!-- A rewatch isn't "behind": its episodes aren't new, so it gets a calmer badge -->
@@ -826,7 +831,7 @@
       title="Rewatching"
       aria-label={`Rewatching, ${episodesToWatch} episode${episodesToWatch === 1 ? '' : 's'} left`}
     >
-      ↻ {episodesToWatch.toLocaleString()} left
+      <span class="badge-label">↻ {episodesToWatch.toLocaleString()} left</span>
     </span>
   {:else if watchState === 'to-watch'}
     <span
@@ -852,15 +857,24 @@
           />
         </svg>
       {/if}
-      {#key countTicks}
-        <span class="count" class:ticked={countTicks > 0}>{episodesToWatch.toLocaleString()}</span>
-      {/key}
-      behind
+      <span class="badge-label">
+        {#key countTicks}
+          <span class="count" class:ticked={countTicks > 0}>{episodesToWatch.toLocaleString()}</span
+          >
+        {/key}
+        behind
+      </span>
     </span>
   {/if}
 {/snippet}
 
 {#snippet extraFacts()}
+  {#if airedEpisodes}
+    <div class="fact extra-fact">
+      <dt>Aired</dt>
+      <dd>{airedEpisodes.toLocaleString()} {airedEpisodes === 1 ? 'episode' : 'episodes'}</dd>
+    </div>
+  {/if}
   {#if anime.meanScore}
     <div class="fact extra-fact">
       <dt>Average</dt>
@@ -931,21 +945,13 @@
         const target = event.target as Element;
         if (
           !target.closest(
-            'a, button, input, select, textarea, label, form, .back-actions, .badge-side, .compact-details'
+            'a, button, input, select, textarea, label, form, .back-actions, .card-status, .compact-details'
           )
         ) {
           flipByClick(!flipped, event);
         }
       }}
     >
-      <!--
-        The badge turns with the card, on whichever side faces the viewer. The copy on the back is
-        only for show, so screen readers hear it once
-      -->
-      <div class="badge-side front-side">{@render badge()}</div>
-      <div class="back-side" aria-hidden="true">
-        <div class="badge-side">{@render badge()}</div>
-      </div>
       <!--
         The light that glances off the back as it turns, over it rather than inside it, so it stays
         put when the back's details scroll. The back has no gloss under the mouse
@@ -955,6 +961,7 @@
       </div>
       <!-- Only the side facing the viewer can be focused or read by a screen reader -->
       <div class="face front tw:card" inert={flipped}>
+        <div class="card-status">{@render badge()}</div>
         <!-- A soft light on the cover where the mouse is -->
         <span class="glare" aria-hidden="true"></span>
         <div class="cover-area">
@@ -1073,6 +1080,7 @@
         aria-label={`${anime.title} details`}
         aria-keyshortcuts="Escape"
       >
+        <div class="card-status">{@render badge()}</div>
         <!--
           Always two lines tall, so the details sit at the same height on every card. Only the
           title's own text is the link; the space around a short title turns the card back over
@@ -1085,7 +1093,7 @@
 
         <!-- On phones, details scroll between the title and actions so the controls stay reachable. -->
         <div class="facts-area" bind:this={factsArea}>
-          <dl class="facts" class:main-facts={compact && canEdit}>
+          <dl class="facts" class:main-facts={compact}>
             <div class="fact main-field" class:editable={canEdit}>
               <dt>Watched</dt>
               <dd>
@@ -1108,7 +1116,6 @@
                 {:else}
                   {progressLabel}
                 {/if}
-                {#if airedNote}<span class="aired-note">({airedNote})</span>{/if}
               </dd>
             </div>
             {#if canEdit}
@@ -1126,20 +1133,35 @@
                   </span>
                 </dd>
               </div>
-            {:else if anime.userScore}
+            {:else}
               <div class="fact main-field">
                 <dt>Score</dt>
                 <dd>
-                  <span aria-hidden="true">{formatScore(anime.userScore, scoreFormat)}</span>
-                  <span class="tw:sr-only">{describeScore(anime.userScore, scoreFormat)}</span>
+                  {#if anime.userScore}
+                    <span aria-hidden="true">{formatScore(anime.userScore, scoreFormat)}</span>
+                    <span class="tw:sr-only">{describeScore(anime.userScore, scoreFormat)}</span>
+                  {:else}
+                    Not scored
+                  {/if}
                 </dd>
               </div>
             {/if}
             {@render extraFacts()}
           </dl>
-          {#if compact && canEdit && (anime.meanScore || anime.rewatching || (mounted && anime.nextEpisode))}
+          {#if compact && hasExtraFacts}
             <details class="compact-details">
-              <summary>More details</summary>
+              <summary>
+                More details
+                <svg
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  aria-hidden="true"
+                >
+                  <path d="m4 6 4 4 4-4" />
+                </svg>
+              </summary>
               <dl class="facts">{@render extraFacts()}</dl>
             </details>
           {/if}
@@ -1283,10 +1305,7 @@
     border: 0;
     border-radius: 50%;
     background: #ffffff;
-    box-shadow:
-      0 0 0 1px rgb(10 30 50 / 0.25),
-      0 4px 10px rgb(0 0 0 / 0.4),
-      0 10px 20px -8px rgb(0 0 0 / 0.55);
+    box-shadow: 0 0 0 1px rgb(10 30 50 / 0.2);
     transition:
       box-shadow 200ms ease,
       translate 200ms ease,
@@ -1316,10 +1335,7 @@
   .friend-presence:hover .presence-avatar,
   .friend-presence:focus-visible .presence-avatar {
     translate: 0 -3px;
-    box-shadow:
-      0 0 0 2px var(--you-blue),
-      0 5px 12px rgb(0 0 0 / 0.4),
-      0 8px 18px -6px rgb(73 185 249 / 0.35);
+    box-shadow: 0 0 0 1px rgb(10 30 50 / 0.2);
   }
   .friend-presence:hover .presence-avatar + .presence-avatar,
   .friend-presence:focus-visible .presence-avatar + .presence-avatar {
@@ -1360,7 +1376,7 @@
   }
 
   .anime-card {
-    /* Every badge's height, which also sets how far it rises above the card's top edge */
+    /* Reserve the same status row on both sides, even for unknown episode states. */
     --badge-height: 1.75rem;
     /* Set by the page grid, which sizes cards to fit the screen */
     width: var(--card-width, 300px);
@@ -1426,55 +1442,21 @@
     transform: translateZ(0);
   }
 
-  /*
-   * The badge, centered on the card's top edge, one on each side just above its face, so it tilts,
-   * rises and turns with the card and shows on whichever side faces the viewer. It's centered with
-   * auto margins and half its height above the edge, not shifted by a share of its own size: that
-   * relies on the `translate` property, which not every browser or build applies, leaving the
-   * badge off to the right
-   */
-  .badge-side {
-    position: absolute;
-    top: calc(var(--badge-height) / -2);
-    right: 0;
-    left: 0;
-    z-index: 3;
+  /* Status participates in layout instead of floating across the card edge. */
+  .card-status {
     display: flex;
-    /* As wide as its badge, so it centers rather than stretching across the card */
-    width: max-content;
-    margin-inline: auto;
-    backface-visibility: hidden;
-    transform: translateZ(2px);
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-width: 0;
+    min-height: var(--badge-height);
   }
 
-  /*
-   * The back's badge sits in a layer the size of the card, turned exactly as the back is, about the
-   * card's center. Turned about its own center instead, a turn on any axis but the vertical one
-   * would carry it away from the top of the back
-   */
-  .back-side {
-    position: absolute;
-    inset: 0;
-    backface-visibility: hidden;
-    transform: rotate3d(var(--turn-axis-x), var(--turn-axis-y), 0, 180deg) translateZ(2px);
-    pointer-events: none;
-  }
-
-  .back-side .badge-side {
-    transform: none;
-    pointer-events: auto;
-  }
-
-  /* The badge facing away doesn't pulse; it starts when its side comes round */
-  .anime-card:not(.flipped, .dragging) .back-side .card-badge::after,
-  .flipped:not(.dragging) .front-side .card-badge::after {
-    animation: none;
-  }
-
-  .anime-card:not(.flipped, .dragging) .back-side .flame-outer,
-  .anime-card:not(.flipped, .dragging) .back-side .flame-inner,
-  .flipped:not(.dragging) .front-side .flame-outer,
-  .flipped:not(.dragging) .front-side .flame-inner {
+  .anime-card:not(.flipped, .dragging) .back .flame-outer,
+  .anime-card:not(.flipped, .dragging) .back .flame-inner,
+  .flipped:not(.dragging) .front .flame-outer,
+  .flipped:not(.dragging) .front .flame-inner {
     animation-play-state: paused;
   }
 
@@ -1583,14 +1565,9 @@
     --gloss-x: var(--pointer-x);
     --gloss-y: var(--pointer-y);
     --gloss: var(--lift);
-    /*
-     * On the dark navy page, the card is lighter than other surfaces and has a faint sky-blue
-     * edge, with deeper shadows, so it stands out as it does on the light page
-     */
-    --card-surface: light-dark(var(--surface), #24425f);
-    --card-edge: light-dark(transparent, rgb(159 220 255 / 0.2));
-    --card-shadow: light-dark(rgb(0 0 0 / 0.1), rgb(2 10 20 / 0.5));
-    --card-shadow-deep: light-dark(rgb(15 48 79 / 0.45), rgb(2 10 20 / 0.75));
+    /* Cards share the page palette in either theme. */
+    --card-surface: var(--surface);
+    --card-edge: var(--border-subtle);
   }
 
   /*
@@ -1618,7 +1595,7 @@
         transparent calc(var(--band) + 22%)
       );
     mix-blend-mode: overlay;
-    opacity: var(--gloss);
+    opacity: calc(var(--gloss) * 0.12);
     transition: opacity 250ms ease-out;
     pointer-events: none;
   }
@@ -1643,7 +1620,7 @@
       transparent 75%
     );
     mix-blend-mode: color-dodge;
-    opacity: calc(var(--gloss) * 0.28);
+    opacity: calc(var(--gloss) * 0.04);
     transition: opacity 250ms ease-out;
     pointer-events: none;
   }
@@ -1662,12 +1639,9 @@
   .anime-card:not(.in-3d) .flipper {
     transform-style: flat;
   }
-  .anime-card:not(.in-3d) :is(.back, .back-light, .back-side),
+  .anime-card:not(.in-3d) :is(.back, .back-light),
   .anime-card:not(.in-3d) .front::before {
     display: none;
-  }
-  .anime-card:not(.in-3d) .front-side {
-    transform: none;
   }
   .anime-card:not(.in-3d, [data-lit]) .flipper {
     transform: none;
@@ -1691,19 +1665,13 @@
      * turns, so it never fights the turn
      */
     .flipper {
-      transform: translateZ(calc(var(--lift) * 36px)) rotateX(calc(var(--pointer-y) * 18deg))
-        rotateY(calc(var(--pointer-x) * -24deg))
+      transform: translateZ(calc(var(--lift) * 4px)) rotateX(calc(var(--pointer-y) * 2deg))
+        rotateY(calc(var(--pointer-x) * -3deg))
         rotate3d(var(--turn-axis-x), var(--turn-axis-y), 0, var(--card-turn));
     }
-    /* Its shadow falls away from the light and spreads as it rises, on either side */
+    /* The accent edge gives a clear hover state without lifting the surface. */
     .card-slot:hover .face {
-      box-shadow:
-        0 0 0 2px var(--you-blue),
-        calc(var(--pointer-x) * -36px) calc(20px + var(--pointer-y) * -30px)
-          calc(24px + var(--lift) * 24px) -12px var(--card-shadow-deep),
-        0 8px 24px -10px rgb(73 185 249 / 0.45);
-      /* It follows the mouse every frame already */
-      transition: none;
+      box-shadow: 0 0 0 1px var(--you-blue);
     }
   }
 
@@ -1726,8 +1694,8 @@
   /* Where the card tilts toward the mouse, the tilt eases out on top of the drag */
   @media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
     .anime-card.dragging .flipper {
-      transform: translateZ(calc(var(--lift) * 36px)) rotateX(calc(var(--pointer-y) * 18deg))
-        rotateY(calc(var(--pointer-x) * -24deg)) var(--drag-transform);
+      transform: translateZ(calc(var(--lift) * 4px)) rotateX(calc(var(--pointer-y) * 2deg))
+        rotateY(calc(var(--pointer-x) * -3deg)) var(--drag-transform);
     }
   }
 
@@ -1740,14 +1708,11 @@
     gap: 10px;
     background: var(--card-surface);
     color: var(--color-base-content);
-    /* Tailwind's shadow-xl, darker on the dark page, plus the card's edge */
-    box-shadow:
-      0 0 0 1px var(--card-edge),
-      0 20px 25px -5px var(--card-shadow),
-      0 8px 10px -6px var(--card-shadow);
+    /* A quiet edge keeps the artwork prominent. */
+    box-shadow: 0 0 0 1px var(--card-edge);
     -webkit-backface-visibility: hidden;
     backface-visibility: hidden;
-    transition: box-shadow 420ms cubic-bezier(0.22, 1, 0.36, 1);
+    transition: box-shadow 150ms ease;
   }
 
   /* After a save moves the card, a sky-blue ring that fades out, so the eye finds it again */
@@ -1765,10 +1730,8 @@
   }
 
   .card-slot:has(:focus-visible) .face {
-    box-shadow:
-      0 0 0 2px var(--you-blue),
-      0 22px 38px -16px var(--card-shadow-deep),
-      0 8px 24px -10px rgb(73 185 249 / 0.4);
+    box-shadow: 0 0 0 2px var(--you-blue);
+    transition: box-shadow 150ms ease;
   }
 
   /* A fixed layout from the top: title, details, then any error at the bottom */
@@ -1955,9 +1918,9 @@
     height: 32px;
     padding: 0 12px;
     border: 1px solid var(--border-subtle);
-    border-radius: 9px;
+    border-radius: var(--radius-control);
     font-size: 0.78rem;
-    font-weight: 700;
+    font-weight: 600;
     cursor: pointer;
     transition:
       background-color 160ms ease,
@@ -1979,20 +1942,16 @@
     border-color: var(--you-blue);
   }
   .entry-save {
-    background-color: #155286;
-    background-image: linear-gradient(155deg, rgb(45 157 214 / 0.7), transparent 75%);
-    border-color: rgb(118 209 255 / 0.55);
-    color: #ffffff;
-    box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.25),
-      0 2px 4px rgb(15 61 110 / 0.15);
+    background-color: var(--action);
+    background-image: none;
+    border-color: transparent;
+    color: var(--action-content);
+    box-shadow: none;
   }
   .entry-save:not(:disabled):hover {
-    background-color: #1b6ba2;
-    border-color: #9ae2ff;
-    box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.35),
-      0 0 0 2px rgb(73 185 249 / 0.12);
+    background-color: var(--action-hover);
+    border-color: transparent;
+    box-shadow: none;
   }
   .entry-action:not(:disabled):active {
     box-shadow: inset 0 2px 4px rgb(3 25 48 / 0.2);
@@ -2023,14 +1982,7 @@
     align-self: stretch;
   }
 
-  .aired-note {
-    margin-left: 4px;
-    color: var(--text-accent);
-    font-size: 0.8rem;
-    white-space: nowrap;
-  }
-
-  /* A pill as wide as the card allows, so it's an easy target rather than a line of small text */
+  /* A full-width secondary action remains easy to reach on a narrow card. */
   .download-link {
     cursor: pointer;
     display: flex;
@@ -2040,17 +1992,18 @@
     width: 100%;
     /* Little side padding, so both lines fit even on the smallest cards */
     padding: 0.35rem 0.25rem;
-    border: 2px solid var(--you-blue);
-    border-radius: 999px;
-    background: var(--you-blue-pale);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-control);
+    background: var(--surface-muted);
     color: var(--text-accent);
     font-size: 0.85rem;
-    font-weight: 700;
+    font-weight: 500;
     line-height: 1.2;
     text-align: center;
     transition:
       background-color 0.15s ease-out,
       color 0.15s ease-out;
+    min-height: 40px;
   }
 
   /*
@@ -2131,11 +2084,6 @@
     .compact .main-field dt,
     .compact .main-field dd {
       text-align: center;
-    }
-    .compact .aired-note {
-      display: block;
-      margin: 3px 0 0;
-      font-size: 0.65rem;
     }
     .compact .entry-actions {
       display: grid;
@@ -2233,11 +2181,6 @@
       padding-inline: 6px;
       font-size: 1rem;
     }
-    .aired-note {
-      display: block;
-      margin: 4px 0 0;
-      font-size: 0.65rem;
-    }
     .back-actions {
       padding-top: 10px;
       border-top: 1px solid var(--border-subtle);
@@ -2262,25 +2205,57 @@
     .back.compact {
       --back-padding-y: 12px;
       --back-padding-x: 8px;
+      --score-control-height: 44px;
+      --score-number-width: 3rem;
       gap: 8px;
     }
     .compact .back-title {
-      font-size: 0.8rem;
+      font-size: 0.8125rem;
+      line-height: 1.3;
+      text-align: center;
     }
     .compact .facts-area {
-      flex-direction: column;
-      justify-content: flex-start;
+      display: block;
     }
     .compact .facts {
-      flex: none;
+      gap: 8px;
+      font-size: 0.8125rem;
+    }
+    /* One label-over-value layout at every small-card width and for every score format. */
+    .compact .fact,
+    .compact .fact.main-field {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      justify-items: stretch;
+      align-items: start;
+      gap: 4px;
     }
     .compact .fact.main-field {
-      grid-template-columns: minmax(0, 1fr);
-      gap: 3px;
       padding: 6px;
     }
-    .compact .main-field dd {
+    .compact .facts dt,
+    .compact .facts dd {
       text-align: left;
+    }
+    .compact .facts dt {
+      margin: 0;
+      font-size: 0.75rem;
+    }
+    .compact .main-field dd {
+      display: flex;
+      align-items: center;
+      min-height: var(--score-control-height);
+    }
+    .compact .field-form {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      width: 100%;
+      gap: 4px;
+    }
+    .compact .field-form > input {
+      width: 100%;
+      min-width: 0;
+      min-height: var(--score-control-height);
     }
     .compact .main-facts > .extra-fact {
       display: none;
@@ -2293,12 +2268,28 @@
       text-align: left;
     }
     .compact-details summary {
-      min-height: 32px;
-      padding-block: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-height: 44px;
+      padding-block: 8px;
       color: var(--text-accent);
       font-size: 0.7rem;
       font-weight: 700;
       cursor: pointer;
+      list-style: none;
+    }
+    .compact-details summary::-webkit-details-marker {
+      display: none;
+    }
+    .compact-details summary svg {
+      width: 14px;
+      height: 14px;
+      flex: none;
+    }
+    .compact-details[open] summary svg {
+      transform: rotate(180deg);
     }
     .compact-details summary:focus-visible {
       outline: 2px solid var(--you-blue);
@@ -2312,7 +2303,13 @@
       padding-top: 8px;
     }
     .compact .entry-actions {
-      grid-template-columns: 36px minmax(0, 1fr);
+      grid-template-columns: 44px minmax(0, 1fr);
+    }
+    .compact .entry-action {
+      min-height: 44px;
+    }
+    .compact .entry-save svg {
+      display: none;
     }
     .compact .entry-reset .entry-action-label {
       display: none;
@@ -2323,9 +2320,9 @@
       height: 16px;
     }
     .compact .download-link {
-      min-height: 36px;
+      min-height: 44px;
       border-width: 1px;
-      border-radius: 10px;
+      border-radius: var(--radius-control);
       font-size: 0.75rem;
     }
     .compact .download-full,
@@ -2337,25 +2334,25 @@
     }
 
     @container (max-width: 12rem) {
-      .fact.editable {
+      .back:not(.compact) .fact.editable {
         grid-template-columns: minmax(0, 1fr);
         gap: 4px;
         padding: 6px;
       }
-      .editable dd {
+      .back:not(.compact) .editable dd {
         text-align: left;
       }
-      .field-form {
+      .back:not(.compact) .field-form {
         flex-wrap: wrap;
       }
-      .fact:not(.editable) {
+      .back:not(.compact) .fact:not(.editable) {
         grid-template-columns: minmax(0, 1fr);
         gap: 2px;
       }
-      .fact:not(.editable) dd {
+      .back:not(.compact) .fact:not(.editable) dd {
         text-align: left;
       }
-      .entry-action svg {
+      .back:not(.compact) .entry-action svg {
         display: none;
       }
     }
@@ -2398,19 +2395,16 @@
     align-items: center;
     justify-content: center;
     width: 42px;
-    height: 28px;
+    height: 32px;
     padding: 0 8px;
-    border: 1px solid rgb(118 209 255 / 0.55);
-    border-radius: 9px;
-    background-color: #155286;
-    background-image: linear-gradient(155deg, rgb(45 157 214 / 0.7), transparent 75%);
-    color: #ffffff;
-    box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.25),
-      inset 0 -1px 0 rgb(3 25 48 / 0.2),
-      0 2px 4px rgb(15 61 110 / 0.15);
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
+    background-color: var(--action);
+    background-image: none;
+    color: var(--action-content);
+    box-shadow: none;
     font-size: 0.8rem;
-    font-weight: 800;
+    font-weight: 600;
     font-variant-numeric: tabular-nums;
     cursor: pointer;
     transition:
@@ -2425,22 +2419,18 @@
     line-height: 1;
   }
   .quick-watch-plus {
-    color: #bcefff;
+    color: currentColor;
     font-size: 0.95rem;
     font-weight: 500;
   }
   .quick-watch:not(:disabled):hover {
-    background-color: #1b6ba2;
-    border-color: #9ae2ff;
-    box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.35),
-      inset 0 -1px 0 rgb(3 25 48 / 0.15),
-      0 0 0 2px rgb(73 185 249 / 0.12),
-      0 3px 10px rgb(20 95 156 / 0.22);
+    background-color: var(--action-hover);
+    border-color: transparent;
+    box-shadow: none;
   }
   .quick-watch:not(:disabled):active {
-    background-color: #103e69;
-    box-shadow: inset 0 2px 4px rgb(3 25 48 / 0.3);
+    background-color: var(--action-hover);
+    box-shadow: none;
   }
   .quick-watch:focus-visible {
     outline: 3px solid var(--you-blue);
@@ -2527,51 +2517,52 @@
   }
 
   .episode-bar .watched {
-    background: var(--text-accent);
+    background: var(--action);
     transition: width 300ms ease;
   }
 
   /* Aired but not watched yet: the backlog the badge counts */
   .episode-bar .aired {
-    background: var(--you-blue);
+    background: light-dark(#99bce2, #4c6d94);
     transition: width 300ms ease;
   }
 
-  /* A white ring and a shadow lift every badge off the cover and the card */
+  /* Status labels share the same size and shape across the grid. */
   .card-badge {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
     height: var(--badge-height);
-    padding: 0 0.85rem;
-    border: 2px solid #ffffff;
-    font-size: 0.85rem;
-    font-weight: 800;
-    box-shadow: 0 4px 10px rgb(0 0 0 / 0.2);
-    /* Holds the rings that pulse out of it */
+    padding: 0 8px;
+    border: 1px solid var(--border-subtle);
+    font-size: 0.75rem;
+    font-weight: 600;
+    box-shadow: none;
     position: relative;
-    animation: badge-pop 0.45s ease-out;
+    border-radius: var(--radius-control);
   }
 
-  /* The badge to act on stands out most. White on these blues keeps at least 4.5:1 contrast */
+  .badge-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Backlog labels use the accent tint; the episode count carries the status. */
   .behind-badge {
     /* Its words are separate flex items, so a word's width apart rather than daisyUI's wide gap */
     gap: 0.3em;
-    background: linear-gradient(135deg, #1872b8, var(--sea-blue));
-    color: #ffffff;
-    box-shadow:
-      0 4px 12px rgb(20 95 156 / 0.45),
-      0 0 0 3px rgb(73 185 249 / 0.35);
+    background: var(--you-blue-pale);
+    color: var(--you-blue);
+    box-shadow: none;
+    border-color: var(--border-subtle);
   }
 
-  /*
-   * A big backlog sinks into deeper water: navy, with faint diagonal stripes like light through
-   * waves. Still blue, so it reads as "a lot to catch up on", not as an alarm
-   */
+  /* Large backlogs retain the same calm treatment. */
   .behind-badge.deep {
-    background:
-      repeating-linear-gradient(135deg, rgb(255 255 255 / 0.1) 0 4px, transparent 4px 9px),
-      linear-gradient(135deg, var(--sea-blue), var(--navy));
-    box-shadow:
-      0 4px 12px rgb(15 61 110 / 0.5),
-      0 0 0 3px rgb(20 95 156 / 0.35);
+    background: var(--you-blue-pale);
+    box-shadow: none;
   }
 
   /* The count drops in from above and settles with a small bounce */
@@ -2630,75 +2621,13 @@
     color: var(--text-accent);
   }
 
-  /*
-   * A sky-blue ring pulses out from the badge and fades, like a gentle heartbeat, while an episode
-   * is new. Only the ring grows, so the badge and its text stay sharp. All new badges pulse together,
-   * so the grid breathes calmly instead of flickering
-   */
-  .behind-badge.new-episode::after {
-    content: '';
-    position: absolute;
-    /* Over the badge's white border too */
-    inset: -2px;
-    border-radius: inherit;
-    animation: pulse 2s ease-out 0.5s infinite;
-    pointer-events: none;
-  }
-
-  @keyframes pulse {
-    0% {
-      box-shadow: 0 0 0 0 rgb(73 185 249 / 0.7);
-    }
-    70%,
-    100% {
-      box-shadow: 0 0 0 10px rgb(73 185 249 / 0);
-    }
-  }
-
-  /* Catching up splashes: a sky-blue ring bursts out of the caught-up badge, once */
-  .splash::after {
-    content: '';
-    position: absolute;
-    inset: -2px;
-    border-radius: inherit;
-    animation: splash 0.8s ease-out 0.15s both;
-    pointer-events: none;
-  }
-
-  @keyframes splash {
-    0% {
-      box-shadow:
-        0 0 0 0 rgb(73 185 249 / 0.9),
-        0 0 0 0 rgb(73 185 249 / 0.6);
-    }
-    100% {
-      box-shadow:
-        0 0 0 18px rgb(73 185 249 / 0),
-        0 0 0 30px rgb(73 185 249 / 0);
-    }
-  }
-
-  @keyframes badge-pop {
-    0% {
-      scale: 0.4;
-      opacity: 0;
-    }
-    60% {
-      scale: 1.15;
-      opacity: 1;
-    }
-    100% {
-      scale: 1;
-    }
-  }
-
   /* Every cover gets the same 3:4 frame, cropped to fit, whatever the image's own proportions */
   .cover-frame {
     position: relative;
     display: block;
     width: 100%;
     overflow: hidden;
-    border-radius: var(--rounded-box, 1rem) var(--rounded-box, 1rem) 0 0;
+    border-radius: var(--radius-control);
   }
 
   img {
@@ -2743,10 +2672,7 @@
   }
   @media (hover: hover) and (pointer: fine) {
     .card-slot:hover .face {
-      box-shadow:
-        0 0 0 2px var(--you-blue),
-        0 22px 38px -16px var(--card-shadow-deep),
-        0 8px 24px -10px rgb(73 185 249 / 0.4);
+      box-shadow: 0 0 0 1px var(--you-blue);
     }
     .card-slot:hover img {
       filter: brightness(1.08);
@@ -2773,15 +2699,6 @@
       animation: none;
     }
 
-    .card-badge {
-      animation: none;
-    }
-
-    .behind-badge.new-episode::after,
-    .splash::after {
-      display: none;
-    }
-
     .count.ticked {
       animation: none;
     }
@@ -2790,6 +2707,15 @@
     .face,
     img {
       transition: none;
+    }
+  }
+  @media (pointer: coarse) {
+    .quick-watch {
+      min-height: 44px;
+      min-width: 44px;
+    }
+    .entry-action {
+      min-height: 44px;
     }
   }
 </style>

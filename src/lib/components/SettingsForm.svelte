@@ -210,7 +210,11 @@
 <style>
   form {
     display: grid;
-    gap: 12px;
+    gap: 0;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-panel);
+    background: var(--surface);
+    overflow: hidden;
   }
 
   .setting {
@@ -218,12 +222,13 @@
     align-items: center;
     justify-content: space-between;
     gap: 20px;
-    padding: 16px 18px;
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-box, 1rem);
-    background: var(--surface);
-    box-shadow: 0 1px 3px rgb(15 61 110 / 0.08);
+    padding: 20px 16px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
     cursor: pointer;
+    border-bottom: 1px solid var(--border-subtle);
   }
 
   /* A setting that doesn't apply right now: dimmed, and not clickable */
@@ -242,7 +247,7 @@
   .setting-name {
     display: block;
     color: var(--text-heading);
-    font-weight: 700;
+    font-weight: 600;
   }
 
   .setting-hint {
@@ -250,13 +255,14 @@
     margin-top: 2px;
     color: var(--text-accent);
     font-size: 0.85rem;
+    line-height: 1.5;
   }
 
   .note {
     margin-top: 12px;
     color: var(--text-accent);
     font-size: 0.8rem;
-    opacity: 0.8;
+    opacity: 1;
   }
 
   .status {
@@ -264,5 +270,21 @@
     margin-top: 4px;
     color: var(--text-accent);
     font-size: 0.85rem;
+  }
+  .setting:last-of-type {
+    border-bottom: 0;
+  }
+  .setting > span {
+    min-width: 0;
+  }
+  @media (max-width: 440px) {
+    .setting {
+      gap: 12px;
+      padding: 16px 12px;
+    }
+    .choice {
+      width: 8rem;
+      max-width: 45%;
+    }
   }
 </style>

@@ -25,11 +25,13 @@
 
 <Seo />
 
+<a class="skip-link" href="#main-content">Skip to content</a>
+
 <div class="app">
   <Header user={data.user} preferences={data.preferences} />
 
   <!-- Focusable from script only, so "Back to top" can move focus here -->
-  <main tabindex="-1">
+  <main id="main-content" tabindex="-1">
     {@render children()}
   </main>
 
@@ -47,11 +49,11 @@
     flex: 1;
     display: flex;
     flex-direction: column;
-    padding: 1rem;
+    padding: 24px 16px;
     /* Room below the content for the floating "Back to top" button, so it never covers a control */
     padding-bottom: calc(1rem + 64px);
     /* Full width, so the anime grid can use wide screens; narrower content centers itself */
-    width: 100%;
+    width: min(100%, 1600px);
     margin: 0 auto;
     box-sizing: border-box;
     outline: none;

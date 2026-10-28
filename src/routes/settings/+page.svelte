@@ -16,14 +16,14 @@
 <style>
   .settings {
     width: 100%;
-    max-width: 36rem;
-    margin: 0 auto;
+    max-width: 40rem;
+    margin: 16px auto 0;
   }
 
   .heading {
     margin-bottom: 20px;
     color: var(--text-heading);
-    font-size: 1.5rem;
-    font-weight: 800;
+    font-size: 1.75rem;
+    font-weight: 600;
   }
 </style>
