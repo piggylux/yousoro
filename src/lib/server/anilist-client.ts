@@ -204,10 +204,25 @@ export async function getWatchingEntries(
       ? data.MediaListCollection.user.mediaListOptions.scoreFormat
       : DEFAULT_SCORE_FORMAT,
     // Custom lists repeat entries that already appear in the status list
-    entries: data.MediaListCollection.lists
-      .filter((list) => !list.isCustomList)
-      .flatMap((list) => list.entries),
+    entries: onePerAnime(
+      data.MediaListCollection.lists
+        .filter((list) => !list.isCustomList)
+        .flatMap((list) => list.entries)
+    ),
   };
+}
+
+/**
+ * AniList can hold two entries for one anime, as when another site imports a list twice at once.
+ * The one updated last stands for it, in the place of the first
+ */
+function onePerAnime(entries: AniListEntry[]): AniListEntry[] {
+  const byAnime = new Map<number, AniListEntry>();
+  for (const entry of entries) {
+    const kept = byAnime.get(entry.media.id);
+    if (!kept || entry.updatedAt > kept.updatedAt) byAnime.set(entry.media.id, entry);
+  }
+  return [...byAnime.values()];
 }
 
 /**
