@@ -3,7 +3,17 @@ export const SITE_NAME = 'Yousoro';
 export const HOME_TITLE = 'Yousoro | Anime Tracker & AniList Episode Calendar';
 export const SITE_DESCRIPTION =
   'Track your AniList anime watching list, catch up on aired episodes, and plan your next watch with an episode calendar. Keep your anime on course with Yousoro.';
-export const SHARE_IMAGE = `${SITE_ORIGIN}/android-chrome-512x512.png`;
+
+/** Link previews are drawn at the size social sites show large, by src/lib/server/preview-image.ts */
+export const PREVIEW_IMAGE_SIZE = { width: 1200, height: 630 } as const;
+/** The site's own link preview, for pages that don't draw one of their own */
+export const SHARE_IMAGE = `${SITE_ORIGIN}/preview.png`;
+const SHARE_IMAGE_ALT = 'Yousoro: keep up with what you watch';
+
+/** The link preview of a list, drawn from its public AniList entries */
+export function listPreviewImage(username: string): string {
+  return `${SITE_ORIGIN}/user/anilist/${encodeURIComponent(username)}/preview.jpg`;
+}
 
 type SeoUrl = Pick<URL, 'pathname' | 'origin'> & {
   searchParams: Pick<URLSearchParams, 'get'>;
@@ -14,6 +24,7 @@ export function getPageSeo(url: SeoUrl, status = 200, resolvedUsername?: string)
   let title = SITE_NAME;
   let description = SITE_DESCRIPTION;
   let canonical: string | undefined;
+  let image = { url: SHARE_IMAGE, type: 'image/png', alt: SHARE_IMAGE_ALT };
   const home = path === '/home';
   if (status >= 400) title = `${status} | ${SITE_NAME}`;
   else if (home) {
@@ -28,7 +39,7 @@ export function getPageSeo(url: SeoUrl, status = 200, resolvedUsername?: string)
       try {
         username = decodeURIComponent(match[1]);
       } catch {
-        return { title, description, canonical, noindex: true, home: false };
+        return { title, description, canonical, image, noindex: true, home: false };
       }
       // AniList returns its canonical spelling even when the requested name uses another case.
       username = resolvedUsername || username;
@@ -41,6 +52,11 @@ export function getPageSeo(url: SeoUrl, status = 200, resolvedUsername?: string)
         description = `Explore ${username}'s AniList watching list on Yousoro. See aired anime episodes, catch-up progress, and upcoming release dates.`;
         // The calendar and filtered views are alternate presentations of this public list.
         canonical = `${SITE_ORIGIN}/user/anilist/${encodeURIComponent(username)}`;
+        image = {
+          url: listPreviewImage(username),
+          type: 'image/jpeg',
+          alt: `${username}'s anime watching list`,
+        };
       }
     }
   }
@@ -48,6 +64,7 @@ export function getPageSeo(url: SeoUrl, status = 200, resolvedUsername?: string)
     title,
     description,
     canonical,
+    image,
     noindex: !canonical || status !== 200 || url.origin !== SITE_ORIGIN,
     home: home && status === 200,
   };

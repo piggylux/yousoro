@@ -6,6 +6,7 @@ import {
   getPageSeo,
   HOME_TITLE,
   jsonLdScript,
+  listPreviewImage,
   serializeJsonLd,
   SHARE_IMAGE,
   SITE_ORIGIN,
@@ -50,6 +51,34 @@ describe('search metadata', () => {
       `${SITE_ORIGIN}/user/anilist/Show%20%26%20Friends`
     );
     expect(getPageSeo(url, 404, 'Show & Friends').canonical).toBeUndefined();
+  });
+
+  it('previews a list and its calendar with the list’s own image, under its resolved name', () => {
+    for (const query of ['', '?view=calendar']) {
+      const seo = getPageSeo(
+        new URL(`${SITE_ORIGIN}/user/anilist/showfan${query}`),
+        200,
+        'Show Fan'
+      );
+      expect(seo.image).toEqual({
+        url: `${SITE_ORIGIN}/user/anilist/Show%20Fan/preview.jpg`,
+        type: 'image/jpeg',
+        alt: "Show Fan's anime watching list",
+      });
+    }
+  });
+
+  it.each(['/home', '/settings', '/user/anilist/fixture/friends'])(
+    'previews other pages with the site’s image: %s',
+    (path) => {
+      expect(getPageSeo(new URL(`${SITE_ORIGIN}${path}`)).image.url).toBe(SHARE_IMAGE);
+    }
+  );
+
+  it('falls back to the site’s image for a list that failed to load', () => {
+    expect(getPageSeo(new URL(`${SITE_ORIGIN}/user/anilist/fixture`), 404).image.url).toBe(
+      SHARE_IMAGE
+    );
   });
 
   it.each([
@@ -105,8 +134,15 @@ describe('search metadata', () => {
     expect(robots).toContain(`Sitemap: ${SITE_ORIGIN}/sitemap.xml`);
     expect(robots).not.toContain('Disallow: /settings');
     expect(manifest.start_url).toBe('/home');
-    expect(
-      readFileSync(new URL(`../../static${new URL(SHARE_IMAGE).pathname}`, import.meta.url)).length
-    ).toBeGreaterThan(0);
+    // Both preview images are drawn by a route of the same path
+    for (const image of [SHARE_IMAGE, listPreviewImage('fixture')]) {
+      const route = new URL(image).pathname.replace(
+        '/user/anilist/fixture/',
+        '/user/[domain]/[username]/'
+      );
+      expect(
+        readFileSync(new URL(`../routes${route}/+server.ts`, import.meta.url), 'utf8')
+      ).toContain('export const GET');
+    }
   });
 });

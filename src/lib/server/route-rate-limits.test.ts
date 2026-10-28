@@ -41,6 +41,7 @@ beforeEach(async () => {
 function event(isDataRequest = false) {
   return {
     params: { domain: 'anilist', username: 'Fixture' },
+    route: { id: '/user/[domain]/[username]' },
     locals: {
       session: {
         token: 'fixture.token.signature',
