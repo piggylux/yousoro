@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { imageFallback } from '#lib/image-fallback.js';
   import type { SharedAnime } from '#lib/types/friend-watching.js';
   let {
     anime,
@@ -31,7 +32,7 @@
       alt=""
       loading="lazy"
       class:blurred={anime.isAdult && blurMature}
-      onerror={() => (failed = true)}
+      {@attach imageFallback(() => (failed = true))}
     />
   {:else}<span class="poster-initial" aria-hidden="true">{anime.title.charAt(0)}</span>{/if}
   <span class="episode">{anime.rewatching ? '↻ ' : ''}Ep {anime.progress}</span>

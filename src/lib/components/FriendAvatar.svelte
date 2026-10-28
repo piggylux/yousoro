@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { imageFallback } from '#lib/image-fallback.js';
+
   let {
     name,
     avatarUrl,
@@ -18,7 +20,7 @@
 
 <span class="avatar" style={`--avatar-size: ${size}px`} aria-hidden="true">
   {#if avatarUrl && !failed}
-    <img src={avatarUrl} alt="" loading="lazy" onerror={() => (failed = true)} />
+    <img src={avatarUrl} alt="" loading="lazy" {@attach imageFallback(() => (failed = true))} />
   {:else}
     <span>{name.charAt(0).toUpperCase()}</span>
   {/if}

@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { CalendarEpisode } from '#lib/calendar.js';
   import { clock } from '#lib/clock.js';
+  import { imageFallback } from '#lib/image-fallback.js';
   let { entry, blurMature = true }: { entry: CalendarEpisode; blurMature?: boolean } = $props();
   const aired = $derived(entry.airsAt <= clock.now);
   let failed = $state(false);
@@ -22,7 +23,7 @@
         src={entry.anime.thumbnailUrl}
         alt=""
         loading="lazy"
-        onerror={() => (failed = true)}
+        {@attach imageFallback(() => (failed = true))}
       />{:else}<span class="fallback" aria-hidden="true">{entry.anime.title.charAt(0)}</span>{/if}
     {#if entry.anime.isAdult && blurMature}<span class="mature">18+</span>{/if}
   </span>

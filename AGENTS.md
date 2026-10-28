@@ -22,6 +22,10 @@ here; keep `README.md` focused on the product and getting started.
   variants of the same control into individual pages or dialogs.
 - Prefer the existing stack and dependencies when they meet the need. Justify additions with a
   concrete benefit and account for their maintenance cost.
+- For image fallbacks, use `imageFallback` from `#lib/image-fallback.js` with `{@attach ...}`.
+  Svelte emits inline SSR event attributes for declarative image `onload`/`onerror` handlers and
+  `use:` actions, which the script CSP blocks. Preserve the CSP and handle pre-hydration failures
+  in the shared attachment instead.
 
 ## Visual direction
 

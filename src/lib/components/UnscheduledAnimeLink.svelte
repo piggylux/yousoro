@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { imageFallback } from '#lib/image-fallback.js';
   import type { Anime } from '#lib/types/anime.js';
 
   let { anime, blurMature = true }: { anime: Anime; blurMature?: boolean } = $props();
@@ -26,7 +27,12 @@
 >
   <span class="poster" class:blurred={anime.isAdult && blurMature}>
     {#if anime.thumbnailUrl && !failed}
-      <img src={anime.thumbnailUrl} alt="" loading="lazy" onerror={() => (failed = true)} />
+      <img
+        src={anime.thumbnailUrl}
+        alt=""
+        loading="lazy"
+        {@attach imageFallback(() => (failed = true))}
+      />
     {:else}<span class="initial" aria-hidden="true">{anime.title.charAt(0)}</span>{/if}
     {#if anime.isAdult && blurMature}<span class="mature">18+</span>{/if}
   </span>
