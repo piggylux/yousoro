@@ -68,9 +68,11 @@ describe('getWatchState', () => {
 describe('getEpisodeToSearch', () => {
   it.each([
     [{ currentEpisode: 3, numberAiredEpisodes: 5 }, 4],
-    [{ currentEpisode: 5, numberAiredEpisodes: 5 }, 6],
-    [{ currentEpisode: 5, numberAiredEpisodes: 5, rewatching: true }, 6],
-    [{ currentEpisode: 6, numberAiredEpisodes: 5 }, 7],
+    // Caught up, the next episode isn't out, so the latest one is
+    [{ currentEpisode: 5, numberAiredEpisodes: 5 }, 5],
+    [{ currentEpisode: 5, numberAiredEpisodes: 5, rewatching: true }, 5],
+    // Watched one AniList doesn't count yet, so it's out
+    [{ currentEpisode: 6, numberAiredEpisodes: 5 }, 6],
     [{ currentEpisode: 0, numberAiredEpisodes: 3 }, 1],
     [{ currentEpisode: 12, numberEpisodes: 12, numberAiredEpisodes: 12 }, null],
     [{ currentEpisode: 12, numberEpisodes: 12, numberAiredEpisodes: 13 }, null],

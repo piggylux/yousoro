@@ -64,11 +64,15 @@ export function getWatchState(anime: Anime): WatchState {
   }
 }
 
-/** Search the next episode on any list, including caught-up shows, but never completed ones. */
+/**
+ * Search the next episode on any list, but never completed shows. Once caught up, the next one
+ * isn't out yet, as AniList counting it aired makes the show one behind, so search the latest
+ * episode out instead: the one the user watched last
+ */
 export function getEpisodeToSearch(anime: Anime): number | null {
   const state = getWatchState(anime);
-  if (state === 'to-watch' || (state === 'caught-up' && anime.currentEpisode > 0))
-    return anime.currentEpisode + 1;
+  if (state === 'to-watch') return anime.currentEpisode + 1;
+  if (state === 'caught-up') return anime.currentEpisode;
   return null;
 }
 
