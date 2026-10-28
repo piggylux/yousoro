@@ -658,23 +658,21 @@
     padding-inline: 16px;
   }
 
+  /*
+   * The user row sits at the top, not centred on the backlog banner beside it, so it stays in place
+   * when switching to the calendar, which has no banner
+   */
   .profile-bar {
     display: flex;
     flex-wrap: wrap;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
     gap: 16px 28px;
     margin-bottom: 24px;
   }
-  /*
-   * The same user row as the list, only laid out for the calendar: no backlog banner beside it,
-   * and aligned with the calendar's width
-   */
+  /* The calendar's own heading follows, closer than the list's search and filters */
   .calendar-profile {
-    justify-content: flex-start;
-    max-width: 1500px;
-    margin: 0 auto 12px;
-    width: 100%;
+    margin-bottom: 12px;
   }
 
   .profile {

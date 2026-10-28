@@ -395,11 +395,10 @@
 />
 
 <style>
+  /* As wide as the list, so the page doesn't shift when switching between them */
   .calendar {
     container: schedule / inline-size;
     width: 100%;
-    max-width: 1500px;
-    margin: 0 auto;
   }
   .calendar-heading,
   .week-summary {
