@@ -29,23 +29,28 @@ const SUKEBEI_LANGUAGE_TERMS: Record<DownloadLanguage, string> = {
   french: '',
 };
 
+/*
+ * Web releases with several audio tracks say "MULTi … Multi-Audio", but `multi` alone also finds
+ * the many "Multi-Subs" releases, which only have subtitles; French ones always add VF. A French
+ * MULTi release lists VOSTFR as well, for its subtitles, so a dub can't exclude VOSTFR
+ */
 const TERMS: Record<DownloadLanguage, Record<DownloadVersion, string>> = {
   any: {
     any: '',
     subbed: '-dub -dubbed -vf',
-    dubbed: '(dub|dubbed|(dual audio)|vf|multi)',
-    'dual-audio': '((dual audio)|multi)',
+    dubbed: '(dub|dubbed|(dual audio)|(multi audio)|vf)',
+    'dual-audio': '((dual audio)|(multi audio)|(multi vf))',
   },
   english: {
     any: '',
     subbed: '-dub -dubbed',
-    dubbed: '(dub|dubbed|(dual audio))',
-    'dual-audio': '(dual audio)',
+    dubbed: '(dub|dubbed|(dual audio)|(multi audio))',
+    'dual-audio': '((dual audio)|(multi audio))',
   },
   french: {
     any: '(vostfr|vf|vff|french|multi)',
     subbed: 'vostfr',
-    dubbed: '(vf|vff|multi) -vostfr',
+    dubbed: '(vf|vff|multi)',
     'dual-audio': 'multi',
   },
 };
@@ -70,12 +75,22 @@ const ROMAN_NUMERALS: Record<string, number> = {
   VIII: 8,
   IX: 9,
 };
-// The search stops growing at this many characters of phrases, as they're sent in the link, where
-// quotes, "|" and accented letters take several characters each: much longer, and nyaa.si can take
-// too long to answer
-const MAX_ENCODED_CHARS = 600;
+// Bound the entire encoded query, including filters, and the number of OR clauses. nyaa.si takes
+// about a quarter of a second more for each phrase it hasn't cached: 10 phrases take about 2s
+export const NYAA_MAX_QUERY_LENGTH = 480;
+export const NYAA_SEARCH_TIMEOUT_MS = 12000;
+export const NYAA_ATTEMPT_TIMEOUT_MS = 6000;
+export const NYAA_CLIENT_TIMEOUT_MS = 15000;
+// AniList is asked about a series' other entries for this long at most, out of the search's time.
+// A slower answer is still cached for the next search
+export const NYAA_SERIES_LOOKUP_MS = 2500;
+const MAX_PHRASES = 10;
+// When nyaa.si is too slow for a search, the same search with only its first few phrases may
+// still answer in time
+const LIGHTER_PHRASES = 3;
 
-const encodedLength = (text: string) => new URLSearchParams([['q', text]]).toString().length - 2;
+export const nyaaQueryLength = (text: string) =>
+  new URLSearchParams([['q', text]]).toString().length - 2;
 
 function ordinal(n: number) {
   const suffix = n % 100 >= 11 && n % 100 <= 13 ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] ?? 'th');
@@ -104,81 +119,103 @@ function splitSeason(title: string): { base: string; season: number; guessed: bo
 
 /**
  * A title ready to go in a phrase: accents in one piece (as release names have them), without a
- * part in another script, and without quotes, which would end the phrase early
+ * part in another script, and without quotes, which would end the phrase early. Without square
+ * brackets too, which release names keep for groups and tags: "[Oshi no Ko]" is "Oshi no Ko"
  */
 function cleanTitle(title: string) {
   return title
     .normalize('NFC')
     .replace(NON_LATIN_BRACKETS, '')
-    .replace(/["\\]/g, ' ')
+    .replace(/["\\[\]]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
-const withoutPunctuation = (title: string) => title.replace(/['’`:;,.!?()[\]{}]/g, '');
+// Also without dashes around words, as in "Re:ZERO -Starting Life in Another World-", but keeping
+// the ones inside a word, as in "Shangri-La"
+const withoutPunctuation = (title: string) =>
+  title.replace(/['’`:;,.!?()[\]{}]/g, '').replace(/(^|\s)[-–—]+|[-–—]+(?=\s|$)/g, '$1');
 
 /*
  * Every phrase that could name the episode is ranked by how likely release names are to use it,
- * and the search keeps the most likely ones that fit in MAX_ENCODED_CHARS. The main titles are the
- * romaji and the English one; an anime can have many other titles, as Pokémon Horizons has one
- * per arc, and those come last
+ * and the search keeps the most likely ones that fit in NYAA_MAX_QUERY_LENGTH. The main titles are
+ * the romaji and the English one; an anime can have many other titles, as Pokémon Horizons has one
+ * per arc, and those come last. The order follows which phrases matched recent nyaa.si releases:
+ * fansubs write "Title - 05", web releases "Title S01E05", and hardly any "Title 05"
  */
 const enum Rank {
   /**
-   * A main title as written, with the episode number: "Title - 05", "Title 05", and with its
-   * season as "S3", as SubsPlease, one of the most common groups, names seasons: "Title S3 - 05"
+   * A main title as written, with a dash and the episode number: "Title - 05", and with its season
+   * as "S3", as SubsPlease, one of the most common groups, names seasons: "Title S3 - 05"
    */
   Number,
-  /** The same with an episode code: "Title - S02E05", "Title S02E05" */
+  /** The same with an episode code: "Title S02E05", "Title - S02E05" */
   Code,
-  /** A main title in brackets after another title: "Pokémon Horizons (Pocket Monsters 2023) - 152" */
-  Bracketed,
-  /** A main title without punctuation, which release names often drop: "My Girlfriends Friend" */
+  /** A main title without punctuation, which web releases often drop: "My Girlfriends Friend" */
   Unpunctuated,
   /** The other ways of writing a season ("Season 2", "2nd Season"), and guessed seasons */
   Season,
+  /** A main title in brackets after another title: "Pokémon Horizons (Pocket Monsters 2023) - 152" */
+  Bracketed,
+  /** The episode number without a dash: "Title 05" */
+  Dashless,
   /** Another title, with the episode number */
   Other,
+  /** Unpadded single-digit episodes are less common, but some groups use them. */
+  Unpadded,
 }
 
 /**
- * The exact phrases that name one episode, most likely first, as many as fit in the budget. Each
+ * Candidate exact phrases that name one episode, most likely first. Each
  * ends with the episode number or code, with or without a dash, as release names write it
  */
-function episodePhrases(titles: { main: string[]; other: string[] }, episode: number): string[] {
+function episodePhrases(
+  titles: { main: string[]; other: string[]; arc?: { title: string; episode: number } },
+  episode: number
+) {
   /*
-   * By lowercase phrase, so each phrase is kept once, at its best rank. Within a rank, the forms
-   * with a dash come before the ones without, for every title in turn, so a long title can't use
-   * up the budget before the other title gets its most likely form
+   * By lowercase phrase, so each phrase is kept once, at its best rank. Within a rank, the more
+   * common layout comes first for every title in turn, so a long title can't use up the budget
+   * before the other title gets its most likely form
    */
   const candidates = new Map<
     string,
-    { phrase: string; rank: Rank; dashless: boolean; order: number }
+    { phrase: string; rank: Rank; secondary: boolean; order: number }
   >();
-  const add = (rank: Rank, phrase: string, dashless = false) => {
+  const add = (rank: Rank, phrase: string, secondary = false) => {
     const key = phrase.toLowerCase();
     const known = candidates.get(key);
     if (known && known.rank <= rank) return;
-    candidates.set(key, { phrase, rank, dashless, order: known?.order ?? candidates.size });
+    candidates.set(key, { phrase, rank, secondary, order: known?.order ?? candidates.size });
   };
-  const withNumber = (rank: Rank, name: string) => {
-    add(rank, `"${name} - ${pad(episode)}"`);
-    add(rank, `"${name} ${pad(episode)}"`, true);
+  const withNumber = (rank: Rank, name: string, secondary = false) => {
+    add(rank, `"${name} - ${pad(episode)}"`, secondary);
+    add(rank > Rank.Dashless ? rank : Rank.Dashless, `"${name} ${pad(episode)}"`, true);
+    if (episode < 10) {
+      add(Rank.Unpadded, `"${name} - ${episode}"`);
+      add(Rank.Unpadded, `"${name} ${episode}"`, true);
+    }
   };
+  // Without a dash first, as web releases write codes: "Title S02E05 1080p WEB-DL"
   const withCode = (rank: Rank, name: string, season: number) => {
     const code = `S${pad(season)}E${pad(episode)}`;
-    add(rank, `"${name} - ${code}"`);
-    add(rank, `"${name} ${code}"`, true);
+    add(rank, `"${name} ${code}"`);
+    add(rank, `"${name} - ${code}"`, true);
   };
 
-  for (const title of titles.main.map(cleanTitle)) {
-    for (const [spelling, asWritten] of [
-      [title, true],
-      [cleanTitle(withoutPunctuation(title)), false],
-    ] as const) {
+  // Spelling by spelling, for every title in turn, as for the layouts within a rank
+  const spellings = titles.main.map((title) => titleSpellings(cleanTitle(title)));
+  for (let index = 0; index < Math.max(...spellings.map(({ length }) => length)); index++) {
+    for (const [titleIndex, spelling] of spellings.map((each) => each[index]).entries()) {
+      const asWritten = index === 0;
       if (!spelling || !LATIN_TITLE.test(spelling)) continue;
 
-      withNumber(asWritten ? Rank.Number : Rank.Unpunctuated, spelling);
+      // Other spellings of the English title are mostly web releases', which write a code
+      withNumber(
+        asWritten ? Rank.Number : Rank.Unpunctuated,
+        spelling,
+        !asWritten && titleIndex > 0
+      );
       // A title with brackets of its own is put in brackets without them
       if (!/[()]/.test(spelling)) add(Rank.Bracketed, `"(${spelling}) - ${pad(episode)}"`);
 
@@ -203,26 +240,42 @@ function episodePhrases(titles: { main: string[]; other: string[] }, episode: nu
       }
     }
   }
+  // The first part's title with the episode numbered on from it, as many release names number a
+  // split series: "Kusuriya no Hitorigoto - 52" for the third season's fourth episode. Other
+  // layouts and spellings of it found few releases, and took the place of ones that found more
+  if (titles.arc) {
+    const title = cleanTitle(titles.arc.title);
+    if (LATIN_TITLE.test(title)) add(Rank.Number, `"${title} - ${pad(titles.arc.episode)}"`);
+  }
   for (const title of titles.other.map(cleanTitle)) {
-    for (const spelling of [title, cleanTitle(withoutPunctuation(title))]) {
+    for (const spelling of titleSpellings(title)) {
       if (spelling && LATIN_TITLE.test(spelling)) withNumber(Rank.Other, spelling);
     }
   }
 
-  const ranked = [...candidates.values()].sort(
-    (a, b) => a.rank - b.rank || Number(a.dashless) - Number(b.dashless) || a.order - b.order
+  return [...candidates.values()].sort(
+    (a, b) => a.rank - b.rank || Number(a.secondary) - Number(b.secondary) || a.order - b.order
   );
-  const kept: string[] = [];
-  let length = 0;
-  for (const { phrase } of ranked) {
-    // Counting the "|" between phrases. A phrase too long for what's left is skipped, so shorter
-    // ones after it still get in; the most likely phrase is always kept
-    const cost = encodedLength(phrase) + encodedLength('|');
-    if (kept.length > 0 && length + cost > MAX_ENCODED_CHARS) continue;
-    kept.push(phrase);
-    length += cost;
-  }
-  return kept;
+}
+
+function titleSpellings(title: string): string[] {
+  const plain = cleanTitle(withoutPunctuation(title));
+  return [
+    ...new Set([
+      title,
+      // A symbol between words is a dash or a space: "Yu☆Gi☆Oh!" is "Yu-Gi-Oh!", "Lucky☆Star" is
+      // "Lucky Star". Not one ending a title, which can tell it from another: "Gintama°"
+      cleanTitle(title.replace(/(?<=\p{L})\p{So}+(?=\p{L})/gu, '-')),
+      cleanTitle(title.replace(/(?<=\p{L})\p{So}+(?=\p{L})/gu, ' ')),
+      // A dash inside a word may be a space instead, as in "Bleach: Sennen Kessen Hen - Kashin Tan"
+      title.replace(/(?<=\p{L})-(?=\p{L})/gu, ' '),
+      plain,
+      // A colon inside a word may be a space instead: "Re:ZERO" is also "Re ZERO"
+      cleanTitle(withoutPunctuation(title.replace(/(?<=\p{L}):(?=\p{L})/gu, ' '))),
+      plain.normalize('NFD').replace(/\p{M}/gu, ''),
+      cleanTitle(plain.replace(/[-–—]/g, ' ')),
+    ]),
+  ];
 }
 
 export type NyaaSearch = {
@@ -238,45 +291,240 @@ export type NyaaSearch = {
   version?: DownloadVersion;
   /** Marked as adult on AniList, which searches sukebei.nyaa.si instead */
   adult?: boolean;
+  /** The anime's AniList id, which the server looks up the series' other entries with */
+  mediaId?: number;
 };
 
 /**
- * The nyaa.si category and query for one episode. Each spelling of the title is an exact phrase
- * that ends with the episode number, laid out the ways release names write it ("Title - 05",
- * "Title 05", "(Title) - 05"), so another season ("Title S2 - 05") or a longer title that starts
- * the same way doesn't match.
+ * The first part of a series AniList splits in several entries, and how many episodes come before
+ * this one, as many release names number episodes on from earlier parts: the fourth part of
+ * Bleach: Thousand-Year Blood War starts at episode 41
  */
-export function nyaaQuery({
-  query: customQuery,
-  title,
-  englishTitle,
-  otherTitles = [],
-  episode,
-  language = 'any',
-  version = 'any',
-  adult = false,
-}: NyaaSearch): { category: string; query: string } {
+export type NyaaArc = { offset: number; title: string };
+
+/** What a search learns from the anime's other AniList entries, which the server looks up */
+export type NyaaSeries = { arc: NyaaArc | null; related: string[] };
+
+/**
+ * A search for the packs of an older series, and the episode they need to include: its number
+ * in its own season, and in the whole series when it's numbered on from earlier parts
+ */
+export type NyaaPacks = { query: string; episode: number; season: number; seriesEpisode?: number };
+
+export type NyaaQueryPlan = {
+  category: string;
+  /** The most likely phrases */
+  query: string;
+  /** Only the first few phrases of `query`, to try instead when nyaa.si takes too long to answer */
+  lighter?: string;
+  /** The next most likely phrases, to try when `query` finds nothing */
+  broader?: string;
+  /**
+   * The words of the series' first part and the episode's number in the whole series, for names no
+   * phrase can match, as "Bleach S17E50" numbers a season TVDB's way. Tried before `broader` when
+   * `query` finds nothing, as words answer fast. nyaa.si matches them loosely, even inside
+   * checksums, so only the releases naming `episode` are kept
+   */
+  wide?: { query: string; episode: number };
+  /**
+   * Last, for a series released in packs, as older ones are: its titles without the episode,
+   * batches allowed, and without the series' other entries whose titles start the same way, as
+   * their newer releases would take every result. Only the packs including the episode are kept
+   */
+  packs?: NyaaPacks;
+};
+
+/**
+ * Bounded queries for one episode. Each spelling of the title is an exact phrase that ends with
+ * the episode number, laid out the ways release names write it ("Title - 05", "Title S01E05",
+ * "Title 05"), so another season ("Title S2 - 05") or a longer title that starts the same way
+ * doesn't match. Oversized/non-Latin titles use a bounded word search instead.
+ */
+export function nyaaQueryPlan(
+  {
+    query: customQuery,
+    title,
+    englishTitle,
+    otherTitles = [],
+    episode,
+    language = 'any',
+    version = 'any',
+    adult = false,
+  }: NyaaSearch,
+  series?: NyaaSeries | null
+): NyaaQueryPlan {
+  const arc = series?.arc;
   const category = adult ? SUKEBEI_ANIME : CATEGORIES[language];
   if (customQuery !== undefined) return { category, query: customQuery.trim() };
   const main = englishTitle ? [title, englishTitle] : [title];
-  const phrases = episodePhrases({ main, other: otherTitles }, episode);
-  // When no title can be spelled in a phrase, its words and the episode number still narrow it
-  // down. Search operators are taken out of them, or "-Title-" would exclude a word
-  const titleQuery = phrases.length
-    ? `(${phrases.join('|')})`
-    : `${cleanTitle(title)
-        .replace(/[|()+~*]/g, ' ')
-        .replace(/(^|\s)-+/g, '$1')
-        .replace(/\s+/g, ' ')
-        .trim()} ${pad(episode)}`;
-  const query = [
-    titleQuery,
-    adult ? SUKEBEI_LANGUAGE_TERMS[language] : '',
-    TERMS[language][version],
-    '-batch',
-  ]
+  const candidates = episodePhrases(
+    {
+      main,
+      other: otherTitles,
+      arc: arc ? { title: arc.title, episode: arc.offset + episode } : undefined,
+    },
+    episode
+  );
+  const terms = [adult ? SUKEBEI_LANGUAGE_TERMS[language] : '', TERMS[language][version]]
     .filter(Boolean)
     .join(' ');
+  const filters = [terms, '-batch'].filter(Boolean).join(' ');
+  const format = (phrases: string[]) => `(${phrases.join('|')}) ${filters}`;
+  const pack = (phrases: string[]) => {
+    const kept: string[] = [];
+    for (const phrase of phrases) {
+      if (kept.length === MAX_PHRASES) break;
+      if (nyaaQueryLength(format([...kept, phrase])) <= NYAA_MAX_QUERY_LENGTH) kept.push(phrase);
+    }
+    return kept;
+  };
+  const first = pack(
+    candidates.filter(({ rank }) => rank !== Rank.Unpadded).map(({ phrase }) => phrase)
+  );
+  if (!first.length) {
+    // No exact phrase fits (or only non-Latin names exist). Keep whole title words, the episode,
+    // and every preference filter. Never let a single huge title bypass the query budget.
+    const words = cleanTitle(title)
+      .replace(/[|()+~*]/g, ' ')
+      .replace(/(^|\s)-+/g, '$1')
+      .split(/\s+/)
+      .filter(Boolean);
+    const kept: string[] = [];
+    for (const word of words) {
+      if (kept.length === 12) break;
+      if (nyaaQueryLength([...kept, word, pad(episode), filters].join(' ')) > NYAA_MAX_QUERY_LENGTH)
+        break;
+      kept.push(word);
+    }
+    // A single unbroken title may itself exceed the budget; shorten it by Unicode code point.
+    if (!kept.length && words[0]) {
+      let prefix = '';
+      for (const character of words[0]) {
+        if (
+          nyaaQueryLength(`${prefix}${character} ${pad(episode)} ${filters}`) >
+          NYAA_MAX_QUERY_LENGTH
+        )
+          break;
+        prefix += character;
+      }
+      kept.push(prefix);
+    }
+    return { category, query: [...kept, pad(episode), filters].filter(Boolean).join(' ') };
+  }
+  // Give alternate names a chance before filling the fallback with remaining main-title forms.
+  const aliases = candidates
+    .filter(({ rank, secondary }) => rank === Rank.Other && !secondary)
+    .slice(0, 2);
+  const remaining = [...aliases, ...candidates].filter(({ phrase }) => !first.includes(phrase));
+  const broader = pack([...new Set(remaining.map(({ phrase }) => phrase))]);
+  const plan: NyaaQueryPlan = { category, query: format(first) };
+  if (first.length > LIGHTER_PHRASES) plan.lighter = format(first.slice(0, LIGHTER_PHRASES));
+  if (broader.length) plan.broader = format(broader);
+  if (arc) {
+    // A search of its own, as nyaa.si doesn't take a group of words as an alternative to phrases
+    const words = cleanTitle(arc.title)
+      .replace(/[^\p{L}\p{N}]+/gu, ' ')
+      .trim();
+    const query = `(${words} ${arc.offset + episode}) ${filters}`;
+    if (words && LATIN_TITLE.test(words) && nyaaQueryLength(query) <= NYAA_MAX_QUERY_LENGTH)
+      plan.wide = { query, episode: arc.offset + episode };
+  }
+  const packs = packsQuery([...main, ...otherTitles], series?.related ?? [], terms);
+  if (packs) {
+    const season = splitSeason(cleanTitle(title));
+    plan.packs = { query: packs, episode, season: season && !season.guessed ? season.season : 1 };
+    if (arc) plan.packs.seriesEpisode = arc.offset + episode;
+  }
+  return plan;
+}
+
+const titleWords = (title: string) =>
+  title
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean);
+const startsWithWords = (title: string[], start: string[]) =>
+  title.length > start.length && start.every((word, index) => title[index] === word);
+const SEASON_WORD = /^(season|saison|part|cour|the|\d+(st|nd|rd|th)?|s\d+|[ivx]+)$/;
+
+/**
+ * The titles without the episode. A title another starts with is left out, as a franchise's name
+ * ("Yu-Gi-Oh!" for "Yu-Gi-Oh! Duel Monsters") would find all of it. So are the words that go on
+ * the titles in the series' other entries ("GX" in "Yu☆Gi☆Oh! Duel Monsters GX")
+ */
+function packsQuery(titles: string[], related: string[], terms: string): string | null {
+  const names = [...new Set(titles.map(cleanTitle))].filter((title) => LATIN_TITLE.test(title));
+  const kept = names.filter(
+    (title) => !names.some((other) => startsWithWords(titleWords(other), titleWords(title)))
+  );
+  const excluded = new Set<string>();
+  for (const other of related.map(titleWords)) {
+    for (const title of kept.map(titleWords)) {
+      const next = other[title.length];
+      if (next && next.length > 1 && !SEASON_WORD.test(next) && startsWithWords(other, title))
+        excluded.add(`-${next}`);
+    }
+  }
+  const trailing = [terms, ...[...excluded].slice(0, 6)].filter(Boolean).join(' ');
+  // A group of phrases needs something after it, or nyaa.si finds nothing
+  const format = (phrases: string[]) =>
+    trailing ? `(${phrases.join('|')}) ${trailing}` : phrases.join('|');
+  const phrases: string[] = [];
+  const seen = new Set<string>();
+  for (const spelling of kept.flatMap(titleSpellings)) {
+    const phrase = `"${spelling}"`;
+    if (!spelling || !LATIN_TITLE.test(spelling) || seen.has(phrase.toLowerCase())) continue;
+    if (phrases.length === MAX_PHRASES) break;
+    if (nyaaQueryLength(format([...phrases, phrase])) > NYAA_MAX_QUERY_LENGTH) continue;
+    seen.add(phrase.toLowerCase());
+    phrases.push(phrase);
+  }
+  return phrases.length ? format(phrases) : null;
+}
+
+/**
+ * Whether a pack's name includes the episode: a range of episodes that covers it ("001-224",
+ * "Episodes 001 à 049", "001~224"), or a complete series when it has none. Not when the name
+ * says another season, as "S2 (01-48)" numbers its own episodes
+ */
+export function packIncludes(name: string, packs: NyaaPacks): boolean {
+  const seasons = [
+    ...name.matchAll(
+      /(?<![\p{L}\p{N}])(?:S|Season\s*|Saison\s*)0*(\d{1,2})(?![\p{N}E])|(?<!\p{N})(\d{1,2})(?:st|nd|rd|th)\s+Season/giu
+    ),
+  ].map(([, season, ordinal]) => Number(season ?? ordinal));
+  if (seasons.length && !seasons.includes(packs.season)) return false;
+  // Without a season, the range may number the whole series instead
+  const episodes = (seasons.length ? [packs.episode] : [packs.episode, packs.seriesEpisode]).filter(
+    (episode) => episode !== undefined
+  );
+  // From every number, so one ending the title doesn't hide the range: "Kaiju No. 8 - 01-12"
+  const ranges = [
+    ...name.matchAll(
+      /(?<![\p{L}\p{N}.])(?=(\d{1,4})\s*(?:-|~|〜|à|to)\s*(\d{1,4})(?![\p{N}.]))/giu
+    ),
+  ]
+    .map(([, from, to]) => [Number(from), Number(to)])
+    // Not years, as in "(2000-2004)"
+    .filter(([from, to]) => from < to && !(from >= 1900 && to < 2100));
+  if (ranges.length) return ranges.some(([from, to]) => episodes.some((n) => from <= n && n <= to));
+  return /(?<!\p{L})(complete|int[ée]grale|integral)(?!\p{L})|全集/iu.test(name);
+}
+
+/**
+ * Whether a release name numbers the episode, alone or in a code: "- 50", "[50]", "S17E50". Not
+ * when the number is part of another, a checksum ("[50F3DC8F]"), a range ("41-50") or a decimal
+ */
+export function namesEpisode(name: string, episode: number): boolean {
+  return new RegExp(
+    `(?<![\\p{L}\\p{N}])(?<!\\d[.-])(?:S\\d{1,3}E|EP?)?${pad(episode)}(?:v\\d)?(?![\\p{L}\\p{N}]|[.-]\\d)`,
+    'iu'
+  ).test(name);
+}
+
+/** The most likely query; the API may also try the plan's other queries. */
+export function nyaaQuery(search: NyaaSearch): { category: string; query: string } {
+  const { category, query } = nyaaQueryPlan(search);
   return { category, query };
 }
 

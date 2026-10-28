@@ -1,3 +1,4 @@
+import type { NyaaSeries } from '#lib/nyaa.js';
 import { retryAfterSeconds } from '#lib/read-retry.js';
 import { DEFAULT_SCORE_FORMAT, isScoreFormat, type ScoreFormat } from '#lib/score.js';
 import { fingerprint, pauseAniList, takeAniListRequest } from '#lib/server/rate-limit.js';
@@ -262,6 +263,117 @@ export async function getLatestAirings(
     if (airingAt !== null && airingAt > since) latest.set(id, airingAt);
   }
   return latest;
+}
+
+// Earlier parts are finished, so a series' count changes only when AniList's data does
+const seriesCache = new Map<number, { series: NyaaSeries; expiresAt: number }>();
+const ARC_TTL_MS = 24 * 60 * 60 * 1000;
+// Until AniList knows how long an earlier part is, which can be soon after it ends
+const UNKNOWN_LENGTH_TTL_MS = 60 * 60 * 1000;
+// Bleach: Thousand-Year Blood War has four parts; a longer chain is more likely a wrong count
+const MAX_EARLIER_PARTS = 8;
+const SERIES_FORMATS = ['TV', 'TV_SHORT', 'ONA'];
+
+// A title's words, without the punctuation ending them: "Kokurasetai:" and "Kokurasetai?" match
+const titleWords = (title: string) =>
+  title
+    .toLowerCase()
+    .split(/\s+/)
+    .map((word) => word.replace(/[^\p{L}\p{N}]+$/u, ''))
+    .filter(Boolean);
+
+/**
+ * What an anime's search needs from the other entries of its series. `arc` is the first part of
+ * the series it continues, when AniList splits it in several entries, and how many episodes come
+ * before it. Earlier TV parts count while their titles start with the words the anime's title
+ * shares with the part right before it, less any season words, so the 366 episodes of Bleach
+ * don't count for Bleach: Thousand-Year Blood War. Null when there's no earlier part or the count
+ * is uncertain, as a wrong count would find another episode. `related` are the titles of the
+ * series' other TV entries, as "Yu☆Gi☆Oh! Duel Monsters GX" for Yu☆Gi☆Oh! Duel Monsters
+ */
+export async function getSeries(mediaId: number): Promise<NyaaSeries> {
+  const cached = seriesCache.get(mediaId);
+  if (cached && cached.expiresAt > Date.now()) return cached.series;
+  const part = async (id: number) => {
+    const data = await query<{
+      Media: {
+        title: { romaji: string };
+        relations: {
+          edges: {
+            relationType: string;
+            node: {
+              id: number;
+              type: string;
+              format: string | null;
+              episodes: number | null;
+              title: { romaji: string; english: string | null };
+            };
+          }[];
+        };
+      };
+    }>(
+      `query ($id: Int) {
+        Media(id: $id) {
+          title { romaji }
+          relations {
+            edges { relationType node { id type format episodes title { romaji english } } }
+          }
+        }
+      }`,
+      { id },
+      undefined,
+      { optional: true }
+    );
+    const entries = data.Media.relations.edges.filter(
+      ({ node }) => node.type === 'ANIME' && SERIES_FORMATS.includes(node.format ?? '')
+    );
+    return {
+      title: data.Media.title.romaji,
+      earlier: entries
+        .filter(({ relationType }) => relationType === 'PREQUEL')
+        .map(({ node }) => node),
+      related: entries.flatMap(({ node }) => [node.title.romaji, node.title.english ?? []].flat()),
+    };
+  };
+
+  const first = await part(mediaId);
+  let unknownLength = false;
+  const arc = await (async () => {
+    let current = first;
+    if (current.earlier.length !== 1) return null;
+    const words = titleWords(current.title);
+    const before = titleWords(current.earlier[0].title.romaji);
+    const series: string[] = [];
+    while (series.length < words.length && words[series.length] === before[series.length])
+      series.push(words[series.length]);
+    // "SPY×FAMILY Season 3" and "SPY×FAMILY Season 2" are both "SPY×FAMILY"
+    while (series.length && /^(season|part|cour|\d+(st|nd|rd|th)?)$/.test(series.at(-1)!))
+      series.pop();
+    if (!series.length) return null;
+
+    let offset = 0;
+    for (let count = 0; count < MAX_EARLIER_PARTS; count++) {
+      const earlier = current.earlier.filter(({ title }) =>
+        series.every((word, index) => titleWords(title.romaji)[index] === word)
+      );
+      if (!earlier.length) return offset ? { offset, title: current.title } : null;
+      if (earlier.length > 1) return null;
+      if (!earlier[0].episodes) {
+        unknownLength = true;
+        return null;
+      }
+      offset += earlier[0].episodes;
+      current = await part(earlier[0].id);
+    }
+    return null;
+  })();
+  const series = { arc, related: first.related };
+  if (seriesCache.size >= 1000) seriesCache.delete(seriesCache.keys().next().value!);
+  seriesCache.set(mediaId, {
+    series,
+    expiresAt: Date.now() + (unknownLength ? UNKNOWN_LENGTH_TTL_MS : ARC_TTL_MS),
+  });
+  return series;
 }
 
 export type AniListUser = { id: number; name: string; avatarUrl: string | null };

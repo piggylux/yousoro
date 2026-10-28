@@ -5,6 +5,7 @@ import {
   AniListTokenError,
   getFollowing,
   getLatestAirings,
+  getSeries,
   getViewer,
   saveEntry,
 } from '#lib/server/anilist-client.js';
@@ -176,5 +177,135 @@ describe('AniList request protection', () => {
     );
     await expect(getViewer('fixture')).rejects.toBeInstanceOf(AniListRateLimitError);
     expect(pauseAniList).toHaveBeenCalledWith(seconds);
+  });
+});
+
+describe('series', () => {
+  type Part = { title: string; earlier?: [id: number, title: string, episodes: number | null][] };
+  // Answers AniList's relation queries from a chain of parts, by id
+  function serve(parts: Record<number, Part>) {
+    vi.mocked(fetch).mockImplementation(async (_url, init) => {
+      const { id } = JSON.parse(init!.body as string).variables;
+      const { title, earlier = [] } = parts[id];
+      return Response.json({
+        data: {
+          Media: {
+            title: { romaji: title },
+            relations: {
+              edges: [
+                ...earlier.map(([id, title, episodes]) => ({
+                  relationType: 'PREQUEL',
+                  node: { id, type: 'ANIME', format: 'TV', episodes, title: { romaji: title } },
+                })),
+                // Not a TV part of the series, so never counted
+                {
+                  relationType: 'PREQUEL',
+                  node: {
+                    id: 9,
+                    type: 'ANIME',
+                    format: 'MOVIE',
+                    episodes: 1,
+                    title: { romaji: title },
+                  },
+                },
+                {
+                  relationType: 'ADAPTATION',
+                  node: {
+                    id: 8,
+                    type: 'MANGA',
+                    format: 'MANGA',
+                    episodes: null,
+                    title: { romaji: title },
+                  },
+                },
+              ],
+            },
+          },
+        },
+      });
+    });
+  }
+
+  it("counts the earlier parts' episodes back to the first part, but not the original series", async () => {
+    serve({
+      104: {
+        title: 'BLEACH: Sennen Kessen-hen - Kashin-tan',
+        earlier: [[103, 'BLEACH: Sennen Kessen-hen - Soukoku-tan', 14]],
+      },
+      103: {
+        title: 'BLEACH: Sennen Kessen-hen - Soukoku-tan',
+        earlier: [[102, 'BLEACH: Sennen Kessen-hen - Ketsubetsu-tan', 13]],
+      },
+      102: {
+        title: 'BLEACH: Sennen Kessen-hen - Ketsubetsu-tan',
+        earlier: [[101, 'BLEACH: Sennen Kessen-hen', 13]],
+      },
+      101: { title: 'BLEACH: Sennen Kessen-hen', earlier: [[100, 'BLEACH', 366]] },
+    });
+    expect((await getSeries(104)).arc).toEqual({ offset: 40, title: 'BLEACH: Sennen Kessen-hen' });
+    expect(fetch).toHaveBeenCalledTimes(4);
+    // With the titles of the series' other TV entries, not its movies or manga
+    expect((await getSeries(104)).related).toEqual(['BLEACH: Sennen Kessen-hen - Soukoku-tan']);
+    // Kept for the next search
+    expect((await getSeries(104)).arc).toEqual({ offset: 40, title: 'BLEACH: Sennen Kessen-hen' });
+    expect(fetch).toHaveBeenCalledTimes(4);
+  });
+
+  it('leaves out the season words the parts share', async () => {
+    serve({
+      203: { title: 'SPY×FAMILY Season 3', earlier: [[202, 'SPY×FAMILY Season 2', 12]] },
+      202: { title: 'SPY×FAMILY Season 2', earlier: [[201, 'SPY×FAMILY', 25]] },
+      201: { title: 'SPY×FAMILY' },
+    });
+    expect((await getSeries(203)).arc).toEqual({ offset: 37, title: 'SPY×FAMILY' });
+  });
+
+  it.each([
+    ['no earlier part', { 301: { title: 'Dungeon Meshi' } }],
+    [
+      'an unrelated earlier part',
+      { 311: { title: 'Nisemonogatari', earlier: [[310, 'Bakemonogatari', 15]] } },
+    ],
+    [
+      'two earlier parts to choose from',
+      {
+        321: {
+          title: 'Show 2nd Season',
+          earlier: [
+            [320, 'Show', 12],
+            [319, 'Show Recap', 1],
+          ],
+        },
+      },
+    ],
+    [
+      'an earlier part of unknown length',
+      { 331: { title: 'Show 2nd Season', earlier: [[330, 'Show', null]] } },
+    ],
+  ] as [string, Record<number, Part>][])('counts nothing for %s', async (_case, parts) => {
+    serve(parts);
+    expect((await getSeries(Math.max(...Object.keys(parts).map(Number)))).arc).toBeNull();
+  });
+
+  it('asks again within the hour about an earlier part of unknown length', async () => {
+    serve({ 342: { title: 'Show 2nd Season', earlier: [[341, 'Show', null]] } });
+    expect((await getSeries(342)).arc).toBeNull();
+    const now = Date.now();
+    vi.spyOn(Date, 'now').mockReturnValue(now + 61 * 60 * 1000);
+    serve({
+      342: { title: 'Show 2nd Season', earlier: [[341, 'Show', 12]] },
+      341: { title: 'Show' },
+    });
+    expect((await getSeries(342)).arc).toEqual({ offset: 12, title: 'Show' });
+  });
+
+  it('counts nothing for now when AniList has no requests to spare, and asks again later', async () => {
+    serve({
+      402: { title: 'Show 2nd Season', earlier: [[401, 'Show', 12]] },
+      401: { title: 'Show' },
+    });
+    vi.mocked(takeAniListRequest).mockResolvedValueOnce({ allowed: false, retryAfter: 30 });
+    await expect(getSeries(402)).rejects.toBeInstanceOf(AniListRateLimitError);
+    expect((await getSeries(402)).arc).toEqual({ offset: 12, title: 'Show' });
   });
 });

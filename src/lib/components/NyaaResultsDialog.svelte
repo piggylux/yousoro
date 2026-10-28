@@ -1,7 +1,14 @@
 <script lang="ts">
   import CloseButton from '#lib/components/CloseButton.svelte';
   import { closeOnBackdrop } from '#lib/dialog.js';
-  import { nyaaSearchUrl, nyaaSite, type NyaaSearch } from '#lib/nyaa.js';
+  import {
+    nyaaSearchUrl,
+    nyaaSite,
+    nyaaQueryLength,
+    NYAA_MAX_QUERY_LENGTH,
+    NYAA_CLIENT_TIMEOUT_MS,
+    type NyaaSearch,
+  } from '#lib/nyaa.js';
 
   let { search, onclose }: { search: NyaaSearch; onclose: () => void } = $props();
   const heading = $props.id();
@@ -14,9 +21,16 @@
   let attempt = $state(0);
   const suggestedQuery = $derived(`${search.title} ${String(search.episode).padStart(2, '0')}`);
   let queryDraft = $derived(suggestedQuery);
+  const queryTooLong = $derived(nyaaQueryLength(queryDraft.trim()) > NYAA_MAX_QUERY_LENGTH);
   let appliedQuery = $state<string | null>(null);
+  let resolvedQuery = $state<string | null>(null);
+  // No release had the episode alone, so these are packs that include it
+  let inPacks = $state(false);
   const activeSearch = $derived(
     appliedQuery === null ? search : { ...search, query: appliedQuery }
+  );
+  const resultSearch = $derived(
+    resolvedQuery === null ? activeSearch : { ...activeSearch, query: resolvedQuery }
   );
   type Release = {
     id: string;
@@ -48,8 +62,14 @@
     void attempt;
     const selection = activeSearch;
     const controller = new AbortController();
+    const signal = AbortSignal.any([
+      controller.signal,
+      AbortSignal.timeout(NYAA_CLIENT_TIMEOUT_MS),
+    ]);
     loading = true;
     errorMessage = '';
+    resolvedQuery = null;
+    inPacks = false;
     releases = [];
     async function load() {
       try {
@@ -57,13 +77,17 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(selection),
-          signal: controller.signal,
+          signal,
         });
         if (!response.ok)
           throw new Error(
             response.status === 429
               ? 'Too many searches. Please wait before trying again.'
-              : 'Nyaa results are unavailable. Try again or open the search on Nyaa.'
+              : response.status === 504
+                ? 'Nyaa search timed out. Try a shorter query or open the search on Nyaa.'
+                : response.status === 400
+                  ? 'Search query is too long or invalid. Use fewer title words or alternatives.'
+                  : 'Nyaa results are unavailable. Try again or open the search on Nyaa.'
           );
         const xml = new DOMParser().parseFromString(await response.text(), 'application/xml');
         if (
@@ -112,10 +136,19 @@
             },
           ];
         });
-        if (!controller.signal.aborted) releases = rows;
+        if (!controller.signal.aborted) {
+          releases = rows;
+          const query = response.headers.get('X-Nyaa-Query');
+          resolvedQuery = query ? decodeURIComponent(query) : null;
+          inPacks = response.headers.get('X-Nyaa-Packs') === '1';
+        }
       } catch (err) {
         if (!controller.signal.aborted)
-          errorMessage = err instanceof Error ? err.message : 'Could not load Nyaa results.';
+          errorMessage = signal.aborted
+            ? 'Nyaa search timed out. Try a shorter query or open the search on Nyaa.'
+            : err instanceof Error
+              ? err.message
+              : 'Could not load Nyaa results.';
       } finally {
         if (!controller.signal.aborted) loading = false;
       }
@@ -138,7 +171,7 @@
       <h2 id={heading}>{search.title}</h2>
       <p id={`${heading}-description`}>
         {appliedQuery === null ? `Episode ${search.episode}` : 'Custom search'} ·
-        <a href={nyaaSearchUrl(activeSearch)} target="_blank" rel="noreferrer"
+        <a href={nyaaSearchUrl(resultSearch)} target="_blank" rel="noreferrer"
           >Open full search ↗<span class="tw:sr-only"> (opens in a new tab)</span></a
         >
       </p>
@@ -151,7 +184,7 @@
       onsubmit={(event) => {
         event.preventDefault();
         const query = queryDraft.trim();
-        if (!query) return;
+        if (!query || queryTooLong) return;
         appliedQuery = query;
         filter = '';
         attempt++;
@@ -184,8 +217,10 @@
           required
           placeholder="Title, episode or release group…"
           aria-controls={`${heading}-results`}
+          aria-invalid={queryTooLong || undefined}
+          aria-describedby={queryTooLong ? `${heading}-query-length` : undefined}
         />
-        <button class="search-submit" type="submit" disabled={!queryDraft.trim()}>
+        <button class="search-submit" type="submit" disabled={!queryDraft.trim() || queryTooLong}>
           <svg
             width="16"
             height="16"
@@ -200,6 +235,9 @@
           Search
         </button>
       </div>
+      {#if queryTooLong}<p id={`${heading}-query-length`} role="status">
+          This search is too long. Use fewer title words or alternatives.
+        </p>{/if}
     </form>
     <div class="filter">
       <div class="filter-heading">
@@ -274,7 +312,11 @@
       {:else if releases.length === 0}
         <p class="message" role="status">No releases found. Try another search query.</p>
       {:else}
-        <p class="result-order">Newest first · Latest RSS results</p>
+        <p class="result-order">
+          {inPacks
+            ? `No release of episode ${search.episode} alone · Packs that include it`
+            : 'Newest first · Latest RSS results'}
+        </p>
         {#if filteredReleases.length === 0}
           <p class="message">
             No releases match your filter. Try different words or clear the filter.
@@ -398,6 +440,11 @@
     justify-content: space-between;
     gap: 12px;
     margin-bottom: 8px;
+  }
+  .search-form > p {
+    margin-top: 8px;
+    color: var(--text-accent);
+    font-size: 0.8125rem;
   }
   .search-heading {
     min-height: 28px;

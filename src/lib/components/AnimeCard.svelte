@@ -1247,6 +1247,7 @@
                     language: downloadLanguage,
                     version: downloadVersion,
                     adult: anime.isAdult,
+                    mediaId: anime.id,
                   })}
               >
                 <!-- The compact back shortens the visible label; the accessible name keeps the site. -->
