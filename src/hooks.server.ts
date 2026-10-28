@@ -6,6 +6,12 @@ import { getPreferences } from '#lib/server/preferences.js';
 import { getSession } from '#lib/server/session.js';
 import { DEFAULT_PREFERENCES } from '#lib/types/preferences.js';
 
+/**
+ * Link preview images only show public data, whoever asks, and say how long they can be cached.
+ * Matched by the route SvelteKit resolved, so a look-alike path can't borrow their caching
+ */
+const PUBLIC_IMAGE_ROUTES = new Set(['/preview.png', '/user/[domain]/[username]/preview.jpg']);
+
 export const handle: Handle = async ({ event, resolve }) => {
   const url = new URL(event.request.url);
   const path = url.pathname;
@@ -25,10 +31,10 @@ export const handle: Handle = async ({ event, resolve }) => {
   if (getPageSeo(url, response.status).noindex || event.locals.session) {
     response.headers.set('X-Robots-Tag', 'noindex, follow');
   }
-  return secureResponse(response, path);
+  return secureResponse(response, path, PUBLIC_IMAGE_ROUTES.has(event.route.id ?? ''));
 };
 
-function secureResponse(response: Response, path: string) {
+function secureResponse(response: Response, path: string, publicImage: boolean) {
   // No other site may frame these pages, so the progress buttons can't be clickjacked. The
   // Content-Security-Policy, set in vite.config.ts, also forbids framing, for newer browsers.
   response.headers.set('X-Frame-Options', 'DENY');
@@ -38,6 +44,7 @@ function secureResponse(response: Response, path: string) {
     path.startsWith('/auth/') ? 'no-referrer' : 'strict-origin-when-cross-origin'
   );
   // Layouts and data responses vary with cookies, and may contain private AniList entries.
+  if (publicImage) return response;
   response.headers.set('Cache-Control', 'private, no-store');
   response.headers.set('Pragma', 'no-cache');
 

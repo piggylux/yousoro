@@ -13,9 +13,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getSession).mockReturnValue(null);
 });
-function event(path: string, origin = SITE_ORIGIN) {
+function event(path: string, origin = SITE_ORIGIN, routeId: string | null = null) {
   return {
     request: new Request(`${origin}${path}`),
+    route: { id: routeId },
     locals: {},
     getClientAddress: () => '192.0.2.1',
     cookies: { get: () => undefined },
@@ -85,6 +86,40 @@ describe('request security', () => {
         expect(response.headers.get('Referrer-Policy')).toBe('no-referrer');
     }
   );
+
+  it.each([
+    ['/preview.png', '/preview.png'],
+    ['/user/anilist/fixture/preview.jpg', '/user/[domain]/[username]/preview.jpg'],
+  ])(
+    'lets the public preview image %s keep its own caching, even for a signed-in request',
+    async (path, routeId) => {
+      vi.mocked(getSession).mockReturnValue({
+        token: 'fixture',
+        user: { id: 1, name: 'fixture' },
+      } as NonNullable<ReturnType<typeof getSession>>);
+      const response = await handle({
+        event: event(path, SITE_ORIGIN, routeId),
+        resolve: async () =>
+          new Response('image', { headers: { 'Cache-Control': 'public, max-age=3600' } }),
+      });
+      expect(response.headers.get('Cache-Control')).toBe('public, max-age=3600');
+      expect(response.headers.get('X-Frame-Options')).toBe('DENY');
+    }
+  );
+
+  it.each([
+    // Only the route SvelteKit resolved counts, not what the path looks like
+    ['/user/anilist/fixture/preview.jpg', '/user/[domain]/[username]'],
+    ['/user/anilist/fixture/friends', '/user/[domain]/[username]/friends'],
+    ['/preview.png/x', null],
+  ])('keeps other routes private, whatever their path: %s', async (path, routeId) => {
+    const response = await handle({
+      event: event(path, SITE_ORIGIN, routeId),
+      resolve: async () =>
+        new Response('fixture', { headers: { 'Cache-Control': 'public, max-age=3600' } }),
+    });
+    expectPrivate(response);
+  });
 
   it('emits the combined Retry-After once after the action and load', async () => {
     const request = event('/user/anilist/fixture');

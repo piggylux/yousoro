@@ -1,7 +1,13 @@
 <script lang="ts">
   import { page } from '$app/state';
 
-  import { getPageSeo, jsonLdScript, SHARE_IMAGE, SITE_NAME, WEBSITE_SCHEMA } from '#lib/seo.js';
+  import {
+    getPageSeo,
+    jsonLdScript,
+    PREVIEW_IMAGE_SIZE,
+    SITE_NAME,
+    WEBSITE_SCHEMA,
+  } from '#lib/seo.js';
 
   const resolvedUsername = $derived(
     typeof page.data.username === 'string' ? page.data.username : undefined
@@ -24,16 +30,16 @@
   <meta property="og:title" content={seo.title} />
   <meta property="og:description" content={seo.description} />
   {#if seo.canonical}<meta property="og:url" content={seo.canonical} />{/if}
-  <meta property="og:image" content={SHARE_IMAGE} />
-  <meta property="og:image:type" content="image/png" />
-  <meta property="og:image:width" content="512" />
-  <meta property="og:image:height" content="512" />
-  <meta property="og:image:alt" content="Yousoro logo" />
-  <meta name="twitter:card" content="summary" />
+  <meta property="og:image" content={seo.image.url} />
+  <meta property="og:image:type" content={seo.image.type} />
+  <meta property="og:image:width" content={String(PREVIEW_IMAGE_SIZE.width)} />
+  <meta property="og:image:height" content={String(PREVIEW_IMAGE_SIZE.height)} />
+  <meta property="og:image:alt" content={seo.image.alt} />
+  <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content={seo.title} />
   <meta name="twitter:description" content={seo.description} />
-  <meta name="twitter:image" content={SHARE_IMAGE} />
-  <meta name="twitter:image:alt" content="Yousoro logo" />
+  <meta name="twitter:image" content={seo.image.url} />
+  <meta name="twitter:image:alt" content={seo.image.alt} />
   {#if seo.home}
     {@html jsonLdScript(WEBSITE_SCHEMA)}
   {/if}

@@ -26,6 +26,7 @@
   import FriendsWatchingLoader from '#lib/components/FriendsWatchingLoader.svelte';
   import ListFilters from '#lib/components/ListFilters.svelte';
   import ScorePrompt from '#lib/components/ScorePrompt.svelte';
+  import ShareButton from '#lib/components/ShareButton.svelte';
   import YousoroCelebration from '#lib/components/YousoroCelebration.svelte';
   import { flippedCard } from '#lib/flipped-card.svelte.js';
   import { recordOwnWatchingEntry, seedOwnAnime, withoutListOwner } from '#lib/friend-watching.js';
@@ -39,6 +40,17 @@
 
   let { data }: { data: AnimePageData } = $props();
   const calendarView = $derived(page.url.searchParams.get('view') === 'calendar');
+
+  // The view being looked at, as anyone would see it: without the viewer's filters or search
+  const share = $derived.by(() => {
+    const view = calendarView ? 'calendar' : 'list';
+    const path = `/user/anilist/${encodeURIComponent(data.username)}`;
+    return {
+      url: `${page.url.origin}${path}${calendarView ? '?view=calendar' : ''}`,
+      title: `${data.canEdit ? 'My' : `${data.username}'s`} anime ${view} on Yousoro`,
+      subject: `${data.canEdit ? 'your' : `${data.username}'s`} ${view}`,
+    };
+  });
 
   let friendMatches = $state<FriendWatchingResult | null>(null);
   const visibleFriendMatches = $derived(
@@ -373,13 +385,16 @@
         <img class="avatar-img" src={data.avatarUrl} alt={`${data.username}'s profile picture`} />
       {/if}
       <div>
-        {#if calendarView}
-          <span class="name">{data.username}</span>
-        {:else}
-          <h1 class="name">
-            {data.username}<span class="tw:sr-only">'s anime watching list</span>
-          </h1>
-        {/if}
+        <div class="name-row">
+          {#if calendarView}
+            <span class="name">{data.username}</span>
+          {:else}
+            <h1 class="name">
+              {data.username}<span class="tw:sr-only">'s anime watching list</span>
+            </h1>
+          {/if}
+          <ShareButton url={share.url} title={share.title} subject={share.subject} />
+        </div>
         <span class="profile-links">
           <a href={`/user/anilist/${encodeURIComponent(data.username)}/friends`}>Friends</a>
           ·
@@ -684,10 +699,25 @@
     box-shadow: none;
   }
 
+  .profile > div {
+    min-width: 0;
+  }
+
   .name {
     display: block;
+    min-width: 0;
     font-size: 1.25rem;
     font-weight: 700;
+    /* AniList names are one word of up to 20 letters, wider than a phone has room for */
+    overflow-wrap: anywhere;
+  }
+
+  /* A long name wraps the share button onto its own line rather than squeezing either */
+  .name-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: 4px;
   }
 
   .profile-links {

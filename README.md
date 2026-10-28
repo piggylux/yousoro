@@ -21,6 +21,9 @@ shows you're actively watching come first. Once you've watched an episode, mark 
 
 The production origin is `https://yousoro.vercel.app`. Page titles, descriptions, canonical URLs,
 social previews, and home-page structured data are managed in `src/lib/seo.ts` and `Seo.svelte`.
+Preview images are drawn by `src/lib/server/preview-image.ts`: the site's own at `/preview.png`,
+prerendered at build time, and one for each list at `/user/anilist/<name>/preview.jpg`, drawn
+from the public list and cached for an hour.
 If the public domain changes, update `SITE_ORIGIN`, `static/robots.txt`, and `static/sitemap.xml`
 together. The sitemap lists the landing page; public AniList lists can be discovered through links.
 Settings, sign-in, friends, errors, signed-in responses, and non-production hosts use `noindex`.

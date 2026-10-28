@@ -26,6 +26,7 @@ describe('saving settings in a native form submission', () => {
     const event = {
       cookies,
       locals: {},
+      route: { id: '/settings' },
       request: new Request('http://localhost/settings', {
         method: 'POST',
         body: new URLSearchParams({
