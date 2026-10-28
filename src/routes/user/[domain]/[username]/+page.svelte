@@ -666,24 +666,15 @@
     gap: 16px 28px;
     margin-bottom: 24px;
   }
+  /*
+   * The same user row as the list, only laid out for the calendar: no backlog banner beside it,
+   * and aligned with the calendar's width
+   */
   .calendar-profile {
     justify-content: flex-start;
     max-width: 1500px;
     margin: 0 auto 12px;
     width: 100%;
-  }
-  .calendar-profile .avatar-img {
-    width: 44px;
-    height: 44px;
-    box-shadow: none;
-  }
-  .calendar-profile .name {
-    font-size: 1rem;
-  }
-  .calendar-profile .profile-links {
-    font-size: 0.75rem;
-    opacity: 1;
-    color: var(--text-accent);
   }
 
   .profile {
