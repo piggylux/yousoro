@@ -62,12 +62,14 @@ type Joke = string | [toThem: string, aboutThem: string];
 
 /**
  * What a match's percent says, from the closest match down: a few words shown beside it and on
- * its link preview, and jokes made to be shared, one of them for each pair
+ * its link preview, jokes made to be shared, one of them for each pair, and the tone of its final
+ * thought
  */
-const TIERS: { min: number; label: string; jokes: Joke[] }[] = [
+const TIERS: { min: number; label: string; tone: 'close' | 'mixed' | 'rivals'; jokes: Joke[] }[] = [
   {
     min: 95,
     label: 'Same brain cell',
+    tone: 'close',
     jokes: [
       [
         "Are you two sure you're not one person with two accounts?",
@@ -83,6 +85,7 @@ const TIERS: { min: number; label: string; jokes: Joke[] }[] = [
   {
     min: 85,
     label: 'Kindred spirits',
+    tone: 'close',
     jokes: [
       [
         'You two could swap watchlists and nobody would notice. Not even you.',
@@ -98,6 +101,7 @@ const TIERS: { min: number; label: string; jokes: Joke[] }[] = [
   {
     min: 70,
     label: 'Watch-party ready',
+    tone: 'close',
     jokes: [
       'Certified watch-party material. Snacks are on whoever loses the next argument.',
       'Ready for a marathon together, as long as nobody skips the opening.',
@@ -110,6 +114,7 @@ const TIERS: { min: number; label: string; jokes: Joke[] }[] = [
   {
     min: 55,
     label: 'Couch compatible',
+    tone: 'mixed',
     jokes: [
       'Agree enough to share a couch, disagree enough to fight over the remote.',
       'Not quite the main pairing, but the fandom ships it anyway.',
@@ -122,6 +127,7 @@ const TIERS: { min: number; label: string; jokes: Joke[] }[] = [
   {
     min: 40,
     label: 'Friendly rivals',
+    tone: 'mixed',
     jokes: [
       [
         'Rivals who respect each other. Very shōnen of you.',
@@ -134,6 +140,7 @@ const TIERS: { min: number; label: string; jokes: Joke[] }[] = [
   {
     min: 25,
     label: 'Polar opposites',
+    tone: 'rivals',
     jokes: [
       [
         'Your watchlists met once and agreed to stay polite.',
@@ -149,6 +156,7 @@ const TIERS: { min: number; label: string; jokes: Joke[] }[] = [
   {
     min: 0,
     label: 'Sworn rivals',
+    tone: 'rivals',
     jokes: [
       [
         'Every great story needs a rival. You two found yours.',
@@ -189,10 +197,14 @@ export function matchComment(
 
 /*
  * The words a franchise's anime share at the start of their titles, so a sentence doesn't name two
- * seasons of one show: "Steins;Gate" and "Steins;Gate 0". Two unrelated titles that start alike
- * only make it name another anime instead
+ * seasons of one show: "Steins;Gate", "Steins;Gate 0" and "Steins;Gate: Fuka Ryouiki no Déjà vu".
+ * Two unrelated titles that start alike only make it name another anime instead
  */
-const franchise = (anime: ScoredAnime) => anime.title.toLowerCase().split(/\s+/)[0];
+const franchise = (anime: ScoredAnime) =>
+  anime.title
+    .toLowerCase()
+    .split(/\s+/)[0]
+    .replace(/[^\p{L}\p{N}]+$/u, '');
 /** Two titles longer than this together are too much for one sentence: only the first is named */
 const MAX_TITLES_LENGTH = 48;
 /** Titles of later parts: "Season 2", "2nd Season", "Part 2", "II", "R2", "The Final", a movie or an OVA */
@@ -240,14 +252,7 @@ export function finalThought(
   const [first, second] = isViewer(b.name) ? [b, a] : [a, b];
   const pair = `${who(first.name)} and ${second.name}`;
   const Pair = `${Who(first.name)} and ${second.name}`;
-  const tone =
-    match.percent === null
-      ? 'unknown'
-      : match.percent >= 70
-        ? 'close'
-        : match.percent >= 40
-          ? 'mixed'
-          : 'rivals';
+  const tone = match.percent === null ? 'unknown' : tierOf(match.percent).tone;
 
   const loved = lovedTitles(match.bothLoved);
   const agreement =
@@ -281,7 +286,7 @@ export function finalThought(
     choose(
       [
         say`Never bring up ${title(split.anime)} at dinner: ${who(a.name)} gave it ${scoreA}, ${who(b.name)} gave it ${scoreB}, and someone is wrong.`,
-        say`${title(split.anime)} is where this friendship goes to fight, ${scoreA} from ${who(a.name)} against ${scoreB} from ${who(b.name)}.`,
+        say`${title(split.anime)} is where the gloves come off, ${scoreA} from ${who(a.name)} against ${scoreB} from ${who(b.name)}.`,
         say`${title(split.anime)}: ${scoreA} from ${who(a.name)}, ${scoreB} from ${who(b.name)}. Settle it with a rewatch, or a duel.`,
       ],
       2
@@ -291,7 +296,7 @@ export function finalThought(
     split &&
     choose(
       [
-        say`The only crack in this friendship: ${title(split.anime)}, ${scoreA} from ${who(a.name)} against ${scoreB} from ${who(b.name)}.`,
+        say`The only crack in the armor: ${title(split.anime)}, ${scoreA} from ${who(a.name)} against ${scoreB} from ${who(b.name)}.`,
         say`Just never bring up ${title(split.anime)}: ${who(a.name)} gave it ${scoreA}, ${who(b.name)} gave it ${scoreB}.`,
         say`Mostly peaceful, apart from ${title(split.anime)}: ${scoreA} from ${who(a.name)}, ${scoreB} from ${who(b.name)}.`,
       ],
@@ -302,7 +307,7 @@ export function finalThought(
   const nudge =
     match.inCommon === 0
       ? say`Zero anime in common. Either a beautiful friendship is about to begin, or a very long argument.`
-      : say`Not enough shared scores to call it yet. Go score some anime, the fate of this friendship depends on it.`;
+      : say`Not enough shared scores to call it yet. Go score some anime, the fate of this match depends on it.`;
 
   // Homework for the viewer first, or for whoever was compared with the list's owner
   const sides = [

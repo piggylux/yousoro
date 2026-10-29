@@ -135,7 +135,7 @@ describe('final thoughts', () => {
     const sentences = finalThought(match(), alice, bob, voiceFor(null));
     expect(read(sentences)).toBe(
       'Alice and Bob agree Frieren and Mushishi are peak. Nobody tell the comment section. ' +
-        'The only crack in this friendship: Ex-Arm, 8 / 10 from Alice against 2 / 10 from Bob. ' +
+        'The only crack in the armor: Ex-Arm, 8 / 10 from Alice against 2 / 10 from Bob. ' +
         "Homework for Bob: Monster, straight from Alice's favorites. No excuses."
     );
     const titles = sentences.flat().filter((part) => part.title);
@@ -158,6 +158,17 @@ describe('final thoughts', () => {
     expect(thought).toContain('Never bring up Ex-Arm at dinner');
   });
 
+  it('changes its tone exactly where the label does', () => {
+    const thought = (percent: number) =>
+      read(finalThought(match({ percent }), alice, bob, voiceFor(null)));
+    // Watch-party ready, then Couch compatible
+    expect(thought(70)).toContain('The only crack in the armor');
+    expect(thought(69)).toContain('Never bring up Ex-Arm at dinner');
+    // Friendly rivals, then Polar opposites
+    expect(thought(40)).toMatch(/^Alice and Bob agree/);
+    expect(thought(39)).toMatch(/^Never bring up Ex-Arm at dinner/);
+  });
+
   it('says at most three sentences, never repeating how many anime they share', () => {
     for (const percent of [95, 80, 50, 20, null]) {
       const sentences = finalThought(match({ percent }), alice, bob, voiceFor(null));
@@ -169,7 +180,7 @@ describe('final thoughts', () => {
   it('talks to the viewer, and gives them the homework', () => {
     expect(read(finalThought(match(), alice, bob, voiceFor('bob')))).toBe(
       'You and Alice agree Frieren and Mushishi are peak. Nobody tell the comment section. ' +
-        'The only crack in this friendship: Ex-Arm, 8 / 10 from Alice against 2 / 10 from you. ' +
+        'The only crack in the armor: Ex-Arm, 8 / 10 from Alice against 2 / 10 from you. ' +
         "Homework for you: Monster, straight from Alice's favorites. No excuses."
     );
     expect(read(finalThought(match(), alice, bob, voiceFor('alice')))).toContain(
@@ -184,7 +195,12 @@ describe('final thoughts', () => {
       });
     expect(
       read(
-        finalThought(loved('Steins;Gate', 'Steins;Gate 0', 'Mushishi'), alice, bob, voiceFor(null))
+        finalThought(
+          loved('Steins;Gate', 'Steins;Gate 0', 'Steins;Gate: Fuka Ryouiki', 'Mushishi'),
+          alice,
+          bob,
+          voiceFor(null)
+        )
       )
     ).toContain('agree Steins;Gate and Mushishi are peak.');
     expect(

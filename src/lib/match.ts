@@ -55,18 +55,19 @@ export function compareTastes(
     b: theirs.score,
   });
 
+  const gap = ({ mine, theirs }: (typeof both)[number]) =>
+    Math.abs(mine.score100 - theirs.score100);
   // How far above their own averages both scored it
   const fondness = ({ mine, theirs }: (typeof both)[number]) =>
     mine.score100 - averageA + theirs.score100 - averageB;
+  // Scored 30 points apart, an anime is a disagreement, even when both liked it more than most
   const bothLoved = both
     .filter(({ mine, theirs }) => mine.score100 > averageA && theirs.score100 > averageB)
-    .filter(({ mine }) => shown(mine))
+    .filter((entry) => gap(entry) < DISAGREEMENT && shown(entry.mine))
     .sort((x, y) => fondness(y) - fondness(x) || byTitle(x.mine, y.mine))
     .slice(0, SHOWN.bothLoved)
     .map(pair);
 
-  const gap = ({ mine, theirs }: (typeof both)[number]) =>
-    Math.abs(mine.score100 - theirs.score100);
   const disagreements = both
     .filter((entry) => gap(entry) >= DISAGREEMENT && shown(entry.mine))
     .sort((x, y) => gap(y) - gap(x) || byTitle(x.mine, y.mine))

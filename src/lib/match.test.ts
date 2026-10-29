@@ -94,9 +94,22 @@ describe('comparing tastes', () => {
     });
     // Bob scores everything lower, but anime 2 and 1 are still above his own average, 2 the most
     const bob = profile('Bob', {
-      scored: [scored(1, 60), scored(2, 75), scored(3, 20), scored(4, 50)],
+      scored: [scored(1, 65), scored(2, 78), scored(3, 20), scored(4, 50)],
     });
     expect(compareTastes(alice, bob).bothLoved.map(({ anime }) => anime.id)).toEqual([2, 1]);
+  });
+
+  it('never lists an anime as both loved and a disagreement', () => {
+    // Both above their own averages, but 30 points apart
+    const alice = profile('Alice', {
+      scored: [scored(1, 100), scored(2, 85), scored(3, 30), scored(4, 30)],
+    });
+    const bob = profile('Bob', {
+      scored: [scored(1, 70), scored(2, 80), scored(3, 20), scored(4, 20)],
+    });
+    const match = compareTastes(alice, bob);
+    expect(match.disagreements.map(({ anime }) => anime.id)).toEqual([1]);
+    expect(match.bothLoved.map(({ anime }) => anime.id)).toEqual([2]);
   });
 
   it('lists disagreements of 30 points or more, the furthest apart first', () => {
