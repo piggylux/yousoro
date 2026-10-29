@@ -367,14 +367,29 @@ describe('group previews', () => {
       async (_url: string) => new Response(PIXEL, { headers: { 'Content-Type': 'image/png' } })
     );
     vi.stubGlobal('fetch', fetch);
-    const alice = taster('Alice', [scoredAnime(1, 90), scoredAnime(2, 40)]);
-    const bob = { ...taster('Bob', []), id: 2 };
+    // Alice has seen 1, so only Bob's plan to watch 2 is a pick
+    const alice = taster('Alice', [scoredAnime(1, 90)]);
+    const bob = { ...taster('Bob', []), id: 2, planned: [scoredAnime(1, 0), scoredAnime(2, 0)] };
     const response = await renderGroupPreview([alice, bob], 'public, max-age=3600');
     expect(await imageOf(response)).toEqual({ format: 'jpeg', width: 1200, height: 630 });
     expect(fetch.mock.calls.map(([url]) => url).toSorted()).toEqual([
       'https://s4.anilist.co/Alice.png',
       'https://s4.anilist.co/Bob.png',
-      'https://s4.anilist.co/cover-1.jpg',
+      'https://s4.anilist.co/cover-2.jpg',
+    ]);
+  });
+
+  it('draws an invitation from what its host plans to watch, not what they have seen', async () => {
+    const fetch = vi.fn(
+      async (_url: string) => new Response(PIXEL, { headers: { 'Content-Type': 'image/png' } })
+    );
+    vi.stubGlobal('fetch', fetch);
+    const alice = { ...taster('Alice', [scoredAnime(1, 90)]), planned: [scoredAnime(2, 0)] };
+    const response = await renderGroupPreview([alice], 'public, max-age=3600');
+    expect(await imageOf(response)).toEqual({ format: 'jpeg', width: 1200, height: 630 });
+    expect(fetch.mock.calls.map(([url]) => url).toSorted()).toEqual([
+      'https://s4.anilist.co/Alice.png',
+      'https://s4.anilist.co/cover-2.jpg',
     ]);
   });
 });

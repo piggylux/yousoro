@@ -34,7 +34,7 @@ export type TasteProfile = {
   scored: ScoredAnime[];
   /** The other anime they've watched some or all of, dropped ones included */
   seen: number[];
-  /** The anime they plan to watch */
+  /** The anime they plan to watch, once they've started airing */
   planned: ListedAnime[];
 };
 

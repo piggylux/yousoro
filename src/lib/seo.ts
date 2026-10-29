@@ -78,7 +78,7 @@ export function getPageSeo(url: SeoUrl, status = 200, resolvedUsername?: string)
     if (others.length) {
       const everyone = joinNames(names);
       title = `What Should ${everyone} Watch Together? | ${SITE_NAME}`;
-      description = `Anime for ${everyone} to start together, picked from their AniList scores and plan lists.`;
+      description = `Anime none of ${everyone} have seen yet, picked from their AniList plan lists.`;
       image = {
         url: groupPreviewImage(host, others),
         type: 'image/jpeg',
@@ -86,7 +86,7 @@ export function getPageSeo(url: SeoUrl, status = 200, resolvedUsername?: string)
       };
     } else {
       title = `Pick an Anime to Watch with ${host} | ${SITE_NAME}`;
-      description = `Join ${host}'s group to find an anime you'll all enjoy, from your AniList scores and plan lists.`;
+      description = `Join ${host}'s group to find an anime none of you have seen, from your AniList plan lists.`;
       image = {
         url: groupPreviewImage(host, []),
         type: 'image/jpeg',

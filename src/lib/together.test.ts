@@ -34,62 +34,43 @@ function profile(name: string, overrides: Partial<TasteProfile> = {}): TasteProf
 const ids = (picks: ReturnType<typeof pickForGroup>) => picks.map(({ anime }) => anime.id);
 
 describe('picking an anime for a group', () => {
-  it("picks what someone loved that's new to the others, saying who vouches for it", () => {
-    const alice = profile('Alice', { scored: [scored(1, 90), scored(2, 40)] });
-    const bob = profile('Bob');
-    const [pick, ...rest] = pickForGroup([alice, bob]);
-    expect(pick).toMatchObject({
-      anime: { id: 1 },
-      lovedBy: [{ name: 'Alice', score: 9, scoreFormat: 'POINT_10' }],
-      plannedBy: [],
-      newTo: 1,
-    });
-    // Below Alice's own average
-    expect(rest).toEqual([]);
-  });
-
-  it('leaves out what anyone has seen without loving it, or is watching now', () => {
-    const alice = profile('Alice', { scored: [scored(1, 90), scored(2, 90), scored(3, 20)] });
-    const bob = profile('Bob', { scored: [scored(1, 30), scored(9, 80)], seen: [2] });
-    expect(ids(pickForGroup([alice, bob]))).toEqual([9]);
-  });
-
-  it("leaves out what everyone loved: it's new to nobody", () => {
-    const alice = profile('Alice', { scored: [scored(1, 90), scored(2, 10)] });
-    const bob = profile('Bob', { scored: [scored(1, 90), scored(2, 10)] });
-    expect(pickForGroup([alice, bob])).toEqual([]);
-  });
-
-  it('counts a plan shared by several, but not one person’s plan alone', () => {
-    const alice = profile('Alice', { planned: [listed(5), listed(6)] });
-    const bob = profile('Bob', { planned: [listed(5)] });
+  it('picks from plan lists, saying who planned each', () => {
+    const alice = profile('Alice', { planned: [listed(1), listed(2)] });
+    const bob = profile('Bob', { planned: [listed(2)] });
     expect(pickForGroup([alice, bob])).toEqual([
-      { anime: listed(5), lovedBy: [], plannedBy: ['Alice', 'Bob'], newTo: 2 },
+      { anime: listed(2), plannedBy: ['Alice', 'Bob'] },
+      { anime: listed(1), plannedBy: ['Alice'] },
     ]);
   });
 
-  it('puts what most of the group wants first, then what was loved most', () => {
+  it('never picks what anyone has watched, however much they liked it', () => {
     const alice = profile('Alice', {
-      scored: [scored(1, 100), scored(2, 80), scored(3, 20)],
-      planned: [listed(4)],
+      scored: [scored(1, 100)],
+      planned: [listed(2), listed(3), listed(4)],
     });
-    const bob = profile('Bob', { scored: [scored(2, 90), scored(4, 95), scored(5, 10)] });
-    const carol = profile('Carol', { planned: [listed(2), listed(4)] });
-    // 2: loved by two, planned by one; 4: loved by one, planned by two; 1: loved by one
-    expect(ids(pickForGroup([alice, bob, carol]))).toEqual([2, 4, 1]);
+    // Bob finished 2, dropped 3 or is watching it, and loved 1, which nobody planned anyway
+    const bob = profile('Bob', { scored: [scored(1, 90), scored(2, 20)], seen: [3] });
+    expect(ids(pickForGroup([alice, bob]))).toEqual([4]);
   });
 
-  it('breaks ties with AniList’s favorite', () => {
+  it('puts what most of the group plans to watch first, then AniList’s favorites', () => {
     const alice = profile('Alice', {
-      scored: [scored(1, 90, { meanScore: 70 }), scored(2, 90, { meanScore: 85 }), scored(3, 10)],
+      planned: [listed(1, { meanScore: 90 }), listed(2, { meanScore: 60 }), listed(3)],
     });
-    expect(ids(pickForGroup([alice, profile('Bob')]))).toEqual([2, 1]);
+    const bob = profile('Bob', { planned: [listed(2, { meanScore: 60 }), listed(4)] });
+    const carol = profile('Carol', { planned: [listed(2, { meanScore: 60 })] });
+    expect(ids(pickForGroup([alice, bob, carol]))).toEqual([2, 1, 3, 4]);
   });
 
   it('leaves adult anime out unless the viewer chose to see them', () => {
-    const alice = profile('Alice', { scored: [scored(1, 90, { isAdult: true }), scored(2, 10)] });
+    const alice = profile('Alice', { planned: [listed(1, { isAdult: true })] });
     expect(pickForGroup([alice, profile('Bob')])).toEqual([]);
     expect(ids(pickForGroup([alice, profile('Bob')], { showMature: true }))).toEqual([1]);
+  });
+
+  it('shows a dozen picks at most', () => {
+    const planned = Array.from({ length: 20 }, (_, id) => listed(id + 1));
+    expect(pickForGroup([profile('Alice', { planned }), profile('Bob')])).toHaveLength(12);
   });
 });
 

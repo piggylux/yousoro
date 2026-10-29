@@ -36,6 +36,11 @@ describe('watch-along race', () => {
     expect(describeRace(5, [friend('Mika', 5), friend('Sora', 5)])).toBe("You're all on episode 5");
   });
 
+  it('says when nobody has started yet, rather than naming episode 0', () => {
+    expect(describeRace(0, [friend('Mika', 0)])).toBe('Neither you nor Mika has started yet');
+    expect(describeRace(0, [friend('Mika', 0), friend('Sora', 0)])).toBe('Nobody has started yet');
+  });
+
   it('has nothing to say without friends to race', () => {
     expect(describeRace(5, [])).toBeNull();
   });

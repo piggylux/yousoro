@@ -346,7 +346,13 @@ describe('series', () => {
 });
 
 describe('taste profiles', () => {
-  const entry = (id: number, status: string, score: number, updatedAt = 0) => ({
+  const entry = (
+    id: number,
+    status: string,
+    score: number,
+    updatedAt = 0,
+    airing = 'FINISHED'
+  ) => ({
     status,
     score,
     updatedAt,
@@ -356,6 +362,7 @@ describe('taste profiles', () => {
       coverImage: { large: `https://s4.anilist.co/${id}.jpg` },
       isAdult: false,
       meanScore: 70,
+      status: airing,
     },
   });
   const collection = (name: string) =>
@@ -375,6 +382,8 @@ describe('taste profiles', () => {
                 entry(1, 'COMPLETED', 9),
                 entry(2, 'DROPPED', 0),
                 entry(3, 'PLANNING', 0),
+                // Not aired yet, so nobody can start it
+                entry(5, 'PLANNING', 0, 0, 'NOT_YET_RELEASED'),
                 // Listed twice, as after a double import: the later edit stands
                 entry(4, 'CURRENT', 5, 10),
                 entry(4, 'COMPLETED', 8, 20),
