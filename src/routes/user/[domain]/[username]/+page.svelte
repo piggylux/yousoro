@@ -62,6 +62,7 @@
     friends: FriendWatching[];
     coverUrl?: string;
     blurCover?: boolean;
+    viewer?: { name: string; progress: number };
   } | null>(null);
   const friendsViewerId = $derived(page.data.user?.id ?? null);
   const friendsPageKey = $derived(`${friendsViewerId}:${data.username}`);
@@ -519,6 +520,11 @@
                 coverUrl: anime.thumbnailUrl,
                 blurCover: anime.isAdult && data.preferences.blurMature,
                 friends: visibleFriendMatches?.[anime.id] ?? [],
+                // On their own list, the viewer's progress is the card's
+                viewer:
+                  data.canEdit && page.data.user
+                    ? { name: page.data.user.name, progress: anime.currentEpisode }
+                    : undefined,
               })}
             {anime}
             {animeLinkFn}
