@@ -709,3 +709,39 @@ export function nyaaSearchUrl(search: NyaaSearch): string {
   url.searchParams.set('q', query);
   return url.href;
 }
+
+const LANGUAGE_NAMES: Record<DownloadLanguage, string> = {
+  any: '',
+  english: 'English',
+  french: 'French',
+};
+// A custom search keeps only the category, where French releases sit with every non-English one
+const CATEGORY_NAMES: Record<DownloadLanguage, string> = {
+  any: '',
+  english: 'English',
+  french: 'non-English',
+};
+const VERSION_NAMES: Record<DownloadVersion, string> = {
+  any: '',
+  subbed: 'subbed',
+  dubbed: 'dubbed',
+  'dual-audio': 'dual-audio',
+};
+
+/**
+ * The releases the viewer's settings keep a search to, as in "French dubbed", or '' when it looks
+ * for them all. Subbed in any language only leaves dubs out, so raws are still found. A custom
+ * search keeps only nyaa.si's category, which sukebei.nyaa.si doesn't have
+ */
+export function nyaaNarrowing({
+  query,
+  language = 'any',
+  version = 'any',
+  adult = false,
+}: NyaaSearch): string {
+  if (query === undefined)
+    return language === 'any' && version === 'subbed'
+      ? 'non-dubbed'
+      : [LANGUAGE_NAMES[language], VERSION_NAMES[version]].filter(Boolean).join(' ');
+  return adult ? '' : CATEGORY_NAMES[language];
+}

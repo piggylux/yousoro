@@ -38,7 +38,7 @@ export type Preferences = {
   blurMature: boolean;
   /** How big the anime cards are, and so how many fit in a row */
   cardSize: CardSize;
-  /** The language the download search on the viewer's own list looks for */
+  /** The language of the releases Find episode looks for, on any list */
   downloadLanguage: DownloadLanguage;
   /** Subbed, dubbed or dual-audio releases, for the same search */
   downloadVersion: DownloadVersion;

@@ -9,6 +9,7 @@ import {
   nyaaQuery,
   nyaaQueryLength,
   NYAA_MAX_QUERY_LENGTH,
+  nyaaNarrowing,
   nyaaSearchUrl,
   nyaaSite,
 } from '#lib/nyaa.js';
@@ -754,4 +755,25 @@ describe('adult anime', () => {
       expect(result.query).toBe([SHOW_PHRASES, terms, '-batch'].filter(Boolean).join(' '));
     }
   );
+});
+
+describe('nyaaNarrowing', () => {
+  it.each([
+    ['any', 'any', ''],
+    ['any', 'subbed', 'non-dubbed'],
+    ['english', 'subbed', 'English subbed'],
+    ['any', 'dual-audio', 'dual-audio'],
+    ['english', 'any', 'English'],
+    ['french', 'dubbed', 'French dubbed'],
+  ] as const)('names %s %s releases', (language, version, name) => {
+    expect(nyaaNarrowing({ title: 'Show', episode: 1, language, version })).toBe(name);
+  });
+
+  it('names only the category for a custom search, which holds French with other languages', () => {
+    const search = { title: 'Show', episode: 1, language: 'french', version: 'dubbed' } as const;
+    expect(nyaaNarrowing({ ...search, query: 'Show 01' })).toBe('non-English');
+    expect(nyaaNarrowing({ ...search, language: 'english', query: 'Show 01' })).toBe('English');
+    expect(nyaaNarrowing({ ...search, query: 'Show 01', adult: true })).toBe('');
+    expect(nyaaNarrowing({ ...search, adult: true })).toBe('French dubbed');
+  });
 });

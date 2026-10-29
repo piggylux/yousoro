@@ -163,10 +163,8 @@
 
   <label class="setting">
     <span>
-      <span class="setting-name">Release language</span>
-      <span class="setting-hint">
-        The language the nyaa.si search on your own list looks for.
-      </span>
+      <span class="setting-name">Episode search language</span>
+      <span class="setting-hint"> Find episode only lists releases in this language. </span>
     </span>
     <select
       class="choice tw:select tw:select-sm"
@@ -183,8 +181,11 @@
 
   <label class="setting">
     <span>
-      <span class="setting-name">Release version</span>
-      <span class="setting-hint"> Subtitles, a dub, or both audio tracks, in that language. </span>
+      <span class="setting-name">Subbed or dubbed</span>
+      <span class="setting-hint">
+        Find episode only lists releases of this kind. Dual audio has both the original and dubbed
+        tracks.
+      </span>
     </span>
     <select
       class="choice tw:select tw:select-sm"

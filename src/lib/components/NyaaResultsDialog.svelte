@@ -2,6 +2,7 @@
   import CloseButton from '#lib/components/CloseButton.svelte';
   import { closeOnBackdrop } from '#lib/dialog.js';
   import {
+    nyaaNarrowing,
     nyaaSearchUrl,
     nyaaSite,
     nyaaQueryLength,
@@ -24,11 +25,22 @@
   const queryTooLong = $derived(nyaaQueryLength(queryDraft.trim()) > NYAA_MAX_QUERY_LENGTH);
   let appliedQuery = $state<string | null>(null);
   let resolvedQuery = $state<string | null>(null);
+  // Every release, past what the viewer's settings keep the search to, for this dialog only
+  let allReleases = $state(false);
   // No release had the episode alone, so these are packs that include it
   let inPacks = $state(false);
-  const activeSearch = $derived(
-    appliedQuery === null ? search : { ...search, query: appliedQuery }
+  const scopedSearch = $derived<NyaaSearch>(
+    allReleases ? { ...search, language: 'any', version: 'any' } : search
   );
+  const activeSearch = $derived(
+    appliedQuery === null ? scopedSearch : { ...scopedSearch, query: appliedQuery }
+  );
+  // What the viewer's settings keep the search to, as in "French dubbed". The dialog says so, or
+  // finding none of those would read as there being no release at all
+  const narrowing = $derived(
+    nyaaNarrowing(appliedQuery === null ? search : { ...search, query: appliedQuery })
+  );
+  const lookingFor = $derived(allReleases ? '' : narrowing);
   const resultSearch = $derived(
     resolvedQuery === null ? activeSearch : { ...activeSearch, query: resolvedQuery }
   );
@@ -190,23 +202,7 @@
         attempt++;
       }}
     >
-      <div class="search-heading">
-        <label for={`${heading}-query`}>Search Nyaa</label>
-        {#if appliedQuery !== null || queryDraft !== suggestedQuery}
-          <button
-            class="search-reset"
-            type="button"
-            aria-label="Reset to automatic episode search"
-            onclick={() => {
-              appliedQuery = null;
-              queryDraft = suggestedQuery;
-              filter = '';
-              attempt++;
-              queryInput?.focus();
-            }}>Reset search</button
-          >
-        {/if}
-      </div>
+      <label class="tw:sr-only" for={`${heading}-query`}>Search Nyaa</label>
       <div class="search-row">
         <input
           id={`${heading}-query`}
@@ -238,61 +234,94 @@
       {#if queryTooLong}<p id={`${heading}-query-length`} role="status">
           This search is too long. Use fewer title words or alternatives.
         </p>{/if}
-    </form>
-    <div class="filter">
-      <div class="filter-heading">
-        <label for={`${heading}-filter`}>Filter loaded results</label>
-        {#if !loading && !errorMessage && releases.length > 0}
-          <p class="result-count" role="status">
-            {filteredReleases.length} of {releases.length} releases
-          </p>
-        {/if}
-      </div>
-      <div class="filter-input">
-        <svg
-          class="filter-icon"
-          width="17"
-          height="17"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.8"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"><path d="M4 5h16l-6 7v6l-4 2v-8Z" /></svg
-        >
-        <input
-          id={`${heading}-filter`}
-          bind:this={filterInput}
-          type="search"
-          bind:value={filter}
-          placeholder="Filter these results…"
-          aria-controls={`${heading}-results`}
-        />
-        {#if filter}
-          <button
-            type="button"
-            class="clear-filter"
-            aria-label="Clear filter"
-            onclick={() => {
-              filter = '';
-              filterInput?.focus();
-            }}
-          >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.8"
-              stroke-linecap="round"
-              aria-hidden="true"><path d="m6 6 12 12M6 18 18 6" /></svg
+      <!-- Reset waits for a custom search to run, so typing doesn't push the results down -->
+      {#if narrowing || appliedQuery !== null}
+        <div class="search-options">
+          {#if narrowing}
+            <p>
+              {allReleases
+                ? 'Showing all releases.'
+                : `Only ${narrowing} releases, per your settings.`}
+              <button
+                class="text-button"
+                type="button"
+                onclick={() => {
+                  allReleases = !allReleases;
+                  filter = '';
+                }}>{allReleases ? `Only ${narrowing}` : 'Show all releases'}</button
+              >
+            </p>
+          {/if}
+          {#if appliedQuery !== null}
+            <button
+              class="text-button"
+              type="button"
+              aria-label="Reset to automatic episode search"
+              onclick={() => {
+                appliedQuery = null;
+                queryDraft = suggestedQuery;
+                filter = '';
+                attempt++;
+                queryInput?.focus();
+              }}>Reset search</button
             >
-          </button>
-        {/if}
+          {/if}
+        </div>
+      {/if}
+    </form>
+    <!-- Only once there are releases to filter, which keeps the room for them -->
+    {#if !loading && !errorMessage && releases.length > 0}
+      <div class="filter">
+        <label class="tw:sr-only" for={`${heading}-filter`}>Filter loaded results</label>
+        <div class="filter-input">
+          <svg
+            class="filter-icon"
+            width="17"
+            height="17"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"><path d="M4 5h16l-6 7v6l-4 2v-8Z" /></svg
+          >
+          <input
+            id={`${heading}-filter`}
+            bind:this={filterInput}
+            type="search"
+            bind:value={filter}
+            placeholder="Filter these results…"
+            aria-controls={`${heading}-results`}
+          />
+          {#if filter}
+            <button
+              type="button"
+              class="clear-filter"
+              aria-label="Clear filter"
+              onclick={() => {
+                filter = '';
+                filterInput?.focus();
+              }}
+            >
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                aria-hidden="true"><path d="m6 6 12 12M6 18 18 6" /></svg
+              >
+            </button>
+          {/if}
+        </div>
+        <p class="result-count" role="status">
+          {filteredReleases.length} of {releases.length} releases
+        </p>
       </div>
-    </div>
+    {/if}
     <section
       bind:this={results}
       id={`${heading}-results`}
@@ -301,8 +330,8 @@
     >
       {#if loading}
         <p class="message" role="status">
-          <span class="tw:loading tw:loading-spinner tw:loading-sm" aria-hidden="true"></span> Searching
-          for releases…
+          <span class="tw:loading tw:loading-spinner tw:loading-sm" aria-hidden="true"></span>
+          {lookingFor ? `Searching for ${lookingFor} releases…` : 'Searching for releases…'}
         </p>
       {:else if errorMessage}
         <div class="message">
@@ -310,7 +339,11 @@
           <button class="retry" type="button" onclick={() => attempt++}>Try again</button>
         </div>
       {:else if releases.length === 0}
-        <p class="message" role="status">No releases found. Try another search query.</p>
+        <p class="message" role="status">
+          {lookingFor
+            ? `No ${lookingFor} releases found. Show all releases, or try another search query.`
+            : 'No releases found. Try another search query.'}
+        </p>
       {:else}
         <p class="result-order">
           {inPacks
@@ -423,45 +456,42 @@
   button {
     cursor: pointer;
   }
-  .filter,
   .search-form {
     flex: none;
+    display: grid;
+    gap: 8px;
   }
-  .search-form {
-    padding: 12px;
-    border: 1px solid var(--border-subtle);
-    border-radius: 16px;
-    background: var(--you-blue-pale);
-  }
-  .search-heading,
-  .filter-heading {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 8px;
-  }
-  .search-form > p {
-    margin-top: 8px;
+  .search-form p {
     color: var(--text-accent);
     font-size: 0.8125rem;
-  }
-  .search-heading {
-    min-height: 28px;
-  }
-  label {
-    display: block;
-    color: var(--text-accent);
-    font-size: 0.7rem;
-    font-weight: 700;
   }
   .search-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 8px;
   }
+  /* What the search keeps to, and the way back to the automatic search */
+  .search-options {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    column-gap: 12px;
+  }
+  .search-options > .text-button {
+    margin-left: auto;
+  }
+  .filter {
+    flex: none;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+  }
   .filter-input {
     position: relative;
+    flex: 1 1 12rem;
+    min-width: 0;
   }
   .filter input,
   .search-form input {
@@ -470,13 +500,10 @@
     min-height: 44px;
     padding: 10px 14px;
     border: 1px solid var(--border-subtle);
-    border-radius: 12px;
-    background: var(--you-blue-pale);
+    border-radius: var(--radius-control);
+    background: var(--surface);
     color: var(--color-base-content);
     font-size: 0.8rem;
-  }
-  .search-form input {
-    background: var(--surface);
   }
   .filter input {
     padding-inline: 38px 40px;
@@ -511,12 +538,13 @@
     opacity: 0.45;
     cursor: default;
   }
-  .search-reset {
+  .text-button {
     padding: 4px 0;
     background: transparent;
     border: 0;
     color: var(--text-accent);
-    font-size: 0.7rem;
+    font-size: 0.8125rem;
+    font-weight: 600;
     text-decoration: underline;
     text-underline-offset: 3px;
   }
@@ -560,7 +588,7 @@
     padding: 10px 14px;
     min-height: 44px;
     border: 1px solid var(--sea-blue);
-    border-radius: 12px;
+    border-radius: var(--radius-control);
     background: var(--sea-blue);
     color: #ffffff;
     font-size: 0.8rem;
@@ -674,11 +702,14 @@
       font-size: 1rem;
     }
     .search-submit {
-      width: 100%;
       padding-inline: 12px;
     }
-    .search-row {
-      grid-template-columns: minmax(0, 1fr);
+  }
+  @media (pointer: coarse) {
+    .text-button {
+      display: inline-flex;
+      align-items: center;
+      min-height: 44px;
     }
   }
   @media (max-height: 600px) {
