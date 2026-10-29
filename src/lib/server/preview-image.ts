@@ -608,26 +608,27 @@ export async function renderMatchPreview(
 
 /**
  * The preview of a group picking an anime to watch together: everyone's avatars over who they are,
- * and covers of their top picks. A group of one is an invitation to join, with covers of its host's
- * favorites. Adult anime are left out, as for a visitor who hasn't chosen to see them
+ * and covers of their top picks, which none of them has seen. A group of one is an invitation to
+ * join, with covers of what its host plans to watch, the picks they'd bring. Adult anime are left
+ * out, as for a visitor who hasn't chosen to see them
  */
 export async function renderGroupPreview(
   profiles: TasteProfile[],
   cacheControl: string
 ): Promise<Response> {
   const [host] = profiles;
+  const picks = pickForGroup(profiles);
   if (profiles.length === 1) {
     return renderPersonPreview(
       { name: host.name, avatarUrl: host.avatarUrl, caption: 'Watch together' },
-      favoriteAnime(host).map((anime) => anime.coverUrl),
+      picks.map(({ anime }) => anime.coverUrl),
       {
         headline: 'What should we watch together?',
-        detail: `Join ${host.name}'s group to find an anime you'll all enjoy`,
+        detail: `Join ${host.name}'s group to find an anime none of you have seen`,
       },
       cacheControl
     );
   }
-  const picks = pickForGroup(profiles);
   const [avatars, covers] = await Promise.all([
     Promise.all(profiles.map((profile) => loadImage(profile.avatarUrl))),
     Promise.all(picks.slice(0, PREVIEW_COVERS).map(({ anime }) => loadImage(anime.coverUrl))),
@@ -688,7 +689,7 @@ export async function renderGroupPreview(
                 )
               )
             )
-          : el('div', { fontSize: 28, color: COLORS.accent }, 'Nothing fits everyone yet'),
+          : el('div', { fontSize: 28, color: COLORS.accent }, 'Nothing new to all of them yet'),
         wordmark(40)
       )
     ),

@@ -10,7 +10,6 @@
   import SharedAnimePoster from '#lib/components/SharedAnimePoster.svelte';
   import { joinNames, voiceFor } from '#lib/match-words.js';
   import { loadTasteProfile, parseUserName, type TasteProfileState } from '#lib/match.js';
-  import { describeScore } from '#lib/score.js';
   import { MAX_GROUP, pickForGroup, togetherPath, type GroupPick } from '#lib/together.js';
   import type { TasteProfile } from '#lib/types/match.js';
 
@@ -85,19 +84,12 @@
   );
 
   const voice = $derived(voiceFor(data.user?.name));
-  const { isViewer, who, Who } = $derived(voice);
+  const { isViewer, who } = $derived(voice);
   const viewerIn = $derived(spelled.some(isViewer));
   const canJoin = $derived(
     data.user !== null && !viewerIn && data.others.length > 0 && names.length < MAX_GROUP
   );
   const full = $derived(names.length >= MAX_GROUP);
-
-  // The viewer comes first among names, as "you"
-  const everyone = $derived(
-    joinNames(
-      spelled.toSorted((a, b) => Number(isViewer(b)) - Number(isViewer(a))).map((name) => who(name))
-    )
-  );
 
   const share = $derived(
     data.others.length
@@ -150,23 +142,16 @@
     if (!state || state.status === 'loading') return 'Reading their list…';
     if (state.status === 'missing') return 'No public AniList list';
     if (state.status !== 'ready') return 'Waiting for AniList';
-    const { scored, planned } = state.profile;
-    return `${count(scored.length)} scored · ${count(planned.length)} planned`;
+    const { scored, seen, planned } = state.profile;
+    return `${count(scored.length + seen.length)} watched · ${count(planned.length)} planned`;
   }
 
-  /** Who vouches for a pick and who wants to see it, for its caption and its poster's label */
-  function reasons({ lovedBy, plannedBy }: GroupPick) {
+  /** Who wants to see a pick, and how AniList rates it, for its caption and its poster's label */
+  function reasons({ anime, plannedBy }: GroupPick) {
     return [
-      lovedBy.length ? `Loved by ${joinNames(lovedBy.map(({ name }) => who(name)))}` : null,
-      plannedBy.length ? `Planned by ${joinNames(plannedBy.map(who))}` : null,
+      `Planned by ${joinNames(plannedBy.map(who))}`,
+      anime.meanScore === null ? null : `AniList average ${anime.meanScore}%`,
     ].filter((reason) => reason !== null);
-  }
-
-  function scores({ lovedBy }: GroupPick) {
-    return lovedBy.map(
-      ({ name, score, scoreFormat }) =>
-        `${Who(name)} scored it ${describeScore(score, scoreFormat)}`
-    );
   }
 
   const listUrl = (name: string) => `/user/anilist/${encodeURIComponent(name)}`;
@@ -199,7 +184,9 @@
       </div>
       <p class="summary">
         {#if data.others.length}
-          Anime for {everyone} to start together, from everyone's AniList scores and plan lists.
+          {viewerIn
+            ? 'Anime none of you have seen yet, picked from your AniList plan lists.'
+            : `Anime none of ${joinNames(spelled)} have seen yet, picked from their AniList plan lists.`}
         {:else}
           Add up to {MAX_GROUP - 1} people, or share this page so friends can join.
         {/if}
@@ -339,23 +326,16 @@
           </h2>
           <ul class="reasons">
             {#each reasons(top) as reason (reason)}<li>{reason}</li>{/each}
-            <li>
-              New to {top.newTo === people.length ? 'everyone' : `${top.newTo} of ${people.length}`}
-            </li>
           </ul>
-          {#if top.lovedBy.length}
-            <p class="scores">{scores(top).join(' · ')}</p>
-          {/if}
           <ShareButton url={share.url} title={share.title} subject={share.subject} />
         </div>
       </div>
     {:else}
       <div class="notice">
-        <h2>Nothing fits everyone yet</h2>
+        <h2>Nothing new to all of you yet</h2>
         <p>
-          Picks are anime someone in the group loved, or several of you plan to watch, that nobody
-          has seen without loving. Scores and plan lists on AniList count right away, so try again
-          after adding some, or change the group.
+          Picks come from anime on someone's AniList plan list that nobody in the group has watched.
+          Plan lists count right away, so add a few there and try again, or change the group.
         </p>
       </div>
     {/if}
@@ -371,8 +351,8 @@
                 anime={pick.anime}
                 blurMature={data.preferences.blurMature}
                 detail={{
-                  badge: `${pick.lovedBy.length + pick.plannedBy.length} of ${people.length}`,
-                  label: [...why, ...scores(pick)].join('; '),
+                  badge: `${pick.plannedBy.length} of ${people.length} planned`,
+                  label: why.join('; '),
                 }}
               />
               <p class="pick-reasons" aria-hidden="true">
@@ -600,16 +580,9 @@
     display: flex;
     flex-wrap: wrap;
     gap: 2px 14px;
-    margin-top: 8px;
+    margin: 8px 0 10px;
     color: var(--text-heading);
     font-size: 0.9375rem;
-    overflow-wrap: anywhere;
-  }
-
-  .scores {
-    margin: 6px 0 10px;
-    color: var(--text-accent);
-    font-size: 0.8125rem;
     overflow-wrap: anywhere;
   }
 

@@ -714,6 +714,7 @@ export async function getTasteProfile(userName: string): Promise<TasteProfile> {
             coverImage: { large: string | null } | null;
             isAdult: boolean;
             meanScore: number | null;
+            status: AiringStatus;
           };
         }[];
       }[];
@@ -728,7 +729,7 @@ export async function getTasteProfile(userName: string): Promise<TasteProfile> {
             status
             score
             updatedAt
-            media { id title { romaji } coverImage { large } isAdult meanScore }
+            media { id title { romaji } coverImage { large } isAdult meanScore status }
           }
         }
       }
@@ -765,8 +766,10 @@ export async function getTasteProfile(userName: string): Promise<TasteProfile> {
       isAdult: media.isAdult,
       meanScore: media.meanScore,
     };
-    if (status === 'PLANNING') profile.planned.push(anime);
-    else if (score > 0)
+    if (status === 'PLANNING') {
+      // Nobody can start one that hasn't aired yet, alone or with friends
+      if (media.status !== 'NOT_YET_RELEASED') profile.planned.push(anime);
+    } else if (score > 0)
       profile.scored.push({ ...anime, score, score100: toScore100(score, profile.scoreFormat) });
     else profile.seen.push(media.id);
   }

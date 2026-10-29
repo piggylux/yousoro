@@ -29,6 +29,12 @@ export function describeRace(viewerProgress: number, friends: Runner[]): string 
   }
   if (top === viewerProgress) {
     if (leaders.length === friends.length) {
+      // Added to the list, but not started by anyone yet
+      if (top === 0) {
+        return friends.length === 1
+          ? `Neither you nor ${friends[0].name} has started yet`
+          : 'Nobody has started yet';
+      }
       return friends.length === 1
         ? `You and ${friends[0].name} are both on episode ${top}`
         : `You're all on episode ${top}`;
