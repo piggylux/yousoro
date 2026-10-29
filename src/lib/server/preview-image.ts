@@ -1,11 +1,11 @@
 import { ImageResponse } from '@vercel/og';
 import sharp from 'sharp';
 
-import { getBacklog, sortWatchingList, withoutHiddenMature } from '#lib/anime.js';
+import { getBacklog, getNextUp, sortWatchingList, withoutHiddenMature } from '#lib/anime.js';
 import YouSvg from '#lib/images/minimalist_you.svg?inline';
 import { describeMatch, joinNames, matchComment } from '#lib/match-words.js';
 import { compareTastes, favoriteAnime } from '#lib/match.js';
-import { PREVIEW_IMAGE_SIZE } from '#lib/seo.js';
+import { PREVIEW_IMAGE_SIZE, SITE_ORIGIN } from '#lib/seo.js';
 import { pickForGroup } from '#lib/together.js';
 import type { Anime } from '#lib/types/anime.js';
 import type { TasteMatch, TasteProfile } from '#lib/types/match.js';
@@ -21,6 +21,22 @@ const COLORS = {
   accent: '#596474',
   blue: '#2463a6',
 };
+
+/** The dark theme's colours from src/app.css, for a badge shown on a dark profile */
+const DARK_COLORS: typeof COLORS = {
+  page: '#1b1e24',
+  border: '#383e49',
+  heading: '#eceef2',
+  accent: '#acb6c5',
+  blue: '#8ab8ef',
+};
+
+export type BadgeTheme = 'light' | 'dark';
+
+/** A profile badge is drawn at twice the 600 by 180 it's shown at, to stay sharp on any screen */
+export const BADGE_SIZE = { width: 1200, height: 360 } as const;
+/** Covers on a badge, of what its owner watched most recently */
+const BADGE_COVERS = 5;
 
 /** Covers shown on a list's preview, the anime the owner is most actively watching first */
 const PREVIEW_COVERS = 5;
@@ -58,6 +74,61 @@ export function describeList(animeList: Anime[]): { headline: string; detail: st
 }
 
 /**
+ * The jokes under a badge's line, one picked for each owner and week (see badgeVariant), so
+ * friends' badges read differently and each now and then has a new one. Each fits one line beside
+ * five covers, or two under "All caught up.", the one line that never wraps
+ */
+const QUIPS = {
+  idle: ['Taking suggestions.', 'Need a new obsession.', 'What should I start?'],
+  rewatching: ['Never gets old.', 'Comfort anime hours.', 'Still hits every time.'],
+  finale: ['No spoilers!', 'Tissues at the ready.', 'Not ready to let go.', "Don't spoil it."],
+  behind: ['Send snacks.', 'Just one more episode.', "It's a marathon now.", 'Sleep is optional.'],
+  almost: ['Almost caught up!', 'Finish line in sight.', 'One sitting, tops.'],
+  waiting: ['The wait is the hardest part.', 'Counting down the days.', 'Refreshing every hour.'],
+};
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Which of the jokes someone's badge shows: the same all week, whatever the spelling of their name,
+ * then the next one
+ */
+export function badgeVariant(name: string, now: number): number {
+  let hash = 0;
+  for (const char of name.toLowerCase()) hash = (hash * 31 + char.codePointAt(0)!) % 1_000_003;
+  return hash + Math.floor(now / WEEK_MS);
+}
+
+/**
+ * What a badge says about where its owner is, in their own voice: about to finish a show on the
+ * badge, far behind, a few episodes to go, or caught up and waiting. The first that fits wins, so
+ * it changes as they watch. Each `line` fits two lines beside five covers; its `quip` is the
+ * `variant` of the jokes for it
+ */
+export function badgeLine(animeList: Anime[], variant = 0): { line: string; quip: string } {
+  const pick = (quips: string[]) => quips[variant % quips.length];
+  if (!animeList.length) return { line: 'Between shows.', quip: pick(QUIPS.idle) };
+  if (animeList.every((anime) => anime.rewatching)) {
+    return { line: 'Rewatching an old favorite.', quip: pick(QUIPS.rewatching) };
+  }
+  // The last episode of a show the badge shows, as one episode doesn't make a finale
+  const finale = badgeAnime(animeList).some(
+    (anime) =>
+      !anime.rewatching &&
+      anime.numberEpisodes > 1 &&
+      anime.numberEpisodes - anime.currentEpisode === 1
+  );
+  if (finale) return { line: 'One episode from a finale.', quip: pick(QUIPS.finale) };
+  const { episodes } = getBacklog(animeList);
+  const count = `${episodes.toLocaleString('en-US')} episode${episodes === 1 ? '' : 's'}`;
+  if (episodes >= 10) return { line: `${count} behind.`, quip: pick(QUIPS.behind) };
+  if (episodes > 0) return { line: `${count} to go.`, quip: pick(QUIPS.almost) };
+  return {
+    line: 'All caught up.',
+    quip: pick(getNextUp(animeList) ? QUIPS.waiting : QUIPS.idle),
+  };
+}
+
+/**
  * Fetches an AniList image as a data URL, so a slow or broken one is left out of the preview
  * rather than failing it. Only AniList's CDN is fetched, and only image types the renderer reads
  */
@@ -79,12 +150,12 @@ async function loadImage(url: string | null): Promise<string | null> {
   }
 }
 
-function wordmark(fontSize: number): Element {
+function wordmark(fontSize: number, colors = COLORS): Element {
   return el(
     'div',
-    { display: 'flex', fontSize, color: COLORS.heading },
+    { display: 'flex', fontSize, color: colors.heading },
     'Yousoro',
-    el('span', { color: COLORS.blue }, '!')
+    el('span', { color: colors.blue }, '!')
   );
 }
 
@@ -93,8 +164,12 @@ function wordmark(fontSize: number): Element {
  * and a failure then cuts the response off instead of reaching the caller. Covers are photos, so a
  * list's preview is a JPEG: as a PNG it is several times larger, too large for some chat apps
  */
-async function draw(element: Element, format: ImageFormat): Promise<Uint8Array<ArrayBuffer>> {
-  const png = await new ImageResponse(element as never, PREVIEW_IMAGE_SIZE).arrayBuffer();
+async function draw(
+  element: Element,
+  format: ImageFormat,
+  size: { width: number; height: number } = PREVIEW_IMAGE_SIZE
+): Promise<Uint8Array<ArrayBuffer>> {
+  const png = await new ImageResponse(element as never, size).arrayBuffer();
   return new Uint8Array(
     format === 'png' ? png : await sharp(png).jpeg({ quality: 85, mozjpeg: true }).toBuffer()
   );
@@ -216,6 +291,162 @@ async function renderPersonPreview(
       )
     ),
     'jpeg'
+  );
+  return imageResponse(image, 'jpeg', cacheControl);
+}
+
+/** What a badge says under a cover: the episode its owner is on, of how many there are */
+export function badgeProgress(anime: Anime): string {
+  const total = anime.numberEpisodes ? ` / ${anime.numberEpisodes}` : '';
+  return `Ep ${anime.currentEpisode}${total}`;
+}
+
+/**
+ * The anime a badge shows: what its owner watched most recently, leaving out those they haven't
+ * started. Adult anime are always left out, as for a visitor who hasn't chosen to see them
+ */
+export function badgeAnime(animeList: Anime[]): Anime[] {
+  return animeList
+    .filter((anime) => anime.currentEpisode > 0 && !anime.isAdult)
+    .toSorted((a, b) => (b.lastUpdatedAt ?? 0) - (a.lastUpdatedAt ?? 0))
+    .slice(0, BADGE_COVERS);
+}
+
+/**
+ * A badge for someone to show on their AniList profile, in a README or a forum signature: who they
+ * are, where they are with their list in a line of their own, and covers of what they watched most
+ * recently with the episode they're on. It names the site, as it's often shown without a link.
+ * `list` is null when it can't be read, for a badge of the site alone
+ */
+export async function renderBadge(
+  list: { username: string; avatarUrl: string | null; animeList: Anime[] } | null,
+  theme: BadgeTheme,
+  cacheControl: string
+): Promise<Response> {
+  const colors = theme === 'dark' ? DARK_COLORS : COLORS;
+  const shown = badgeAnime(list?.animeList ?? []);
+  const [avatar, ...covers] = await Promise.all([
+    loadImage(list?.avatarUrl ?? null),
+    ...shown.map((anime) => loadImage(anime.thumbnailUrl)),
+  ]);
+  const drawnCovers = shown.flatMap((anime, index) => {
+    const cover = covers[index];
+    return cover ? [{ cover, progress: badgeProgress(anime) }] : [];
+  });
+  const host = el('div', { fontSize: 24, color: colors.accent }, new URL(SITE_ORIGIN).host);
+  const line = badgeLine(list?.animeList ?? [], badgeVariant(list?.username ?? '', Date.now()));
+
+  const image = await draw(
+    el(
+      'div',
+      {
+        display: 'flex',
+        alignItems: 'center',
+        gap: 36,
+        width: '100%',
+        height: '100%',
+        padding: '36px 40px',
+        border: `2px solid ${colors.border}`,
+        background: colors.page,
+        color: colors.heading,
+      },
+      list
+        ? el(
+            'div',
+            {
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              gap: 12,
+              flex: 1,
+              minWidth: 0,
+              height: '100%',
+            },
+            el(
+              'div',
+              { display: 'flex', alignItems: 'center', gap: 16 },
+              avatarOf(list.username, avatar, 64, {
+                border: `1px solid ${colors.border}`,
+                background: colors.page,
+                color: colors.accent,
+              }),
+              el(
+                'div',
+                { display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 },
+                /*
+                 * AniList names are one word of up to 20 letters: a long one is set smaller to fit
+                 * the column beside five covers, and breaks if it still doesn't
+                 */
+                el(
+                  'div',
+                  {
+                    display: 'flex',
+                    fontSize: list.username.length > 14 ? 24 : 28,
+                    lineHeight: 1.1,
+                    wordBreak: 'break-all',
+                  },
+                  list.username
+                ),
+                el(
+                  'div',
+                  { fontSize: 22, color: colors.accent },
+                  drawnCovers.length ? 'is watching' : 'on Yousoro'
+                )
+              )
+            ),
+            // Large enough to read once a phone shrinks the badge to a third of its size
+            el(
+              'div',
+              { display: 'flex', flexDirection: 'column', gap: 4 },
+              el('div', { fontSize: 40, lineHeight: 1.15 }, line.line),
+              el('div', { fontSize: 28, lineHeight: 1.2, color: colors.accent }, line.quip)
+            ),
+            el(
+              'div',
+              { display: 'flex', alignItems: 'baseline', gap: 14 },
+              wordmark(32, colors),
+              host
+            )
+          )
+        : el(
+            'div',
+            {
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              flex: 1,
+              height: '100%',
+            },
+            wordmark(48, colors),
+            el(
+              'div',
+              { display: 'flex', flexDirection: 'column' },
+              el('div', { fontSize: 36, lineHeight: 1.2 }, 'Keep up with what you watch'),
+              el('div', { fontSize: 24, color: colors.accent }, 'An AniList companion')
+            ),
+            host
+          ),
+      drawnCovers.length
+        ? el(
+            'div',
+            { display: 'flex', gap: 12 },
+            ...drawnCovers.map(({ cover, progress }) =>
+              el(
+                'div',
+                { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 },
+                img(cover, 140, 202, {
+                  borderRadius: 10,
+                  border: `1px solid ${colors.border}`,
+                  objectFit: 'cover',
+                }),
+                el('div', { fontSize: 22, color: colors.accent }, progress)
+              )
+            )
+          )
+        : img(YouSvg, 375, 260)
+    ),
+    'jpeg',
+    BADGE_SIZE
   );
   return imageResponse(image, 'jpeg', cacheControl);
 }

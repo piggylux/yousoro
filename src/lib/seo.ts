@@ -19,6 +19,12 @@ export function listPreviewImage(username: string): string {
   return `${SITE_ORIGIN}/user/anilist/${encodeURIComponent(username)}/preview.jpg`;
 }
 
+/** A profile badge of a list, as badge.jpg draws it, for light or dark pages */
+export function badgePath(username: string, theme: 'light' | 'dark'): string {
+  const path = `/user/anilist/${encodeURIComponent(username)}/badge.jpg`;
+  return theme === 'dark' ? `${path}?theme=dark` : path;
+}
+
 /** The link preview of a group picking an anime, or of an invitation to join `username` alone */
 export function groupPreviewImage(username: string, others: string[]): string {
   return `${SITE_ORIGIN}${togetherPath(username, others)}/preview.jpg`;
@@ -42,10 +48,14 @@ export function getPageSeo(url: SeoUrl, status = 200, resolvedUsername?: string)
   const home = path === '/home';
   const taste = path.match(/^\/user\/anilist\/([^/]+)\/match(?:\/([^/]+))?$/);
   const group = path.match(/^\/user\/anilist\/([^/]+)\/together((?:\/[^/]+)*)$/);
-  // The names in the path of a group, its host's first
+  const badge = path.match(/^\/user\/anilist\/([^/]+)\/badge$/);
+  // The names in the path of a group or a badge, its owner's first
+  const owned = group ?? badge;
   let names: string[] = [];
   try {
-    if (group) names = [group[1], ...group[2].split('/').slice(1)].map(decodeURIComponent);
+    if (owned) {
+      names = [owned[1], ...(group?.[2].split('/').slice(1) ?? [])].map(decodeURIComponent);
+    }
   } catch {
     return { title, description, canonical, image, noindex: true, home: false };
   }
@@ -76,6 +86,9 @@ export function getPageSeo(url: SeoUrl, status = 200, resolvedUsername?: string)
         alt: `Pick an anime to watch with ${host}`,
       };
     }
+  } else if (badge) {
+    title = `${names[0]}'s Profile Badge | ${SITE_NAME}`;
+    description = `Show what ${names[0]} is watching on an AniList profile, in a README, or anywhere that shows images.`;
   } else if (taste) {
     // Comparisons are drawn in the browser and never indexed, but their links are shared
     let a: string;

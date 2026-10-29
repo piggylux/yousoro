@@ -163,10 +163,14 @@ async function sendQuery<T>(
   return body.data;
 }
 
-/** Fetches a user's "Watching" and "Rewatching" lists, media details included, in one request. */
+/**
+ * Fetches a user's "Watching" and "Rewatching" lists, media details included, in one request. A
+ * read for something decorative, like a badge, can give way first when AniList is busy
+ */
 export async function getWatchingEntries(
   userName: string,
-  token?: string
+  token?: string,
+  priority?: AniListPriority
 ): Promise<{
   userId: number;
   userName: string;
@@ -202,7 +206,8 @@ export async function getWatchingEntries(
       }
     }`,
     { userName },
-    token
+    token,
+    { priority }
   );
 
   return {
