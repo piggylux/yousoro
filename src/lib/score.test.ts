@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { formatMeanScore, formatScore, parseScore, scoreChoices } from '#lib/score.js';
+import { formatMeanScore, formatScore, parseScore, scoreChoices, toScore100 } from '#lib/score.js';
 
 describe('parseScore', () => {
   it.each([
@@ -78,6 +78,19 @@ describe('scoreChoices', () => {
   it('leaves number formats to a number field', () => {
     expect(scoreChoices('POINT_100')).toBeNull();
     expect(scoreChoices('POINT_10_DECIMAL')).toBeNull();
+  });
+});
+
+describe('toScore100', () => {
+  it.each([
+    [85, 'POINT_100', 85],
+    [8.5, 'POINT_10_DECIMAL', 85],
+    [7, 'POINT_10', 70],
+    [4, 'POINT_5', 80],
+    [1, 'POINT_3', 35],
+    [3, 'POINT_3', 85],
+  ] as const)('counts %s in %s as %s out of 100', (score, format, expected) => {
+    expect(toScore100(score, format)).toBe(expected);
   });
 });
 

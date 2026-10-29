@@ -1,9 +1,16 @@
+import { isUserName } from '#lib/match.js';
 import type { NyaaSeries } from '#lib/nyaa.js';
 import { retryAfterSeconds } from '#lib/read-retry.js';
-import { DEFAULT_SCORE_FORMAT, isScoreFormat, type ScoreFormat } from '#lib/score.js';
-import { fingerprint, pauseAniList, takeAniListRequest } from '#lib/server/rate-limit.js';
+import { DEFAULT_SCORE_FORMAT, isScoreFormat, toScore100, type ScoreFormat } from '#lib/score.js';
+import {
+  fingerprint,
+  pauseAniList,
+  takeAniListRequest,
+  type AniListPriority,
+} from '#lib/server/rate-limit.js';
 import type { AiringStatus } from '#lib/types/anime.js';
 import type { FriendWatchingResult, SharedAnime } from '#lib/types/friend-watching.js';
+import type { TasteProfile } from '#lib/types/match.js';
 import type { ScheduleResult, ScheduledEpisode } from '#lib/types/schedule.js';
 
 const ANILIST_URL = 'https://graphql.anilist.co';
@@ -81,13 +88,15 @@ async function query<T>(
   query: string,
   variables: Record<string, unknown>,
   token?: string,
-  options: { cacheTtlMs?: number; optional?: boolean } = {}
+  /** `cacheTtlMs: 0` coalesces a public read while pending without storing its answer here */
+  options: { cacheTtlMs?: number; priority?: AniListPriority } = {}
 ): Promise<T> {
   const readKey = query.trimStart().startsWith('query')
     ? fingerprint(JSON.stringify([query, variables, token || null]))
     : null;
   // Authenticated reads are only coalesced while pending, never stored in the public cache.
-  const cacheKey = !token && readKey ? `yousoro:public:${readKey}` : null;
+  const cacheKey =
+    !token && readKey && options.cacheTtlMs !== 0 ? `yousoro:public:${readKey}` : null;
   if (cacheKey) {
     const cached = publicCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) return cached.data as T;
@@ -96,7 +105,7 @@ async function query<T>(
   if (readKey && pendingReads.has(readKey)) return pendingReads.get(readKey) as Promise<T>;
   // A post-save reload must never join a read that started before the write.
   if (!readKey) pendingReads.clear();
-  const pending = sendQuery<T>(query, variables, token, options.optional)
+  const pending = sendQuery<T>(query, variables, token, options.priority)
     .then((data) => {
       if (cacheKey) {
         if (publicCache.size >= MAX_CACHE_ENTRIES)
@@ -117,9 +126,9 @@ async function sendQuery<T>(
   query: string,
   variables: Record<string, unknown>,
   token?: string,
-  optional = false
+  priority?: AniListPriority
 ): Promise<T> {
-  const budget = await takeAniListRequest(optional);
+  const budget = await takeAniListRequest(priority);
   if (!budget.allowed) throw new AniListRateLimitError(budget.retryAfter);
   const response = await fetch(ANILIST_URL, {
     method: 'POST',
@@ -264,7 +273,7 @@ export async function getLatestAirings(
     }`,
     { ids: missing, since: querySince },
     undefined,
-    { optional: true }
+    { priority: 'optional' }
   );
   const fetched = new Map<number, number>();
   // Newest first, so each anime's first airing is its latest
@@ -353,7 +362,7 @@ export async function getSeries(mediaId: number): Promise<NyaaSeries> {
       }`,
       { id },
       undefined,
-      { optional: true }
+      { priority: 'optional' }
     );
     const entries = data.Media.relations.edges.filter(
       ({ node }) => node.type === 'ANIME' && SERIES_FORMATS.includes(node.format ?? '')
@@ -463,7 +472,7 @@ export async function getUpcomingAirings(
         }`,
         { ids: missing, from: from - 1, until, page },
         undefined,
-        { optional: true, cacheTtlMs: 60 * 60 * 1000 }
+        { priority: 'optional', cacheTtlMs: 60 * 60 * 1000 }
       );
       for (const airing of data.Page.airingSchedules) {
         if (requested.has(airing.mediaId) && airing.airingAt >= from && airing.airingAt < until)
@@ -561,7 +570,7 @@ export async function getFriendsWatching(
       }`,
       { ids: mediaIds, page, viewerId, includeViewer: page === 1 },
       token,
-      { optional: true }
+      { priority: 'optional' }
     ).catch((error) => {
       // Keep already-loaded matches if the optional budget runs out mid-pagination.
       if (page > 1 && error instanceof AniListRateLimitError) {
@@ -645,7 +654,7 @@ export async function getSharedAnime(token: string, userId: number): Promise<Sha
     }`,
     { userId },
     token,
-    { optional: true }
+    { priority: 'optional' }
   );
   return onePerAnime(
     MediaListCollection.lists.filter((list) => !list.isCustomList).flatMap((list) => list.entries)
@@ -655,6 +664,112 @@ export async function getSharedAnime(token: string, userId: number): Promise<Sha
     isAdult: media.isAdult,
     coverUrl: media.coverImage?.large,
   }));
+}
+
+/*
+ * Taste profiles are read for links anyone can share, so each is kept a while, trimmed, apart from
+ * the public cache: AniList's answer for a long list is a megabyte
+ */
+const tasteCache = new Map<string, { profile: TasteProfile; expiresAt: number }>();
+const TASTE_TTL_MS = 10 * 60 * 1000;
+const MAX_TASTE_PROFILES = 50;
+
+/**
+ * What someone thinks of the anime on their list, to compare tastes, from their whole list in one
+ * request. It's always read anonymously, as comparisons are public and cached for anyone, so
+ * private entries stay private; and it's the first read to give way when AniList is busy
+ */
+export async function getTasteProfile(userName: string): Promise<TasteProfile> {
+  // Anyone can ask for any name, and a name that can't exist would still spend a request
+  if (!isUserName(userName)) throw new AniListNotFoundError(`No AniList user named ${userName}`);
+  // AniList ignores case in names, so every spelling shares one read
+  const key = userName.toLowerCase();
+  const cached = tasteCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.profile;
+
+  const { MediaListCollection } = await query<{
+    MediaListCollection: {
+      user: {
+        id: number;
+        name: string;
+        avatar: { large: string | null } | null;
+        mediaListOptions: { scoreFormat: string | null } | null;
+      };
+      lists: {
+        isCustomList: boolean;
+        entries: {
+          status: string;
+          /** In the user's own score format; 0 when they haven't scored it */
+          score: number;
+          updatedAt: number;
+          media: {
+            id: number;
+            title: { romaji: string };
+            coverImage: { large: string | null } | null;
+            isAdult: boolean;
+            meanScore: number | null;
+          };
+        }[];
+      }[];
+    };
+  }>(
+    `query ($userName: String) {
+      MediaListCollection(userName: $userName, type: ANIME) {
+        user { id name avatar { large } mediaListOptions { scoreFormat } }
+        lists {
+          isCustomList
+          entries {
+            status
+            score
+            updatedAt
+            media { id title { romaji } coverImage { large } isAdult meanScore }
+          }
+        }
+      }
+    }`,
+    { userName: key },
+    undefined,
+    { priority: 'spare', cacheTtlMs: 0 }
+  );
+
+  const { user, lists } = MediaListCollection;
+  const profile: TasteProfile = {
+    id: user.id,
+    name: user.name,
+    avatarUrl: user.avatar?.large ?? null,
+    scoreFormat: isScoreFormat(user.mediaListOptions?.scoreFormat)
+      ? user.mediaListOptions.scoreFormat
+      : DEFAULT_SCORE_FORMAT,
+    scored: [],
+    seen: [],
+    planned: [],
+  };
+  const entries = onePerAnime(
+    lists.filter((list) => !list.isCustomList).flatMap((list) => list.entries)
+  );
+  /*
+   * Scores out of 100 are worked out here rather than asked for: AniList answers `score` with them
+   * too, past the first entry, when a query also asks for `score(format: POINT_100)`
+   */
+  for (const { status, score, media } of entries) {
+    if (status === 'PLANNING') profile.planned.push(media.id);
+    else if (score > 0)
+      profile.scored.push({
+        id: media.id,
+        title: media.title.romaji,
+        coverUrl: media.coverImage?.large ?? null,
+        isAdult: media.isAdult,
+        meanScore: media.meanScore,
+        score,
+        score100: toScore100(score, profile.scoreFormat),
+      });
+    else profile.seen.push(media.id);
+  }
+
+  tasteCache.delete(key);
+  if (tasteCache.size >= MAX_TASTE_PROFILES) tasteCache.delete(tasteCache.keys().next().value!);
+  tasteCache.set(key, { profile, expiresAt: Date.now() + TASTE_TTL_MS });
+  return profile;
 }
 
 type AniListUserFields = { id: number; name: string; avatar: { large: string | null } | null };

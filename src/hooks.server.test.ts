@@ -90,8 +90,14 @@ describe('request security', () => {
   it.each([
     ['/preview.png', '/preview.png'],
     ['/user/anilist/fixture/preview.jpg', '/user/[domain]/[username]/preview.jpg'],
+    ['/user/anilist/fixture/match/preview.jpg', '/user/[domain]/[username]/match/preview.jpg'],
+    [
+      '/user/anilist/fixture/match/other/preview.jpg',
+      '/user/[domain]/[username]/match/[other]/preview.jpg',
+    ],
+    ['/api/taste/fixture', '/api/taste/[username]'],
   ])(
-    'lets the public preview image %s keep its own caching, even for a signed-in request',
+    'lets the public data at %s keep its own caching, even for a signed-in request',
     async (path, routeId) => {
       vi.mocked(getSession).mockReturnValue({
         token: 'fixture',
@@ -111,6 +117,8 @@ describe('request security', () => {
     // Only the route SvelteKit resolved counts, not what the path looks like
     ['/user/anilist/fixture/preview.jpg', '/user/[domain]/[username]'],
     ['/user/anilist/fixture/friends', '/user/[domain]/[username]/friends'],
+    ['/user/anilist/fixture/match/other', '/user/[domain]/[username]/match/[[other]]'],
+    ['/api/list/fixture', '/api/list/[username]'],
     ['/preview.png/x', null],
   ])('keeps other routes private, whatever their path: %s', async (path, routeId) => {
     const response = await handle({

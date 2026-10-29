@@ -9,10 +9,24 @@ beforeEach(async () => {
 
 describe('per-instance rate limits', () => {
   it('reserves five outbound slots for lists and saves after optional social requests', async () => {
-    for (let i = 0; i < 20; i++) expect((await limits.takeAniListRequest(true)).allowed).toBe(true);
-    expect((await limits.takeAniListRequest(true)).allowed).toBe(false);
+    for (let i = 0; i < 20; i++) {
+      expect((await limits.takeAniListRequest('optional')).allowed).toBe(true);
+    }
+    expect((await limits.takeAniListRequest('optional')).allowed).toBe(false);
     for (let i = 0; i < 5; i++) expect((await limits.takeAniListRequest()).allowed).toBe(true);
     expect((await limits.takeAniListRequest()).allowed).toBe(false);
+  });
+
+  it('stops spare taste comparisons first, leaving ten slots for everything else', async () => {
+    for (let i = 0; i < 15; i++) {
+      expect((await limits.takeAniListRequest('spare')).allowed).toBe(true);
+    }
+    expect((await limits.takeAniListRequest('spare')).allowed).toBe(false);
+    for (let i = 0; i < 5; i++) {
+      expect((await limits.takeAniListRequest('optional')).allowed).toBe(true);
+    }
+    expect((await limits.takeAniListRequest('optional')).allowed).toBe(false);
+    expect((await limits.takeAniListRequest()).allowed).toBe(true);
   });
   it('charges weighted costs and allows a fresh window after expiry', async () => {
     const now = Date.now();

@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  AniListNotFoundError,
   AniListRateLimitError,
   AniListTokenError,
   getFollowing,
   getLatestAirings,
   getSeries,
+  getTasteProfile,
   getViewer,
   saveEntry,
 } from '#lib/server/anilist-client.js';
@@ -339,5 +341,110 @@ describe('series', () => {
     vi.mocked(takeAniListRequest).mockResolvedValueOnce({ allowed: false, retryAfter: 30 });
     await expect(getSeries(402)).rejects.toBeInstanceOf(AniListRateLimitError);
     expect((await getSeries(402)).arc).toEqual({ offset: 12, title: 'Show', season: 2 });
+  });
+});
+
+describe('taste profiles', () => {
+  const entry = (id: number, status: string, score: number, updatedAt = 0) => ({
+    status,
+    score,
+    updatedAt,
+    media: {
+      id,
+      title: { romaji: `Anime ${id}` },
+      coverImage: { large: `https://s4.anilist.co/${id}.jpg` },
+      isAdult: false,
+      meanScore: 70,
+    },
+  });
+  const collection = (name: string) =>
+    Response.json({
+      data: {
+        MediaListCollection: {
+          user: {
+            id: 7,
+            name,
+            avatar: { large: null },
+            mediaListOptions: { scoreFormat: 'POINT_10' },
+          },
+          lists: [
+            {
+              isCustomList: false,
+              entries: [
+                entry(1, 'COMPLETED', 9),
+                entry(2, 'DROPPED', 0),
+                entry(3, 'PLANNING', 0),
+                // Listed twice, as after a double import: the later edit stands
+                entry(4, 'CURRENT', 5, 10),
+                entry(4, 'COMPLETED', 8, 20),
+              ],
+            },
+            // Custom lists repeat entries from the status lists
+            { isCustomList: true, entries: [entry(1, 'COMPLETED', 9)] },
+          ],
+        },
+      },
+    });
+
+  it('reads a whole list anonymously, at the lowest priority, and trims it', async () => {
+    vi.mocked(fetch).mockResolvedValue(collection('Taster'));
+    const profile = await getTasteProfile('Taster');
+    expect(profile).toEqual({
+      id: 7,
+      name: 'Taster',
+      avatarUrl: null,
+      scoreFormat: 'POINT_10',
+      scored: [
+        expect.objectContaining({ id: 1, score: 9, score100: 90 }),
+        expect.objectContaining({ id: 4, score: 8, score100: 80 }),
+      ],
+      seen: [2],
+      planned: [3],
+    });
+    const init = vi.mocked(fetch).mock.calls[0][1]!;
+    expect(init.headers).not.toHaveProperty('Authorization');
+    const { query } = JSON.parse(init.body as string);
+    expect(query).not.toContain('status_in');
+    // AniList answers both with scores out of 100 when one query asks for both
+    expect(query).not.toContain('POINT_100');
+    expect(takeAniListRequest).toHaveBeenCalledWith('spare');
+  });
+
+  it('reads a list once for every spelling of the name, and for simultaneous comparisons', async () => {
+    vi.mocked(fetch).mockImplementation(async () => collection('Shared'));
+    await Promise.all([getTasteProfile('Shared'), getTasteProfile('SHARED')]);
+    await getTasteProfile('shared');
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string).variables).toEqual({
+      userName: 'shared',
+    });
+  });
+
+  it('reads a list again once its profile is ten minutes old', async () => {
+    vi.mocked(fetch).mockImplementation(async () => collection('Aging'));
+    const now = Date.now();
+    vi.spyOn(Date, 'now').mockReturnValue(now);
+    await getTasteProfile('Aging');
+    vi.spyOn(Date, 'now').mockReturnValue(now + 9 * 60 * 1000);
+    await getTasteProfile('Aging');
+    expect(fetch).toHaveBeenCalledTimes(1);
+    vi.spyOn(Date, 'now').mockReturnValue(now + 10 * 60 * 1000);
+    await getTasteProfile('Aging');
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('never asks AniList about a name that cannot exist', async () => {
+    await expect(getTasteProfile('../settings')).rejects.toBeInstanceOf(AniListNotFoundError);
+    await expect(getTasteProfile('x'.repeat(40))).rejects.toBeInstanceOf(AniListNotFoundError);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(takeAniListRequest).not.toHaveBeenCalled();
+  });
+
+  it('gives way when AniList has no spare requests, without keeping the failure', async () => {
+    vi.mocked(fetch).mockImplementation(async () => collection('Patient'));
+    vi.mocked(takeAniListRequest).mockResolvedValueOnce({ allowed: false, retryAfter: 20 });
+    await expect(getTasteProfile('Patient')).rejects.toBeInstanceOf(AniListRateLimitError);
+    expect(fetch).not.toHaveBeenCalled();
+    expect((await getTasteProfile('Patient')).name).toBe('Patient');
   });
 });

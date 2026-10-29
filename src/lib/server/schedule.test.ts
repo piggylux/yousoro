@@ -60,7 +60,7 @@ describe('four-week airing lookup', () => {
     expect(body.query).toContain('perPage: 50');
     expect(body.query).not.toContain('MediaList');
     expect(init.headers).not.toHaveProperty('Authorization');
-    expect(takeAniListRequest).toHaveBeenCalledWith(true);
+    expect(takeAniListRequest).toHaveBeenCalledWith('optional');
   });
   it('loads multiple episodes per anime across pages and stops when complete', async () => {
     vi.mocked(fetch)
