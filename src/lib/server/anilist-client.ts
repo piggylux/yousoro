@@ -752,17 +752,16 @@ export async function getTasteProfile(userName: string): Promise<TasteProfile> {
    * too, past the first entry, when a query also asks for `score(format: POINT_100)`
    */
   for (const { status, score, media } of entries) {
-    if (status === 'PLANNING') profile.planned.push(media.id);
+    const anime = {
+      id: media.id,
+      title: media.title.romaji,
+      coverUrl: media.coverImage?.large ?? null,
+      isAdult: media.isAdult,
+      meanScore: media.meanScore,
+    };
+    if (status === 'PLANNING') profile.planned.push(anime);
     else if (score > 0)
-      profile.scored.push({
-        id: media.id,
-        title: media.title.romaji,
-        coverUrl: media.coverImage?.large ?? null,
-        isAdult: media.isAdult,
-        meanScore: media.meanScore,
-        score,
-        score100: toScore100(score, profile.scoreFormat),
-      });
+      profile.scored.push({ ...anime, score, score100: toScore100(score, profile.scoreFormat) });
     else profile.seen.push(media.id);
   }
 

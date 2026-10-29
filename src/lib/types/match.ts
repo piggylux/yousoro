@@ -1,7 +1,7 @@
 import type { ScoreFormat } from '#lib/score.js';
 
-/** An anime someone has scored, with what's needed to show it */
-export type ScoredAnime = {
+/** An anime on someone's list, with what's needed to show it */
+export type ListedAnime = {
   id: number;
   title: string;
   coverUrl: string | null;
@@ -9,6 +9,10 @@ export type ScoredAnime = {
   isAdult: boolean;
   /** The average of all AniList users' scores, out of 100; null until enough have scored it */
   meanScore: number | null;
+};
+
+/** An anime someone has scored */
+export type ScoredAnime = ListedAnime & {
   /** Their score, in their own score format */
   score: number;
   /** The same score out of 100, to compare it with someone else's */
@@ -17,7 +21,8 @@ export type ScoredAnime = {
 
 /**
  * What someone thinks of the anime on their public AniList list, to compare with someone else's.
- * Anime they've scored come with titles and covers, to show them; the rest are only ids
+ * Anime they've scored or plan to watch come with titles and covers, to show them; the others they
+ * have seen are only ids
  */
 export type TasteProfile = {
   id: number;
@@ -30,7 +35,7 @@ export type TasteProfile = {
   /** The other anime they've watched some or all of, dropped ones included */
   seen: number[];
   /** The anime they plan to watch */
-  planned: number[];
+  planned: ListedAnime[];
 };
 
 /** An anime both have scored, with each one's score in their own format */

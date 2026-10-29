@@ -1,5 +1,6 @@
 import { retryAfterSeconds } from '#lib/read-retry.js';
 import type {
+  ListedAnime,
   MatchPick,
   ScoredAnime,
   ScoredByBoth,
@@ -88,8 +89,8 @@ export function compareTastes(
     bothScored: both.length,
     bothLoved,
     disagreements,
-    picksForA: picks(b, averageB, seenByA, new Set(a.planned), shown),
-    picksForB: picks(a, averageA, seenByB, new Set(b.planned), shown),
+    picksForA: picks(b, averageB, seenByA, plannedBy(a), shown),
+    picksForB: picks(a, averageA, seenByB, plannedBy(b), shown),
   };
 }
 
@@ -120,7 +121,11 @@ function picks(
     .map((anime) => ({ anime, planned: planned.has(anime.id) }));
 }
 
-function byTitle(x: ScoredAnime, y: ScoredAnime) {
+function plannedBy(profile: TasteProfile) {
+  return new Set(profile.planned.map((anime) => anime.id));
+}
+
+function byTitle(x: ListedAnime, y: ListedAnime) {
   return x.title.localeCompare(y.title) || x.id - y.id;
 }
 
@@ -183,6 +188,12 @@ export type TasteProfileState =
   | { status: 'failed' };
 
 /**
+ * Changed with the shape of a taste profile, so neither the browser nor the CDN can answer with a
+ * profile they kept from before: they keep each for up to a day
+ */
+const TASTE_PROFILE_VERSION = 2;
+
+/**
  * Reads someone's taste profile in the browser. Names are sent in lower case, as AniList ignores
  * case, so every spelling of a name shares one cached profile
  */
@@ -191,7 +202,9 @@ export async function loadTasteProfile(
   fetcher: typeof fetch = fetch
 ): Promise<Exclude<TasteProfileState, { status: 'loading' }>> {
   try {
-    const response = await fetcher(`/api/taste/${encodeURIComponent(name.toLowerCase())}`);
+    const response = await fetcher(
+      `/api/taste/${encodeURIComponent(name.toLowerCase())}?v=${TASTE_PROFILE_VERSION}`
+    );
     if (response.ok) return { status: 'ready', profile: await response.json() };
     if (response.status === 404) return { status: 'missing' };
     if (response.status === 429) {
