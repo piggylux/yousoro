@@ -158,7 +158,7 @@ describe('batched AniList friend matches', () => {
     expect(result.matches[1]).toHaveLength(1);
     expect(fetch).toHaveBeenCalledTimes(1);
   });
-  it('gets the own comparison list without airing enrichment or custom-list duplicates', async () => {
+  it('gets the own comparison list without airing enrichment or duplicates', async () => {
     vi.mocked(fetch).mockResolvedValue(
       Response.json({
         data: {
@@ -181,6 +181,14 @@ describe('batched AniList friend matches', () => {
                 isCustomList: true,
                 entries: [{ media: { id: 1, title: { romaji: 'Anime' }, isAdult: true } }],
               },
+              // AniList can hold one anime twice in the same list, e.g. after an import
+              {
+                isCustomList: false,
+                entries: [
+                  { media: { id: 2, title: { romaji: 'Other' }, isAdult: false } },
+                  { media: { id: 2, title: { romaji: 'Other' }, isAdult: false } },
+                ],
+              },
             ],
           },
         },
@@ -188,6 +196,7 @@ describe('batched AniList friend matches', () => {
     );
     expect(await getSharedAnime('token', 10)).toEqual([
       { id: 1, title: 'Anime', isAdult: true, coverUrl: 'https://s4.anilist.co/cover.jpg' },
+      { id: 2, title: 'Other', isAdult: false, coverUrl: undefined },
     ]);
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string).query).not.toContain(
