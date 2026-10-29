@@ -214,13 +214,13 @@ export async function getWatchingEntries(
 
 /**
  * AniList can hold two entries for one anime, as when another site imports a list twice at once.
- * The one updated last stands for it, in the place of the first
+ * The one updated last stands for it, in the place of the first; without update times, the first
  */
-function onePerAnime(entries: AniListEntry[]): AniListEntry[] {
-  const byAnime = new Map<number, AniListEntry>();
+function onePerAnime<T extends { media: { id: number }; updatedAt?: number }>(entries: T[]): T[] {
+  const byAnime = new Map<number, T>();
   for (const entry of entries) {
     const kept = byAnime.get(entry.media.id);
-    if (!kept || entry.updatedAt > kept.updatedAt) byAnime.set(entry.media.id, entry);
+    if (!kept || (entry.updatedAt ?? 0) > (kept.updatedAt ?? 0)) byAnime.set(entry.media.id, entry);
   }
   return [...byAnime.values()];
 }
@@ -647,16 +647,14 @@ export async function getSharedAnime(token: string, userId: number): Promise<Sha
     token,
     { optional: true }
   );
-  return MediaListCollection.lists
-    .filter((list) => !list.isCustomList)
-    .flatMap((list) =>
-      list.entries.map(({ media }) => ({
-        id: media.id,
-        title: media.title.romaji,
-        isAdult: media.isAdult,
-        coverUrl: media.coverImage?.large,
-      }))
-    );
+  return onePerAnime(
+    MediaListCollection.lists.filter((list) => !list.isCustomList).flatMap((list) => list.entries)
+  ).map(({ media }) => ({
+    id: media.id,
+    title: media.title.romaji,
+    isAdult: media.isAdult,
+    coverUrl: media.coverImage?.large,
+  }));
 }
 
 type AniListUserFields = { id: number; name: string; avatar: { large: string | null } | null };
