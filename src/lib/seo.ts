@@ -1,6 +1,7 @@
 import { joinNames } from '#lib/match-words.js';
 import { matchPath } from '#lib/match.js';
 import { togetherPath } from '#lib/together.js';
+import { wrappedPath } from '#lib/wrapped.js';
 
 export const SITE_ORIGIN = 'https://yousoro.vercel.app';
 export const SITE_NAME = 'Yousoro';
@@ -30,6 +31,11 @@ export function groupPreviewImage(username: string, others: string[]): string {
   return `${SITE_ORIGIN}${togetherPath(username, others)}/preview.jpg`;
 }
 
+/** The link preview of someone's year in anime */
+export function wrappedPreviewImage(username: string, year: number): string {
+  return `${SITE_ORIGIN}${wrappedPath(username, year)}/preview.jpg`;
+}
+
 /** The link preview of a taste match, or of an invitation to compare with `username` alone */
 export function matchPreviewImage(username: string, other?: string): string {
   return `${SITE_ORIGIN}${matchPath(username, other)}/preview.jpg`;
@@ -48,9 +54,10 @@ export function getPageSeo(url: SeoUrl, status = 200, resolvedUsername?: string)
   const home = path === '/home';
   const taste = path.match(/^\/user\/anilist\/([^/]+)\/match(?:\/([^/]+))?$/);
   const group = path.match(/^\/user\/anilist\/([^/]+)\/together((?:\/[^/]+)*)$/);
+  const wrapped = path.match(/^\/user\/anilist\/([^/]+)\/wrapped\/(\d{4})$/);
   const badge = path.match(/^\/user\/anilist\/([^/]+)\/badge$/);
-  // The names in the path of a group or a badge, its owner's first
-  const owned = group ?? badge;
+  // The names in the path of a group, a year in anime or a badge, its owner's first
+  const owned = group ?? wrapped ?? badge;
   let names: string[] = [];
   try {
     if (owned) {
@@ -86,6 +93,16 @@ export function getPageSeo(url: SeoUrl, status = 200, resolvedUsername?: string)
         alt: `Pick an anime to watch with ${host}`,
       };
     }
+  } else if (wrapped) {
+    const [name] = names;
+    const year = Number(wrapped[2]);
+    title = `${name}'s ${year} in Anime | ${SITE_NAME}`;
+    description = `The anime ${name} finished in ${year}: hours watched, top genres, favorites, and their hottest take.`;
+    image = {
+      url: wrappedPreviewImage(name, year),
+      type: 'image/jpeg',
+      alt: `${name}'s ${year} in anime`,
+    };
   } else if (badge) {
     title = `${names[0]}'s Profile Badge | ${SITE_NAME}`;
     description = `Show what ${names[0]} is watching on an AniList profile, in a README, or anywhere that shows images.`;

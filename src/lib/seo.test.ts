@@ -202,3 +202,11 @@ describe('badge metadata', () => {
     );
   });
 });
+
+describe('year in anime metadata', () => {
+  it('names the person and year of a year in anime', () => {
+    const seo = getPageSeo(new URL(`${SITE_ORIGIN}/user/anilist/Alice/wrapped/2026`));
+    expect(seo.title).toBe("Alice's 2026 in Anime | Yousoro");
+    expect(seo.image.url).toBe(`${SITE_ORIGIN}/user/anilist/Alice/wrapped/2026/preview.jpg`);
+  });
+});

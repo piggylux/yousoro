@@ -12,6 +12,7 @@ import type { AiringStatus } from '#lib/types/anime.js';
 import type { FriendWatchingResult, SharedAnime } from '#lib/types/friend-watching.js';
 import type { TasteProfile } from '#lib/types/match.js';
 import type { ScheduleResult, ScheduledEpisode } from '#lib/types/schedule.js';
+import type { AnimeYear } from '#lib/types/wrapped.js';
 
 const ANILIST_URL = 'https://graphql.anilist.co';
 const publicCache = new Map<string, { data: unknown; expiresAt: number }>();
@@ -774,6 +775,114 @@ export async function getTasteProfile(userName: string): Promise<TasteProfile> {
   if (tasteCache.size >= MAX_TASTE_PROFILES) tasteCache.delete(tasteCache.keys().next().value!);
   tasteCache.set(key, { profile, expiresAt: Date.now() + TASTE_TTL_MS });
   return profile;
+}
+
+/** Years in anime are read for links anyone can share, so each is kept a while, like profiles */
+const yearCache = new Map<string, { year: AnimeYear; expiresAt: number }>();
+// An episode's length when AniList doesn't know it: most TV anime run about this long
+const TYPICAL_EPISODE_MINUTES = 24;
+
+/**
+ * The anime someone finished in a year, from their public list, to sum up their year. Only anime
+ * with a finish date in it count: AniList sets one when an anime is marked completed. Read
+ * anonymously and at the lowest priority, as taste profiles are
+ */
+export async function getAnimeYear(userName: string, year: number): Promise<AnimeYear> {
+  if (!isUserName(userName)) throw new AniListNotFoundError(`No AniList user named ${userName}`);
+  const key = `${userName.toLowerCase()}:${year}`;
+  const cached = yearCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.year;
+
+  const { MediaListCollection } = await query<{
+    MediaListCollection: {
+      user: {
+        id: number;
+        name: string;
+        avatar: { large: string | null } | null;
+        mediaListOptions: { scoreFormat: string | null } | null;
+      };
+      lists: {
+        isCustomList: boolean;
+        entries: {
+          status: 'COMPLETED' | 'REPEATING';
+          score: number;
+          progress: number;
+          updatedAt: number;
+          completedAt: { month: number | null };
+          media: {
+            id: number;
+            title: { romaji: string };
+            coverImage: { large: string | null } | null;
+            isAdult: boolean;
+            meanScore: number | null;
+            episodes: number | null;
+            duration: number | null;
+            genres: string[] | null;
+          };
+        }[];
+      }[];
+    };
+  }>(
+    `query ($userName: String, $after: FuzzyDateInt, $before: FuzzyDateInt) {
+      MediaListCollection(userName: $userName, type: ANIME, status_in: [COMPLETED, REPEATING],
+        completedAt_greater: $after, completedAt_lesser: $before) {
+        user { id name avatar { large } mediaListOptions { scoreFormat } }
+        lists {
+          isCustomList
+          entries {
+            status
+            score
+            progress
+            updatedAt
+            completedAt { month }
+            media {
+              id title { romaji } coverImage { large } isAdult meanScore episodes duration genres
+            }
+          }
+        }
+      }
+    }`,
+    // Dates are read as YYYYMMDD, and a date with only its year as YYYY0000
+    { userName: userName.toLowerCase(), after: year * 10000 - 1, before: (year + 1) * 10000 },
+    undefined,
+    { priority: 'spare', cacheTtlMs: 0 }
+  );
+
+  const { user, lists } = MediaListCollection;
+  const scoreFormat = isScoreFormat(user.mediaListOptions?.scoreFormat)
+    ? user.mediaListOptions.scoreFormat
+    : DEFAULT_SCORE_FORMAT;
+  const animeYear: AnimeYear = {
+    id: user.id,
+    name: user.name,
+    avatarUrl: user.avatar?.large ?? null,
+    scoreFormat,
+    year,
+    finished: onePerAnime(
+      lists.filter((list) => !list.isCustomList).flatMap((list) => list.entries)
+    ).map(({ status, score, progress, completedAt, media }) => {
+      // An anime being rewatched was watched in full before: its progress is the rewatch's
+      const episodes = status === 'REPEATING' ? Math.max(progress, media.episodes ?? 0) : progress;
+      return {
+        id: media.id,
+        title: media.title.romaji,
+        coverUrl: media.coverImage?.large ?? null,
+        isAdult: media.isAdult,
+        meanScore: media.meanScore,
+        score,
+        score100: score > 0 ? toScore100(score, scoreFormat) : null,
+        episodes,
+        minutes: episodes * (media.duration ?? TYPICAL_EPISODE_MINUTES),
+        month: completedAt.month,
+        genres: media.genres ?? [],
+      };
+    }),
+  };
+
+  yearCache.delete(key);
+  if (yearCache.size >= MAX_TASTE_PROFILES) yearCache.delete(yearCache.keys().next().value!);
+  yearCache.set(key, { year: animeYear, expiresAt: Date.now() + TASTE_TTL_MS });
+  return animeYear;
 }
 
 type AniListUserFields = { id: number; name: string; avatar: { large: string | null } | null };

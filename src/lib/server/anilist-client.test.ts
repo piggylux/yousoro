@@ -4,6 +4,7 @@ import {
   AniListNotFoundError,
   AniListRateLimitError,
   AniListTokenError,
+  getAnimeYear,
   getFollowing,
   getLatestAirings,
   getSeries,
@@ -446,5 +447,64 @@ describe('taste profiles', () => {
     await expect(getTasteProfile('Patient')).rejects.toBeInstanceOf(AniListRateLimitError);
     expect(fetch).not.toHaveBeenCalled();
     expect((await getTasteProfile('Patient')).name).toBe('Patient');
+  });
+});
+
+describe('years in anime', () => {
+  const entry = (id: number, status: string, progress: number, score = 0) => ({
+    status,
+    score,
+    progress,
+    updatedAt: 0,
+    completedAt: { month: 3 },
+    media: {
+      id,
+      title: { romaji: `Anime ${id}` },
+      coverImage: { large: null },
+      isAdult: false,
+      meanScore: 70,
+      episodes: 24,
+      duration: null,
+      genres: ['Drama'],
+    },
+  });
+
+  it('reads what was finished in the year, counting a rewatched anime in full', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      Response.json({
+        data: {
+          MediaListCollection: {
+            user: { id: 7, name: 'Viewer', avatar: null, mediaListOptions: null },
+            lists: [
+              {
+                isCustomList: false,
+                entries: [entry(1, 'COMPLETED', 24, 8), entry(2, 'REPEATING', 3)],
+              },
+              // Custom lists repeat entries from the status lists
+              { isCustomList: true, entries: [entry(1, 'COMPLETED', 24, 8)] },
+            ],
+          },
+        },
+      })
+    );
+    const year = await getAnimeYear('Viewer', 2026);
+    expect(year.finished).toEqual([
+      expect.objectContaining({ id: 1, score100: 80, episodes: 24, minutes: 24 * 24 }),
+      expect.objectContaining({ id: 2, score100: null, episodes: 24, minutes: 24 * 24 }),
+    ]);
+    const init = vi.mocked(fetch).mock.calls[0][1]!;
+    expect(init.headers).not.toHaveProperty('Authorization');
+    // Finish dates are YYYYMMDD, and one with only its year YYYY0000, which still counts
+    expect(JSON.parse(init.body as string).variables).toEqual({
+      userName: 'viewer',
+      after: 20259999,
+      before: 20270000,
+    });
+    expect(takeAniListRequest).toHaveBeenCalledWith('spare');
+  });
+
+  it('never asks AniList for a name that cannot be one', async () => {
+    await expect(getAnimeYear('two words', 2026)).rejects.toThrow(AniListNotFoundError);
+    expect(fetch).not.toHaveBeenCalled();
   });
 });

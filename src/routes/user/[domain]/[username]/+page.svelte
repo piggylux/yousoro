@@ -39,9 +39,12 @@
   import type { AnimePageData } from '#lib/types/api.js';
   import type { FriendWatching, FriendWatchingResult } from '#lib/types/friend-watching.js';
   import { countColumns, getVisibleRange, type VisibleRange } from '#lib/virtual-grid.js';
+  import { wrappedPath, wrappedYear } from '#lib/wrapped.js';
 
   let { data }: { data: AnimePageData } = $props();
   const calendarView = $derived(page.url.searchParams.get('view') === 'calendar');
+  // The year the list links to a summary of
+  const recapYear = wrappedYear(new Date());
 
   // The view being looked at, as anyone would see it: without the viewer's filters or search
   const share = $derived.by(() => {
@@ -402,6 +405,8 @@
           <a href={`/user/anilist/${encodeURIComponent(data.username)}/friends`}>Friends</a>
           · <a href={matchPath(data.username)}>Taste match</a>
           · <a href={togetherPath(data.username)}>Watch together</a>
+          ·
+          <a href={wrappedPath(data.username, recapYear)}>{recapYear} in anime</a>
           {#if data.canEdit}
             · <a href={`/user/anilist/${encodeURIComponent(data.username)}/badge`}>Profile badge</a>
           {/if}

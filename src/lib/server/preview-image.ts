@@ -9,6 +9,8 @@ import { PREVIEW_IMAGE_SIZE, SITE_ORIGIN } from '#lib/seo.js';
 import { pickForGroup } from '#lib/together.js';
 import type { Anime } from '#lib/types/anime.js';
 import type { TasteMatch, TasteProfile } from '#lib/types/match.js';
+import type { AnimeYear } from '#lib/types/wrapped.js';
+import { summarizeYear } from '#lib/wrapped.js';
 
 /*
  * The light theme's colours from src/app.css. The image is drawn on the server, without the page's
@@ -693,6 +695,33 @@ export async function renderGroupPreview(
     'jpeg'
   );
   return imageResponse(image, 'jpeg', cacheControl);
+}
+
+/**
+ * The preview of someone's year in anime: how much they finished, their favorite genres, and covers
+ * of what they scored highest. Adult anime are left out, as for a visitor who hasn't chosen to see
+ * them
+ */
+export async function renderWrappedPreview(
+  animeYear: AnimeYear,
+  cacheControl: string
+): Promise<Response> {
+  const summary = summarizeYear(animeYear);
+  const genres = summary.topGenres.map(({ genre }) => genre);
+  return renderPersonPreview(
+    { name: animeYear.name, avatarUrl: animeYear.avatarUrl, caption: `${animeYear.year} in anime` },
+    summary.favorites.map((anime) => anime.coverUrl),
+    summary.finished
+      ? {
+          headline: `${summary.finished.toLocaleString('en-US')} anime finished · ${summary.hours.toLocaleString('en-US')} hours`,
+          detail: genres.length ? `Mostly ${joinNames(genres)}` : 'An AniList year in anime',
+        }
+      : {
+          headline: `No anime finished in ${animeYear.year} yet`,
+          detail: 'An AniList year in anime',
+        },
+    cacheControl
+  );
 }
 
 /** The site's own preview, drawn once per format: it's the same every time */
