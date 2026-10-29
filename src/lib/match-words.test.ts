@@ -131,25 +131,45 @@ describe('match comments', () => {
 });
 
 describe('final thoughts', () => {
-  it("jokes about the pair's own anime, keeping titles apart from the words", () => {
+  it('celebrates a close match, teases its one disagreement, and sets homework', () => {
     const sentences = finalThought(match(), alice, bob, voiceFor(null));
     expect(read(sentences)).toBe(
-      '120 anime in common, which is basically a shared personality at this point. ' +
-        'Alice and Bob agree Frieren and Mushishi are peak. Nobody tell the comment section. ' +
-        'Never bring up Ex-Arm at dinner: Alice gave it 8 / 10, Bob gave it 2 / 10, and someone is wrong. ' +
+      'Alice and Bob agree Frieren and Mushishi are peak. Nobody tell the comment section. ' +
+        'The only crack in this friendship: Ex-Arm, 8 / 10 from Alice against 2 / 10 from Bob. ' +
         "Homework for Bob: Monster, straight from Alice's favorites. No excuses."
     );
     const titles = sentences.flat().filter((part) => part.title);
     expect(titles.map(({ text }) => text)).toEqual(['Frieren', 'Mushishi', 'Ex-Arm', 'Monster']);
     // Scores stay on one line
-    expect(sentences[2].map(({ text }) => text).join('')).toContain('8 / 10');
+    expect(sentences[1].map(({ text }) => text).join('')).toContain('8 / 10');
+  });
+
+  it('leads rivals with their fight, then concedes the anime they both love', () => {
+    expect(read(finalThought(match({ percent: 20 }), alice, bob, voiceFor(null)))).toBe(
+      'Never bring up Ex-Arm at dinner: Alice gave it 8 / 10, Bob gave it 2 / 10, and someone is wrong. ' +
+        'The one thing keeping the peace: Frieren, loved on both sides. ' +
+        "Homework for Bob: Monster, straight from Alice's favorites. No excuses."
+    );
+  });
+
+  it('gives a mixed match both its common ground and its fight', () => {
+    const thought = read(finalThought(match({ percent: 50 }), alice, bob, voiceFor(null)));
+    expect(thought).toContain('Alice and Bob agree Frieren and Mushishi are peak.');
+    expect(thought).toContain('Never bring up Ex-Arm at dinner');
+  });
+
+  it('says at most three sentences, never repeating how many anime they share', () => {
+    for (const percent of [95, 80, 50, 20, null]) {
+      const sentences = finalThought(match({ percent }), alice, bob, voiceFor(null));
+      expect(sentences.length).toBeLessThanOrEqual(3);
+      expect(read(sentences)).not.toContain('anime in common');
+    }
   });
 
   it('talks to the viewer, and gives them the homework', () => {
     expect(read(finalThought(match(), alice, bob, voiceFor('bob')))).toBe(
-      '120 anime in common, which is basically a shared personality at this point. ' +
-        'You and Alice agree Frieren and Mushishi are peak. Nobody tell the comment section. ' +
-        'Never bring up Ex-Arm at dinner: Alice gave it 8 / 10, you gave it 2 / 10, and someone is wrong. ' +
+      'You and Alice agree Frieren and Mushishi are peak. Nobody tell the comment section. ' +
+        'The only crack in this friendship: Ex-Arm, 8 / 10 from Alice against 2 / 10 from you. ' +
         "Homework for you: Monster, straight from Alice's favorites. No excuses."
     );
     expect(read(finalThought(match(), alice, bob, voiceFor('alice')))).toContain(
@@ -157,14 +177,53 @@ describe('final thoughts', () => {
     );
   });
 
+  it('names two different shows both loved, and only one when their titles run long', () => {
+    const loved = (...titles: string[]) =>
+      match({
+        bothLoved: titles.map((name, index) => ({ anime: anime(10 + index, name), a: 9, b: 9 })),
+      });
+    expect(
+      read(
+        finalThought(loved('Steins;Gate', 'Steins;Gate 0', 'Mushishi'), alice, bob, voiceFor(null))
+      )
+    ).toContain('agree Steins;Gate and Mushishi are peak.');
+    expect(
+      read(
+        finalThought(
+          loved(
+            'Mushoku Tensei: Isekai Ittara Honki Dasu',
+            'Yahari Ore no Seishun Love Come wa Machigatteiru.'
+          ),
+          alice,
+          bob,
+          voiceFor(null)
+        )
+      )
+    ).toContain('agree Mushoku Tensei: Isekai Ittara Honki Dasu is peak.');
+  });
+
+  it('sets homework from the plan list first, then from a show’s first season', () => {
+    const SEQUEL = anime(20, 'VINLAND SAGA SEASON 2');
+    const picks = (...picksForB: TasteMatch['picksForB']) =>
+      read(finalThought(match({ picksForB }), alice, bob, voiceFor('bob')));
+    expect(picks({ anime: SEQUEL, planned: false }, { anime: MONSTER, planned: false })).toContain(
+      'Homework for you: Monster'
+    );
+    expect(picks({ anime: SEQUEL, planned: false }, { anime: MONSTER, planned: true })).toContain(
+      'Monster has been collecting dust on your plan list. Alice gave it 9 / 10, so the excuses end today.'
+    );
+    // Better a later part than no homework
+    expect(picks({ anime: SEQUEL, planned: false })).toContain(
+      'Homework for you: VINLAND SAGA SEASON 2'
+    );
+  });
+
   it('reads the same every time for a pair, and differently for another pair', () => {
     const thought = (other: TasteProfile) =>
       read(finalThought(match(), alice, other, voiceFor(null)));
     expect(thought(bob)).toBe(thought(bob));
-    const carol = person(3, 'Carol');
-    expect(thought(carol)).not.toBe(thought(bob));
-    expect(thought(carol)).toContain(
-      "120 anime in common. That's a lot of hours not touching grass, together."
+    expect(thought(person(5, 'Dana'))).toContain(
+      "On Frieren and Mushishi, Alice and Dana could finish each other's sentences, spoilers included."
     );
   });
 
@@ -172,18 +231,11 @@ describe('final thoughts', () => {
     const combinations = new Set(
       Array.from({ length: 9 }, (_, index) => {
         const other = person(2 + index, 'Other');
-        const agreement = read([finalThought(match(), alice, other, voiceFor(null))[1]]);
+        const agreement = read([finalThought(match(), alice, other, voiceFor(null))[0]]);
         return `${matchComment(60, alice, other, true)} ${agreement}`;
       })
     );
     expect(combinations.size).toBe(9);
-  });
-
-  it('calls out a favorite that has been waiting on a plan list', () => {
-    const planned = match({ picksForB: [{ anime: MONSTER, planned: true }] });
-    expect(read(finalThought(planned, alice, bob, voiceFor('bob')))).toContain(
-      'Monster has been collecting dust on your plan list. Alice gave it 9 / 10, so the excuses end today.'
-    );
   });
 
   it('still has something to say with no anime in common, or too few scores', () => {

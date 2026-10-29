@@ -1,5 +1,11 @@
 import { formatScore, type ScoreFormat } from '#lib/score.js';
-import type { ScoredAnime, TasteMatch, TasteProfile } from '#lib/types/match.js';
+import type {
+  MatchPick,
+  ScoredAnime,
+  ScoredByBoth,
+  TasteMatch,
+  TasteProfile,
+} from '#lib/types/match.js';
 
 /**
  * How to speak of the two people compared: by name, or as "you" to a viewer who is one of them.
@@ -181,10 +187,46 @@ export function matchComment(
   return typeof joke === 'string' ? joke : joke[toThem ? 0 : 1];
 }
 
+/*
+ * The words a franchise's anime share at the start of their titles, so a sentence doesn't name two
+ * seasons of one show: "Steins;Gate" and "Steins;Gate 0". Two unrelated titles that start alike
+ * only make it name another anime instead
+ */
+const franchise = (anime: ScoredAnime) => anime.title.toLowerCase().split(/\s+/)[0];
+/** Two titles longer than this together are too much for one sentence: only the first is named */
+const MAX_TITLES_LENGTH = 48;
+/** Titles of later parts: "Season 2", "2nd Season", "Part 2", "II", "R2", "The Final", a movie or an OVA */
+const LATER_PART =
+  /\b(season|part|cour)\s*\d|\b\d+(st|nd|rd|th)\s+(season|stage)\b|\b(ii|iii|iv|r2)\b|\bfinal\b|\bmovie\b|\bova\b|\bspecials?\b|'$/i;
+
+/** One or two anime both loved, from different shows, as one part of a sentence */
+function lovedTitles(bothLoved: ScoredByBoth[]): { titles: WordPart[]; are: string } | null {
+  const [loved, ...rest] = bothLoved.map(({ anime }) => anime);
+  if (!loved) return null;
+  const other = rest.find((anime) => franchise(anime) !== franchise(loved));
+  return other && loved.title.length + other.title.length <= MAX_TITLES_LENGTH
+    ? { titles: [title(loved), { text: ' and ' }, title(other)], are: 'are' }
+    : { titles: [title(loved)], are: 'is' };
+}
+
 /**
- * A few closing jokes on a match, from its own anime: what both loved, the one they fight over,
- * and homework for the viewer. The wording varies from one pair to the next, but a match always
- * reads the same, so a shared link shows what was shared
+ * The homework to set: an anime already on the plan list, as it's waited long enough, or else one
+ * that isn't a later part, as nobody should start a show at its second season
+ */
+function homework(picks: MatchPick[]): MatchPick | undefined {
+  return (
+    picks.find(({ planned }) => planned) ??
+    picks.find(({ anime }) => !LATER_PART.test(anime.title)) ??
+    picks[0]
+  );
+}
+
+/**
+ * A few closing jokes on a match, from its own anime, at most three and in the score's tone: close
+ * matches celebrate what both loved and tease their one disagreement, rivals lead with the fight
+ * and concede their common ground, and all end with homework for the viewer. The wording varies
+ * from one pair to the next, but a match always reads the same, so a shared link shows what was
+ * shared
  */
 export function finalThought(
   match: TasteMatch,
@@ -198,85 +240,100 @@ export function finalThought(
   const [first, second] = isViewer(b.name) ? [b, a] : [a, b];
   const pair = `${who(first.name)} and ${second.name}`;
   const Pair = `${Who(first.name)} and ${second.name}`;
-  const sentences: WordPart[][] = [];
+  const tone =
+    match.percent === null
+      ? 'unknown'
+      : match.percent >= 70
+        ? 'close'
+        : match.percent >= 40
+          ? 'mixed'
+          : 'rivals';
 
-  if (match.inCommon >= 100) {
-    const count = match.inCommon.toLocaleString();
-    sentences.push(
-      choose(
-        [
-          say`${count} anime in common. That's a lot of hours not touching grass, together.`,
-          say`${count} anime in common, which is basically a shared personality at this point.`,
-        ],
-        0
-      )
+  const loved = lovedTitles(match.bothLoved);
+  const agreement =
+    loved &&
+    choose(
+      [
+        say`${loved.titles} ${loved.are} the load-bearing anime of this friendship.`,
+        say`${Pair} agree ${loved.titles} ${loved.are} peak. Nobody tell the comment section.`,
+        say`On ${loved.titles}, ${pair} could finish each other's sentences, spoilers included.`,
+      ],
+      1
     );
-  }
-
-  const [loved, alsoLoved] = match.bothLoved;
-  if (loved) {
-    const titles = alsoLoved
-      ? [title(loved.anime), { text: ' and ' }, title(alsoLoved.anime)]
-      : [title(loved.anime)];
-    const are = alsoLoved ? 'are' : 'is';
-    sentences.push(
-      choose(
-        [
-          say`${titles} ${are} the load-bearing anime of this friendship.`,
-          say`${Pair} agree ${titles} ${are} peak. Nobody tell the comment section.`,
-          say`On ${titles}, ${pair} could finish each other's sentences, spoilers included.`,
-        ],
-        1
-      )
+  // Rivals' common ground is the exception, so it's a single anime
+  const [peace] = match.bothLoved;
+  const concession =
+    peace &&
+    choose(
+      [
+        say`At least ${pair} both love ${title(peace.anime)}. It's a start.`,
+        say`The one thing keeping the peace: ${title(peace.anime)}, loved on both sides.`,
+        say`Peace talks can start with ${title(peace.anime)}, which ${pair} both love.`,
+      ],
+      1
     );
-  }
 
   const [split] = match.disagreements;
-  if (split) {
-    const scoreA = scoreOf(split.a, a.scoreFormat);
-    const scoreB = scoreOf(split.b, b.scoreFormat);
-    sentences.push(
-      choose(
-        [
-          say`Never bring up ${title(split.anime)} at dinner: ${who(a.name)} gave it ${scoreA}, ${who(b.name)} gave it ${scoreB}, and someone is wrong.`,
-          say`${title(split.anime)} is where this friendship goes to fight, ${scoreA} from ${who(a.name)} against ${scoreB} from ${who(b.name)}.`,
-          say`${title(split.anime)}: ${scoreA} from ${who(a.name)}, ${scoreB} from ${who(b.name)}. Settle it with a rewatch, or a duel.`,
-        ],
-        2
-      )
+  const scoreA = split && scoreOf(split.a, a.scoreFormat);
+  const scoreB = split && scoreOf(split.b, b.scoreFormat);
+  const fight =
+    split &&
+    choose(
+      [
+        say`Never bring up ${title(split.anime)} at dinner: ${who(a.name)} gave it ${scoreA}, ${who(b.name)} gave it ${scoreB}, and someone is wrong.`,
+        say`${title(split.anime)} is where this friendship goes to fight, ${scoreA} from ${who(a.name)} against ${scoreB} from ${who(b.name)}.`,
+        say`${title(split.anime)}: ${scoreA} from ${who(a.name)}, ${scoreB} from ${who(b.name)}. Settle it with a rewatch, or a duel.`,
+      ],
+      2
     );
-  }
+  // A close match's disagreement is the exception, so it's only teased
+  const crack =
+    split &&
+    choose(
+      [
+        say`The only crack in this friendship: ${title(split.anime)}, ${scoreA} from ${who(a.name)} against ${scoreB} from ${who(b.name)}.`,
+        say`Just never bring up ${title(split.anime)}: ${who(a.name)} gave it ${scoreA}, ${who(b.name)} gave it ${scoreB}.`,
+        say`Mostly peaceful, apart from ${title(split.anime)}: ${scoreA} from ${who(a.name)}, ${scoreB} from ${who(b.name)}.`,
+      ],
+      2
+    );
 
-  if (match.inCommon === 0) {
-    sentences.push(
-      say`Zero anime in common. Either a beautiful friendship is about to begin, or a very long argument.`
-    );
-  } else if (match.percent === null) {
-    sentences.push(
-      say`Not enough shared scores to call it yet. Go score some anime, the fate of this friendship depends on it.`
-    );
-  }
+  // The result above already says how many anime they share, unless it's none
+  const nudge =
+    match.inCommon === 0
+      ? say`Zero anime in common. Either a beautiful friendship is about to begin, or a very long argument.`
+      : say`Not enough shared scores to call it yet. Go score some anime, the fate of this friendship depends on it.`;
 
   // Homework for the viewer first, or for whoever was compared with the list's owner
   const sides = [
-    { to: b, from: a, pick: match.picksForB[0] },
-    { to: a, from: b, pick: match.picksForA[0] },
+    { to: b, from: a, pick: homework(match.picksForB) },
+    { to: a, from: b, pick: homework(match.picksForA) },
   ];
   const next = (isViewer(a.name) ? sides.reverse() : sides).find(({ pick }) => pick);
-  if (next) {
+  let assignment: WordPart[] | undefined;
+  if (next?.pick) {
     const { to, from, pick } = next;
     const score = scoreOf(pick.anime.score, from.scoreFormat);
-    sentences.push(
+    assignment = choose(
       pick.planned
-        ? say`${title(pick.anime)} has been collecting dust on ${whose(to.name)} plan list. ${Who(from.name)} gave it ${score}, so the excuses end today.`
-        : choose(
-            [
-              say`Homework for ${who(to.name)}: ${title(pick.anime)}, straight from ${whose(from.name)} favorites. No excuses.`,
-              say`${Who(to.name)} ${isViewer(to.name) ? 'have' : 'has'} been assigned ${title(pick.anime)}. ${Whose(from.name)} orders.`,
-            ],
-            3
-          )
+        ? [
+            say`${title(pick.anime)} has been collecting dust on ${whose(to.name)} plan list. ${Who(from.name)} gave it ${score}, so the excuses end today.`,
+            say`${title(pick.anime)} is already on ${whose(to.name)} plan list, and ${who(from.name)} gave it ${score}. Today's the day.`,
+            say`${Who(to.name)} planned to watch ${title(pick.anime)} ages ago. ${Who(from.name)} gave it ${score}, so consider this a reminder.`,
+          ]
+        : [
+            say`Homework for ${who(to.name)}: ${title(pick.anime)}, straight from ${whose(from.name)} favorites. No excuses.`,
+            say`${Who(to.name)} ${isViewer(to.name) ? 'have' : 'has'} been assigned ${title(pick.anime)}. ${Whose(from.name)} orders.`,
+          ],
+      3
     );
   }
-  return sentences;
+
+  const sentences: (WordPart[] | null | undefined)[] = {
+    close: [agreement, crack, assignment],
+    mixed: [agreement, fight, assignment],
+    rivals: [fight, concession, assignment],
+    unknown: [agreement, nudge, assignment],
+  }[tone];
+  return sentences.filter((sentence): sentence is WordPart[] => Boolean(sentence));
 }
