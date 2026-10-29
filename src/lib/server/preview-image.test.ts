@@ -14,6 +14,7 @@ import {
   renderMatchInvitePreview,
   renderMatchPreview,
   renderSitePreview,
+  renderWrappedPreview,
 } from '#lib/server/preview-image.js';
 import type { Anime } from '#lib/types/anime.js';
 import type { ScoredAnime, TasteMatch, TasteProfile } from '#lib/types/match.js';
@@ -373,6 +374,38 @@ describe('group previews', () => {
     expect(fetch.mock.calls.map(([url]) => url).toSorted()).toEqual([
       'https://s4.anilist.co/Alice.png',
       'https://s4.anilist.co/Bob.png',
+      'https://s4.anilist.co/cover-1.jpg',
+    ]);
+  });
+});
+
+describe('year previews', () => {
+  it('draws a year in anime from its favorites, never adult ones', async () => {
+    const fetch = vi.fn(
+      async (_url: string) => new Response(PIXEL, { headers: { 'Content-Type': 'image/png' } })
+    );
+    vi.stubGlobal('fetch', fetch);
+    const finished = (id: number, isAdult = false) => ({
+      ...scoredAnime(id, 80, isAdult),
+      episodes: 12,
+      minutes: 288,
+      month: 3,
+      genres: ['Drama'],
+    });
+    const response = await renderWrappedPreview(
+      {
+        id: 1,
+        name: 'Alice',
+        avatarUrl: 'https://s4.anilist.co/Alice.png',
+        scoreFormat: 'POINT_100',
+        year: 2026,
+        finished: [finished(1), finished(2, true)],
+      },
+      'public, max-age=3600'
+    );
+    expect(await imageOf(response)).toEqual({ format: 'jpeg', width: 1200, height: 630 });
+    expect(fetch.mock.calls.map(([url]) => url).toSorted()).toEqual([
+      'https://s4.anilist.co/Alice.png',
       'https://s4.anilist.co/cover-1.jpg',
     ]);
   });
