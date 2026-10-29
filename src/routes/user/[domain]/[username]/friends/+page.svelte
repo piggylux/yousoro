@@ -6,6 +6,7 @@
   import FriendsWatchingLoader from '#lib/components/FriendsWatchingLoader.svelte';
   import SharedAnimeDialog from '#lib/components/SharedAnimeDialog.svelte';
   import SharedAnimePoster from '#lib/components/SharedAnimePoster.svelte';
+  import TasteTwins from '#lib/components/TasteTwins.svelte';
   import { FriendsUnavailable, getOwnSharedAnime } from '#lib/friend-watching.js';
   import type {
     FriendWatchingResult,
@@ -150,6 +151,10 @@
       </p>
     </div>
   {:else}
+    {#key data.user.id}
+      <TasteTwins owner={data.user.name} friends={data.friends} own={data.isOwnPage} />
+    {/key}
+
     <div class="friends-toolbar">
       <div class="view-switch" aria-label="Filter friends">
         <button
