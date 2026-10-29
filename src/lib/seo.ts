@@ -1,3 +1,5 @@
+import { matchPath } from '#lib/match.js';
+
 export const SITE_ORIGIN = 'https://yousoro.vercel.app';
 export const SITE_NAME = 'Yousoro';
 export const HOME_TITLE = 'Yousoro | Anime Tracker & AniList Episode Calendar';
@@ -15,6 +17,11 @@ export function listPreviewImage(username: string): string {
   return `${SITE_ORIGIN}/user/anilist/${encodeURIComponent(username)}/preview.jpg`;
 }
 
+/** The link preview of a taste match, or of an invitation to compare with `username` alone */
+export function matchPreviewImage(username: string, other?: string): string {
+  return `${SITE_ORIGIN}${matchPath(username, other)}/preview.jpg`;
+}
+
 type SeoUrl = Pick<URL, 'pathname' | 'origin'> & {
   searchParams: Pick<URLSearchParams, 'get'>;
 };
@@ -26,13 +33,40 @@ export function getPageSeo(url: SeoUrl, status = 200, resolvedUsername?: string)
   let canonical: string | undefined;
   let image = { url: SHARE_IMAGE, type: 'image/png', alt: SHARE_IMAGE_ALT };
   const home = path === '/home';
+  const taste = path.match(/^\/user\/anilist\/([^/]+)\/match(?:\/([^/]+))?$/);
   if (status >= 400) title = `${status} | ${SITE_NAME}`;
   else if (home) {
     title = HOME_TITLE;
     canonical = `${SITE_ORIGIN}/home`;
   } else if (path === '/settings') title = `Settings | ${SITE_NAME}`;
   else if (path.startsWith('/auth/')) title = `Signing in | ${SITE_NAME}`;
-  else {
+  else if (taste) {
+    // Comparisons are drawn in the browser and never indexed, but their links are shared
+    let a: string;
+    let b: string | undefined;
+    try {
+      [a, b] = taste.slice(1).map((name) => name && decodeURIComponent(name));
+    } catch {
+      return { title, description, canonical, image, noindex: true, home: false };
+    }
+    if (b) {
+      title = `${a} × ${b}: Anime Taste Match | ${SITE_NAME}`;
+      description = `How alike are ${a} and ${b}'s anime tastes? See the anime they both loved, where they disagree, and what each should watch next.`;
+      image = {
+        url: matchPreviewImage(a, b),
+        type: 'image/jpeg',
+        alt: `How ${a} and ${b}'s anime tastes match`,
+      };
+    } else {
+      title = `Compare Your Anime Taste with ${a} | ${SITE_NAME}`;
+      description = `See how your AniList scores match ${a}'s: the anime you both loved, where you disagree, and what to watch next.`;
+      image = {
+        url: matchPreviewImage(a),
+        type: 'image/jpeg',
+        alt: `Compare your anime taste with ${a}`,
+      };
+    }
+  } else {
     const match = path.match(/^\/user\/anilist\/([^/]+)(\/friends)?$/);
     if (match) {
       let username: string;

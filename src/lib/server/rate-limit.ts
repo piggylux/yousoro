@@ -33,11 +33,18 @@ export async function takeLimit(key: string, limit: number, seconds = 60, cost =
   return { allowed: true, retryAfter };
 }
 
-export async function takeAniListRequest(optional = false) {
+/**
+ * How much of the outbound budget a request may use. Optional ones (social matches and decorative
+ * airings) leave five slots for lists and progress saves; spare ones (taste comparisons, which
+ * anyone can start by sharing a link) leave ten, so a link going around can't crowd out the rest
+ */
+export type AniListPriority = 'required' | 'optional' | 'spare';
+const ANILIST_BUDGET: Record<AniListPriority, number> = { required: 25, optional: 20, spare: 15 };
+
+export async function takeAniListRequest(priority: AniListPriority = 'required') {
   const retryAfter = Math.ceil((cooldownUntil - Date.now()) / 1000);
   if (retryAfter > 0) return { allowed: false, retryAfter };
-  // Social matches and decorative airings leave five slots for lists and progress saves.
-  return takeLimit('anilist', optional ? 20 : 25);
+  return takeLimit('anilist', ANILIST_BUDGET[priority]);
 }
 
 export async function pauseAniList(seconds: number) {

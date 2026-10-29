@@ -82,6 +82,15 @@ export function scoreChoices(format: ScoreFormat): { value: number; label: strin
   ];
 }
 
+/**
+ * A score out of 100, to compare it with a score in another format. Smileys count as 35, 60 and
+ * 85, as AniList counts them
+ */
+export function toScore100(score: number, format: ScoreFormat): number {
+  if (format === 'POINT_3') return [0, 35, 60, 85][score] ?? 0;
+  return Math.round((score * 100) / SCORE_SCALES[format].max);
+}
+
 /** AniList's mean score, out of 100, as AniList shows it */
 export function formatMeanScore(meanScore: number) {
   return `${meanScore}%`;

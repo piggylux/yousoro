@@ -7,6 +7,7 @@ import {
   HOME_TITLE,
   jsonLdScript,
   listPreviewImage,
+  matchPreviewImage,
   serializeJsonLd,
   SHARE_IMAGE,
   SITE_ORIGIN,
@@ -74,6 +75,32 @@ describe('search metadata', () => {
       expect(getPageSeo(new URL(`${SITE_ORIGIN}${path}`)).image.url).toBe(SHARE_IMAGE);
     }
   );
+
+  it('titles a match and previews it with its own image, never indexing it', () => {
+    const seo = getPageSeo(new URL(`${SITE_ORIGIN}/user/anilist/Alice/match/Show%20Fan`));
+    expect(seo.title).toBe('Alice × Show Fan: Anime Taste Match | Yousoro');
+    expect(seo.image).toEqual({
+      url: `${SITE_ORIGIN}/user/anilist/Alice/match/Show%20Fan/preview.jpg`,
+      type: 'image/jpeg',
+      alt: "How Alice and Show Fan's anime tastes match",
+    });
+    expect(seo.canonical).toBeUndefined();
+    expect(seo.noindex).toBe(true);
+  });
+
+  it('invites anyone to compare with someone, with an image of their favorites', () => {
+    const seo = getPageSeo(new URL(`${SITE_ORIGIN}/user/anilist/Alice/match`));
+    expect(seo.title).toBe('Compare Your Anime Taste with Alice | Yousoro');
+    expect(seo.image.url).toBe(matchPreviewImage('Alice'));
+    expect(seo.image.url).toBe(`${SITE_ORIGIN}/user/anilist/Alice/match/preview.jpg`);
+    expect(seo.noindex).toBe(true);
+  });
+
+  it('never indexes a match whose name is malformed', () => {
+    const seo = getPageSeo(new URL(`${SITE_ORIGIN}/user/anilist/Alice/match/%E0%A4%A`));
+    expect(seo.noindex).toBe(true);
+    expect(seo.image.url).toBe(SHARE_IMAGE);
+  });
 
   it('falls back to the site’s image for a list that failed to load', () => {
     expect(getPageSeo(new URL(`${SITE_ORIGIN}/user/anilist/fixture`), 404).image.url).toBe(

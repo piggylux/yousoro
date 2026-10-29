@@ -1,8 +1,16 @@
 import sharp from 'sharp';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { describeList, renderListPreview, renderSitePreview } from '#lib/server/preview-image.js';
+import {
+  describeList,
+  describeMatchPreview,
+  renderListPreview,
+  renderMatchInvitePreview,
+  renderMatchPreview,
+  renderSitePreview,
+} from '#lib/server/preview-image.js';
 import type { Anime } from '#lib/types/anime.js';
+import type { ScoredAnime, TasteMatch, TasteProfile } from '#lib/types/match.js';
 
 function anime(overrides: Partial<Anime>): Anime {
   return {
@@ -134,5 +142,95 @@ describe('preview images', () => {
       'public, max-age=3600'
     );
     expect(await imageOf(response)).toEqual({ format: 'jpeg', width: 1200, height: 630 });
+  });
+});
+
+function taster(name: string, scored: ScoredAnime[]): TasteProfile {
+  return {
+    id: 1,
+    name,
+    avatarUrl: `https://s4.anilist.co/${name}.png`,
+    scoreFormat: 'POINT_100',
+    scored,
+    seen: [],
+    planned: [],
+  };
+}
+
+function scoredAnime(id: number, score: number, isAdult = false): ScoredAnime {
+  return {
+    id,
+    title: `Anime ${id}`,
+    coverUrl: `https://s4.anilist.co/cover-${id}.jpg`,
+    isAdult,
+    meanScore: null,
+    score,
+    score100: score,
+  };
+}
+
+describe('match previews', () => {
+  const match = (overrides: Partial<TasteMatch>): TasteMatch => ({
+    percent: null,
+    inCommon: 0,
+    bothScored: 0,
+    bothLoved: [],
+    disagreements: [],
+    picksForA: [],
+    picksForB: [],
+    ...overrides,
+  });
+
+  it('leads with the percent, or with what they have in common when there is none', () => {
+    expect(describeMatchPreview(match({ percent: 82, inCommon: 1200 }))).toEqual({
+      headline: '82%',
+      detail: 'Watch-party ready',
+      note: '1,200 anime in common',
+    });
+    expect(describeMatchPreview(match({ inCommon: 3 }))).toEqual({
+      headline: '3',
+      detail: 'anime in common',
+      note: 'Too few scored by both to compare yet',
+    });
+  });
+
+  it('draws a match from both avatars and the covers of anime both loved, never adult ones', async () => {
+    const fetch = vi.fn(
+      async (_url: string) => new Response(PIXEL, { headers: { 'Content-Type': 'image/png' } })
+    );
+    vi.stubGlobal('fetch', fetch);
+    const scores = [90, 80, 70, 60, 50];
+    const alice = taster('Alice', [
+      ...scores.map((score, index) => scoredAnime(index + 1, score)),
+      scoredAnime(9, 100, true),
+    ]);
+    const bob = taster('Bob', [
+      ...scores.map((score, index) => scoredAnime(index + 1, score)),
+      scoredAnime(9, 100, true),
+    ]);
+
+    const response = await renderMatchPreview(alice, bob, 'public, max-age=3600');
+    expect(response.headers.get('cache-control')).toBe('public, max-age=3600');
+    expect(await imageOf(response)).toEqual({ format: 'jpeg', width: 1200, height: 630 });
+    expect(fetch.mock.calls.map(([url]) => url).toSorted()).toEqual([
+      'https://s4.anilist.co/Alice.png',
+      'https://s4.anilist.co/Bob.png',
+      'https://s4.anilist.co/cover-1.jpg',
+      'https://s4.anilist.co/cover-2.jpg',
+    ]);
+  });
+
+  it('draws an invitation from the anime someone scored highest, never adult ones', async () => {
+    const fetch = vi.fn(
+      async (_url: string) => new Response(PIXEL, { headers: { 'Content-Type': 'image/png' } })
+    );
+    vi.stubGlobal('fetch', fetch);
+    const alice = taster('Alice', [scoredAnime(1, 70), scoredAnime(2, 90, true)]);
+    const response = await renderMatchInvitePreview(alice, 'public, max-age=3600');
+    expect(await imageOf(response)).toEqual({ format: 'jpeg', width: 1200, height: 630 });
+    expect(fetch.mock.calls.map(([url]) => url).toSorted()).toEqual([
+      'https://s4.anilist.co/Alice.png',
+      'https://s4.anilist.co/cover-1.jpg',
+    ]);
   });
 });
