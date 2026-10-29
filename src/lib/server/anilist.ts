@@ -5,16 +5,22 @@ import {
   getWatchingEntries,
   type AniListEntry,
 } from '#lib/server/anilist-client.js';
+import type { AniListPriority } from '#lib/server/rate-limit.js';
 import type { Api, UserAnimeList } from '#lib/types/api.js';
 
 export class AniListApi implements Api {
   /** The signed-in user's token, so their own private entries are visible to them */
   constructor(private token?: string) {}
 
-  async getUserAnimeList(username: string, enrichAirings = true): Promise<UserAnimeList> {
+  async getUserAnimeList(
+    username: string,
+    enrichAirings = true,
+    priority?: AniListPriority
+  ): Promise<UserAnimeList> {
     const { userId, userName, avatarUrl, scoreFormat, entries } = await getWatchingEntries(
       username,
-      this.token
+      this.token,
+      priority
     );
 
     const recentAirings = enrichAirings

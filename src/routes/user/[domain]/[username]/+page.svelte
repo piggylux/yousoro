@@ -402,6 +402,9 @@
           <a href={`/user/anilist/${encodeURIComponent(data.username)}/friends`}>Friends</a>
           · <a href={matchPath(data.username)}>Taste match</a>
           · <a href={togetherPath(data.username)}>Watch together</a>
+          {#if data.canEdit}
+            · <a href={`/user/anilist/${encodeURIComponent(data.username)}/badge`}>Profile badge</a>
+          {/if}
           ·
           <a href={calendarView ? page.url.pathname : `${page.url.pathname}?view=calendar`}
             >{calendarView ? 'Anime list' : 'Calendar'}</a

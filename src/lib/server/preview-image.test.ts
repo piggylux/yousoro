@@ -2,8 +2,13 @@ import sharp from 'sharp';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  badgeAnime,
+  badgeLine,
+  badgeProgress,
+  badgeVariant,
   describeList,
   describeMatchPreview,
+  renderBadge,
   renderGroupPreview,
   renderListPreview,
   renderMatchInvitePreview,
@@ -233,6 +238,125 @@ describe('match previews', () => {
       'https://s4.anilist.co/Alice.png',
       'https://s4.anilist.co/cover-1.jpg',
     ]);
+  });
+});
+
+describe('profile badges', () => {
+  it('says the episode each cover is on, of how many when AniList knows', () => {
+    expect(badgeProgress(anime({ currentEpisode: 7, numberEpisodes: 12 }))).toBe('Ep 7 / 12');
+    expect(badgeProgress(anime({ currentEpisode: 1100, numberEpisodes: 0 }))).toBe('Ep 1100');
+  });
+
+  it('speaks for its owner about where they are with their list', () => {
+    expect(badgeLine([])).toEqual({ line: 'Between shows.', quip: 'Taking suggestions.' });
+    expect(badgeLine([anime({ rewatching: true, currentEpisode: 2, numberEpisodes: 12 })])).toEqual(
+      {
+        line: 'Rewatching an old favorite.',
+        quip: 'Never gets old.',
+      }
+    );
+    expect(
+      badgeLine([
+        anime({ id: 1, currentEpisode: 11, numberEpisodes: 12, numberAiredEpisodes: 12 }),
+        anime({ id: 2, currentEpisode: 0, numberAiredEpisodes: 50 }),
+      ])
+    ).toEqual({ line: 'One episode from a finale.', quip: 'No spoilers!' });
+    expect(badgeLine([anime({ currentEpisode: 0, numberAiredEpisodes: 1200 })])).toEqual({
+      line: '1,200 episodes behind.',
+      quip: 'Send snacks.',
+    });
+    expect(badgeLine([anime({ currentEpisode: 2, numberAiredEpisodes: 3 })])).toEqual({
+      line: '1 episode to go.',
+      quip: 'Almost caught up!',
+    });
+  });
+
+  it('tells a caught-up owner waiting on an episode from one with nothing coming', () => {
+    const caughtUp = { currentEpisode: 3, numberEpisodes: 24, numberAiredEpisodes: 3 };
+    expect(badgeLine([anime({ ...caughtUp, nextEpisode: { number: 4, airsAt: 1 } })]).quip).toBe(
+      'The wait is the hardest part.'
+    );
+    expect(badgeLine([anime(caughtUp)]).quip).toBe('Taking suggestions.');
+  });
+
+  it('picks one of several jokes, going round them in turn', () => {
+    const behind = [anime({ currentEpisode: 0, numberAiredEpisodes: 40 })];
+    const quips = [0, 1, 2, 3, 4].map((variant) => badgeLine(behind, variant).quip);
+    expect(new Set(quips.slice(0, 4)).size).toBe(4);
+    expect(quips[4]).toBe(quips[0]);
+    expect(badgeLine(behind, 3).line).toBe('40 episodes behind.');
+  });
+
+  it('keeps an owner’s joke all week, whatever the spelling of their name, then moves on', () => {
+    const week = 7 * 24 * 60 * 60 * 1000;
+    const start = Math.floor(Date.UTC(2026, 9, 29) / week) * week;
+    expect(badgeVariant('Alice', start + week - 1)).toBe(badgeVariant('alice', start));
+    expect(badgeVariant('Alice', start + week)).toBe(badgeVariant('Alice', start) + 1);
+    expect(badgeVariant('Alice', start)).not.toBe(badgeVariant('Bob', start));
+  });
+
+  it('only counts a finale the badge shows, and never a movie', () => {
+    const finale = { currentEpisode: 11, numberEpisodes: 12, numberAiredEpisodes: 12 };
+    // Behind five more recently watched shows, its cover isn't on the badge
+    const recent = Array.from({ length: 5 }, (_, id) =>
+      anime({ id: id + 2, currentEpisode: 1, numberAiredEpisodes: 3, lastUpdatedAt: 100 })
+    );
+    expect(badgeLine([anime({ id: 1, ...finale, lastUpdatedAt: 1 }), ...recent]).line).toBe(
+      '11 episodes behind.'
+    );
+    expect(
+      badgeLine([anime({ currentEpisode: 0, numberEpisodes: 1, numberAiredEpisodes: 1 })]).line
+    ).toBe('1 episode to go.');
+  });
+
+  it('shows what was watched most recently, never unstarted or adult anime', () => {
+    const shown = badgeAnime([
+      anime({ id: 1, currentEpisode: 3, lastUpdatedAt: 100 }),
+      anime({ id: 2, currentEpisode: 0, lastUpdatedAt: 900 }),
+      anime({ id: 3, currentEpisode: 5, lastUpdatedAt: 500 }),
+      anime({ id: 4, currentEpisode: 8, lastUpdatedAt: 800, isAdult: true }),
+      anime({ id: 5, currentEpisode: 1, lastUpdatedAt: null }),
+      anime({ id: 6, currentEpisode: 2, lastUpdatedAt: 300, rewatching: true }),
+    ]);
+    expect(shown.map(({ id }) => id)).toEqual([3, 6, 1, 5]);
+    const many = Array.from({ length: 9 }, (_, id) => anime({ id, currentEpisode: 1 }));
+    expect(badgeAnime(many)).toHaveLength(5);
+  });
+
+  it('draws a badge at twice the size it is shown, never with unstarted anime', async () => {
+    const fetch = vi.fn(
+      async (_url: string) => new Response(PIXEL, { headers: { 'Content-Type': 'image/png' } })
+    );
+    vi.stubGlobal('fetch', fetch);
+    const response = await renderBadge(
+      {
+        username: 'Fixture',
+        avatarUrl: 'https://s4.anilist.co/avatar.png',
+        animeList: [
+          anime({ id: 1, currentEpisode: 2, thumbnailUrl: 'https://s4.anilist.co/cover-1.jpg' }),
+          anime({ id: 2, currentEpisode: 0, thumbnailUrl: 'https://s4.anilist.co/cover-2.jpg' }),
+        ],
+      },
+      'dark',
+      'public, max-age=3600'
+    );
+    expect(response.headers.get('cache-control')).toBe('public, max-age=3600');
+    expect(await imageOf(response)).toEqual({ format: 'jpeg', width: 1200, height: 360 });
+    expect(fetch.mock.calls.map(([url]) => url).toSorted()).toEqual([
+      'https://s4.anilist.co/avatar.png',
+      'https://s4.anilist.co/cover-1.jpg',
+    ]);
+  });
+
+  it('draws a badge of the site alone for a list that cannot be read', async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    expect(await imageOf(await renderBadge(null, 'light', 'no-store'))).toEqual({
+      format: 'jpeg',
+      width: 1200,
+      height: 360,
+    });
+    expect(fetch).not.toHaveBeenCalled();
   });
 });
 

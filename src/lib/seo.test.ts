@@ -194,3 +194,11 @@ describe('group metadata', () => {
     });
   });
 });
+
+describe('badge metadata', () => {
+  it('names whose badge it is', () => {
+    expect(getPageSeo(new URL(`${SITE_ORIGIN}/user/anilist/Alice/badge`)).title).toBe(
+      "Alice's Profile Badge | Yousoro"
+    );
+  });
+});

@@ -7,13 +7,14 @@ import { getSession } from '#lib/server/session.js';
 import { DEFAULT_PREFERENCES } from '#lib/types/preferences.js';
 
 /**
- * Link preview images and taste profiles only show public data, whoever asks, and say how long
- * they can be cached. Matched by the route SvelteKit resolved, so a look-alike path can't borrow
- * their caching
+ * Link preview images, badges and taste profiles only show public data, whoever asks, and say how
+ * long they can be cached. Matched by the route SvelteKit resolved, so a look-alike path can't
+ * borrow their caching
  */
 const PUBLIC_ROUTES = new Set([
   '/preview.png',
   '/user/[domain]/[username]/preview.jpg',
+  '/user/[domain]/[username]/badge.jpg',
   '/user/[domain]/[username]/match/preview.jpg',
   '/user/[domain]/[username]/match/[other]/preview.jpg',
   '/user/[domain]/[username]/together/[...others]/preview.jpg',
