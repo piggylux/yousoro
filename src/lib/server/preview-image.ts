@@ -3,9 +3,10 @@ import sharp from 'sharp';
 
 import { getBacklog, sortWatchingList, withoutHiddenMature } from '#lib/anime.js';
 import YouSvg from '#lib/images/minimalist_you.svg?inline';
-import { describeMatch, matchComment } from '#lib/match-words.js';
+import { describeMatch, joinNames, matchComment } from '#lib/match-words.js';
 import { compareTastes, favoriteAnime } from '#lib/match.js';
 import { PREVIEW_IMAGE_SIZE } from '#lib/seo.js';
+import { pickForGroup } from '#lib/together.js';
 import type { Anime } from '#lib/types/anime.js';
 import type { TasteMatch, TasteProfile } from '#lib/types/match.js';
 
@@ -239,29 +240,34 @@ export function describeMatchPreview(match: TasteMatch) {
   };
 }
 
+/** Someone's avatar, or their initial without one */
+function avatarOf(name: string, avatar: string | null, size: number, style: Style = {}): Element {
+  const round = { borderRadius: size / 2, border: `1px solid ${COLORS.border}`, ...style };
+  return avatar
+    ? img(avatar, size, size, round)
+    : el(
+        'div',
+        {
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: size,
+          height: size,
+          background: COLORS.page,
+          fontSize: size * 0.45,
+          color: COLORS.accent,
+          ...round,
+        },
+        name.charAt(0).toUpperCase()
+      );
+}
+
 /** A person on a match's preview: their avatar, or their initial without one, over their name */
 function person(name: string, avatar: string | null): Element {
-  const size = 132;
   return el(
     'div',
     { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, width: 300 },
-    avatar
-      ? img(avatar, size, size, { borderRadius: size / 2, border: `1px solid ${COLORS.border}` })
-      : el(
-          'div',
-          {
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: size,
-            height: size,
-            borderRadius: size / 2,
-            border: `1px solid ${COLORS.border}`,
-            fontSize: 60,
-            color: COLORS.accent,
-          },
-          name.charAt(0).toUpperCase()
-        ),
+    avatarOf(name, avatar, 132),
     // AniList names are one word of up to 20 letters, wider than the column at this size
     el(
       'div',
@@ -359,6 +365,97 @@ export async function renderMatchPreview(
               )
             )
           : el('div', { fontSize: 28, color: COLORS.accent }, note),
+        wordmark(40)
+      )
+    ),
+    'jpeg'
+  );
+  return imageResponse(image, 'jpeg', cacheControl);
+}
+
+/**
+ * The preview of a group picking an anime to watch together: everyone's avatars over who they are,
+ * and covers of their top picks. A group of one is an invitation to join, with covers of its host's
+ * favorites. Adult anime are left out, as for a visitor who hasn't chosen to see them
+ */
+export async function renderGroupPreview(
+  profiles: TasteProfile[],
+  cacheControl: string
+): Promise<Response> {
+  const [host] = profiles;
+  if (profiles.length === 1) {
+    return renderPersonPreview(
+      { name: host.name, avatarUrl: host.avatarUrl, caption: 'Watch together' },
+      favoriteAnime(host).map((anime) => anime.coverUrl),
+      {
+        headline: 'What should we watch together?',
+        detail: `Join ${host.name}'s group to find an anime you'll all enjoy`,
+      },
+      cacheControl
+    );
+  }
+  const picks = pickForGroup(profiles);
+  const [avatars, covers] = await Promise.all([
+    Promise.all(profiles.map((profile) => loadImage(profile.avatarUrl))),
+    Promise.all(picks.slice(0, PREVIEW_COVERS).map(({ anime }) => loadImage(anime.coverUrl))),
+  ]);
+  const shownCovers = covers.filter((cover) => cover !== null);
+
+  const image = await draw(
+    el(
+      'div',
+      {
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'space-between',
+        width: '100%',
+        height: '100%',
+        padding: '44px 60px',
+        background: COLORS.page,
+        color: COLORS.heading,
+      },
+      el(
+        'div',
+        { display: 'flex', flexDirection: 'column', gap: 18 },
+        el(
+          'div',
+          { display: 'flex' },
+          ...profiles.map((profile, index) =>
+            avatarOf(profile.name, avatars[index], 92, {
+              marginLeft: index ? -14 : 0,
+              border: `3px solid ${COLORS.page}`,
+            })
+          )
+        ),
+        el('div', { fontSize: 26, color: COLORS.accent }, 'Watch together'),
+        // AniList names are one word of up to 20 letters, so six of them can take two lines
+        el(
+          'div',
+          { display: 'flex', fontSize: 44, lineHeight: 1.15, wordBreak: 'break-word' },
+          `What should ${joinNames(profiles.map((profile) => profile.name))} watch?`
+        )
+      ),
+      el(
+        'div',
+        { display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between' },
+        shownCovers.length
+          ? el(
+              'div',
+              { display: 'flex', flexDirection: 'column', gap: 10 },
+              el('div', { fontSize: 24, color: COLORS.accent }, 'Top picks'),
+              el(
+                'div',
+                { display: 'flex', gap: 14 },
+                ...shownCovers.map((cover) =>
+                  img(cover, 120, 172, {
+                    borderRadius: 10,
+                    border: `1px solid ${COLORS.border}`,
+                    objectFit: 'cover',
+                  })
+                )
+              )
+            )
+          : el('div', { fontSize: 28, color: COLORS.accent }, 'Nothing fits everyone yet'),
         wordmark(40)
       )
     ),

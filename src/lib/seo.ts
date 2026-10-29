@@ -1,4 +1,6 @@
+import { joinNames } from '#lib/match-words.js';
 import { matchPath } from '#lib/match.js';
+import { togetherPath } from '#lib/together.js';
 
 export const SITE_ORIGIN = 'https://yousoro.vercel.app';
 export const SITE_NAME = 'Yousoro';
@@ -15,6 +17,11 @@ const SHARE_IMAGE_ALT = 'Yousoro: keep up with what you watch';
 /** The link preview of a list, drawn from its public AniList entries */
 export function listPreviewImage(username: string): string {
   return `${SITE_ORIGIN}/user/anilist/${encodeURIComponent(username)}/preview.jpg`;
+}
+
+/** The link preview of a group picking an anime, or of an invitation to join `username` alone */
+export function groupPreviewImage(username: string, others: string[]): string {
+  return `${SITE_ORIGIN}${togetherPath(username, others)}/preview.jpg`;
 }
 
 /** The link preview of a taste match, or of an invitation to compare with `username` alone */
@@ -34,13 +41,42 @@ export function getPageSeo(url: SeoUrl, status = 200, resolvedUsername?: string)
   let image = { url: SHARE_IMAGE, type: 'image/png', alt: SHARE_IMAGE_ALT };
   const home = path === '/home';
   const taste = path.match(/^\/user\/anilist\/([^/]+)\/match(?:\/([^/]+))?$/);
+  const group = path.match(/^\/user\/anilist\/([^/]+)\/together((?:\/[^/]+)*)$/);
+  // The names in the path of a group, its host's first
+  let names: string[] = [];
+  try {
+    if (group) names = [group[1], ...group[2].split('/').slice(1)].map(decodeURIComponent);
+  } catch {
+    return { title, description, canonical, image, noindex: true, home: false };
+  }
   if (status >= 400) title = `${status} | ${SITE_NAME}`;
   else if (home) {
     title = HOME_TITLE;
     canonical = `${SITE_ORIGIN}/home`;
   } else if (path === '/settings') title = `Settings | ${SITE_NAME}`;
   else if (path.startsWith('/auth/')) title = `Signing in | ${SITE_NAME}`;
-  else if (taste) {
+  else if (group) {
+    // Groups are picked in the browser and never indexed, but their links are shared
+    const [host, ...others] = names;
+    if (others.length) {
+      const everyone = joinNames(names);
+      title = `What Should ${everyone} Watch Together? | ${SITE_NAME}`;
+      description = `Anime for ${everyone} to start together, picked from their AniList scores and plan lists.`;
+      image = {
+        url: groupPreviewImage(host, others),
+        type: 'image/jpeg',
+        alt: `What ${everyone} could watch together`,
+      };
+    } else {
+      title = `Pick an Anime to Watch with ${host} | ${SITE_NAME}`;
+      description = `Join ${host}'s group to find an anime you'll all enjoy, from your AniList scores and plan lists.`;
+      image = {
+        url: groupPreviewImage(host, []),
+        type: 'image/jpeg',
+        alt: `Pick an anime to watch with ${host}`,
+      };
+    }
+  } else if (taste) {
     // Comparisons are drawn in the browser and never indexed, but their links are shared
     let a: string;
     let b: string | undefined;

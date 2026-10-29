@@ -173,3 +173,24 @@ describe('search metadata', () => {
     }
   });
 });
+
+describe('group metadata', () => {
+  it('names everyone in a group, with a preview of their picks', () => {
+    const seo = getPageSeo(new URL(`${SITE_ORIGIN}/user/anilist/Alice/together/Bob/Carol`));
+    expect(seo.title).toBe('What Should Alice, Bob and Carol Watch Together? | Yousoro');
+    expect(seo.image.url).toBe(`${SITE_ORIGIN}/user/anilist/Alice/together/Bob/Carol/preview.jpg`);
+    expect(seo.noindex).toBe(true);
+    expect(getPageSeo(new URL(`${SITE_ORIGIN}/user/anilist/Alice/together`)).title).toBe(
+      'Pick an Anime to Watch with Alice | Yousoro'
+    );
+  });
+
+  it('never indexes a path whose names cannot be read', () => {
+    expect(
+      getPageSeo(new URL(`${SITE_ORIGIN}/user/anilist/Alice/together/%E0%A4%A`))
+    ).toMatchObject({
+      title: 'Yousoro',
+      noindex: true,
+    });
+  });
+});

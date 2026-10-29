@@ -128,7 +128,7 @@ describe('comparing tastes', () => {
     const alice = profile('Alice', {
       scored: [scored(1, 90), scored(2, 40)],
       seen: [10],
-      planned: [11],
+      planned: [{ id: 11, title: 'Anime 11', coverUrl: null, isAdult: false, meanScore: 70 }],
     });
     const bob = profile('Bob', {
       scored: [
@@ -209,7 +209,7 @@ describe('reading a taste profile in the browser', () => {
       status: 'ready',
       profile: profile('Alice'),
     });
-    expect(fetcher).toHaveBeenCalledWith('/api/taste/alice');
+    expect(fetcher).toHaveBeenCalledWith('/api/taste/alice?v=2');
   });
 
   it('tells a missing list, a busy AniList and a failure apart', async () => {

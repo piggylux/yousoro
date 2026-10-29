@@ -399,7 +399,7 @@ describe('taste profiles', () => {
         expect.objectContaining({ id: 4, score: 8, score100: 80 }),
       ],
       seen: [2],
-      planned: [3],
+      planned: [expect.objectContaining({ id: 3 })],
     });
     const init = vi.mocked(fetch).mock.calls[0][1]!;
     expect(init.headers).not.toHaveProperty('Authorization');

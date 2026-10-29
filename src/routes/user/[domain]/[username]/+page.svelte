@@ -34,6 +34,7 @@
   import { expireRememberedList, recordSavedEntry } from '#lib/list-data.js';
   import { nextAiringReloadDelay, planReload, reloadsOnReturn } from '#lib/live-updates.js';
   import { matchPath } from '#lib/match.js';
+  import { togetherPath } from '#lib/together.js';
   import type { Anime } from '#lib/types/anime.js';
   import type { AnimePageData } from '#lib/types/api.js';
   import type { FriendWatching, FriendWatchingResult } from '#lib/types/friend-watching.js';
@@ -400,6 +401,7 @@
         <span class="profile-links">
           <a href={`/user/anilist/${encodeURIComponent(data.username)}/friends`}>Friends</a>
           · <a href={matchPath(data.username)}>Taste match</a>
+          · <a href={togetherPath(data.username)}>Watch together</a>
           ·
           <a href={calendarView ? page.url.pathname : `${page.url.pathname}?view=calendar`}
             >{calendarView ? 'Anime list' : 'Calendar'}</a

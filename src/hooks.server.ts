@@ -16,6 +16,7 @@ const PUBLIC_ROUTES = new Set([
   '/user/[domain]/[username]/preview.jpg',
   '/user/[domain]/[username]/match/preview.jpg',
   '/user/[domain]/[username]/match/[other]/preview.jpg',
+  '/user/[domain]/[username]/together/[...others]/preview.jpg',
   '/api/taste/[username]',
 ]);
 
