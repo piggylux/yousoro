@@ -19,6 +19,8 @@ vi.mock('#lib/server/preview-image.js', () => ({
   renderSitePreview: vi.fn(async () => new Response('site')),
 }));
 vi.mock('#lib/server/rate-limit.js', () => ({ takeClientLimit: vi.fn() }));
+// As on a site without a MyAnimeList client, whatever the local environment has
+vi.mock('#lib/server/myanimelist-auth.js', () => ({ MAL_ENABLED: false }));
 
 function event(domain = 'anilist') {
   return {
@@ -72,6 +74,10 @@ describe('list preview image', () => {
   });
 
   it('rejects unknown list services', async () => {
+    await expect(GET(event('kitsu'))).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('rejects MyAnimeList lists on a site without a MyAnimeList client', async () => {
     await expect(GET(event('myanimelist'))).rejects.toMatchObject({ status: 404 });
   });
 });

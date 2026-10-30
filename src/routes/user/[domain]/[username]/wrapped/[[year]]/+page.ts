@@ -1,7 +1,6 @@
 import { error, redirect } from '@sveltejs/kit';
 
 import { isUserName } from '#lib/match.js';
-import { isDomain } from '#lib/types/domain.js';
 import { parseWrappedYear, wrappedPath, wrappedYear } from '#lib/wrapped.js';
 
 import type { PageLoad } from './$types';
@@ -12,7 +11,7 @@ import type { PageLoad } from './$types';
  * its year and still shows it once the next one starts
  */
 export const load: PageLoad = ({ params }) => {
-  if (!isDomain(params.domain)) error(404, `Unknown domain: ${params.domain}`);
+  if (params.domain !== 'anilist') error(404, `Unknown domain: ${params.domain}`);
   if (!isUserName(params.username)) error(404, `There's no AniList user named ${params.username}`);
   if (!params.year) redirect(307, wrappedPath(params.username, wrappedYear(new Date())));
   const year = parseWrappedYear(params.year);

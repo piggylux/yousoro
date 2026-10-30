@@ -51,6 +51,20 @@ export async function pauseAniList(seconds: number) {
   cooldownUntil = Math.max(cooldownUntil, Date.now() + seconds * 1000);
 }
 
+// MyAnimeList doesn't publish its limits, and blocks clients it thinks send too many requests, so
+// it gets a budget of its own, as cautious as AniList's
+let malCooldownUntil = 0;
+
+export async function takeMalRequest() {
+  const retryAfter = Math.ceil((malCooldownUntil - Date.now()) / 1000);
+  if (retryAfter > 0) return { allowed: false, retryAfter };
+  return takeLimit('myanimelist', 25);
+}
+
+export async function pauseMal(seconds: number) {
+  malCooldownUntil = Math.max(malCooldownUntil, Date.now() + seconds * 1000);
+}
+
 // Reads include navigation, preloads, and refreshes after saves. Keep them independent of writes.
 const CLIENT_LIMITS = { read: 60, write: 20, auth: 10 } as const;
 export function takeClientLimit(address: string, kind: keyof typeof CLIENT_LIMITS, cost = 1) {

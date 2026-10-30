@@ -13,6 +13,15 @@ export type UserAnimeList = {
   /** How the list owner scores anime, which the anime's `userScore` is in */
   scoreFormat: ScoreFormat;
   animeList: Anime[];
+  /** Anime on a MyAnimeList list that AniList doesn't know, so they can't be shown as cards */
+  unmatched?: UnmatchedAnime[];
+};
+
+export type UnmatchedAnime = {
+  malId: number;
+  title: string;
+  /** Marked as adult on MyAnimeList, so it's hidden with the cards AniList marks so */
+  isAdult: boolean;
 };
 
 export interface Api {
@@ -34,6 +43,7 @@ export type AnimePageData = {
   /** The sections of the list the viewer hides with the filters above it */
   hiddenSections: ListSection[];
   userProfileLink: string;
+  unmatched?: UnmatchedAnime[];
   /** The viewer's display settings, from the root layout */
   preferences: Preferences;
 };

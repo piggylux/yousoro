@@ -2,15 +2,27 @@ import { error, type Cookies } from '@sveltejs/kit';
 
 import { withoutHiddenMature } from '#lib/anime.js';
 import { HIDDEN_SECTIONS_COOKIE, parseHiddenSections } from '#lib/hidden-sections.js';
+import { isUserName } from '#lib/match.js';
 import {
   AniListNotFoundError,
   AniListTokenError,
   AniListRateLimitError,
 } from '#lib/server/anilist-client.js';
 import { AniListApi } from '#lib/server/anilist.js';
+import { MAL_ENABLED, withMalToken } from '#lib/server/myanimelist-auth.js';
+import {
+  MalForbiddenError,
+  MalNotFoundError,
+  MalRateLimitError,
+  MalTokenError,
+} from '#lib/server/myanimelist-client.js';
+import { MyAnimeListApi } from '#lib/server/myanimelist.js';
 import { takeClientLimit } from '#lib/server/rate-limit.js';
-import { clearSession } from '#lib/server/session.js';
-import { isDomain } from '#lib/types/domain.js';
+import { clearMalSession, clearSession } from '#lib/server/session.js';
+import type { UserAnimeList } from '#lib/types/api.js';
+import { DOMAIN_NAMES, isDomain, type Domain } from '#lib/types/domain.js';
+
+type ListEvent = { locals: App.Locals; cookies: Cookies };
 
 export async function loadAnimePage({
   params,
@@ -27,10 +39,11 @@ export async function loadAnimePage({
   getClientAddress: () => string;
   url?: URL;
 }) {
-  // Only AniList is supported for now
-  if (!isDomain(params.domain)) {
+  // MyAnimeList lists need this site's MyAnimeList client
+  if (!isDomain(params.domain) || (params.domain === 'myanimelist' && !MAL_ENABLED)) {
     error(404, `Unknown domain: ${params.domain}`);
   }
+  const domain = params.domain;
   // Read on every load, so the list is rendered already filtered
   const hiddenSections = parseHiddenSections(cookies.get(HIDDEN_SECTIONS_COOKIE));
 
@@ -39,19 +52,23 @@ export async function loadAnimePage({
     const limit = await takeClientLimit(getClientAddress(), 'read', 2);
     if (!limit.allowed) throw new AniListRateLimitError(limit.retryAfter);
     userAnimeList = await getUserAnimeList(
+      domain,
       params.username,
-      locals,
-      cookies,
+      { locals, cookies },
       url?.searchParams.get('view') !== 'calendar'
     );
   } catch (err) {
-    if (err instanceof AniListRateLimitError) {
+    const rateLimited = err instanceof AniListRateLimitError || err instanceof MalRateLimitError;
+    if (rateLimited) {
       locals.retryAfter = Math.max(locals.retryAfter ?? 0, err.retryAfter);
       if (!isDataRequest)
         error(429, { message: err.message, retryAt: Date.now() + err.retryAfter * 1000 });
     }
-    if (err instanceof AniListNotFoundError) {
-      error(404, `There's no AniList user named ${params.username}`);
+    if (err instanceof AniListNotFoundError || err instanceof MalNotFoundError) {
+      error(404, `There's no ${DOMAIN_NAMES[domain]} user named ${params.username}`);
+    }
+    if (err instanceof MalForbiddenError) {
+      error(403, `MyAnimeList didn't share ${params.username}'s list. It may be private.`);
     }
     // In the browser, the page may already show this list, reloading it by itself or after a
     // save. It keeps showing it then (see +page.ts), rather than an error the viewer didn't ask for
@@ -61,29 +78,48 @@ export async function loadAnimePage({
       unavailable: true as const,
       username: params.username,
       hiddenSections,
-      retryAt: err instanceof AniListRateLimitError ? Date.now() + err.retryAfter * 1000 : 0,
+      retryAt: rateLimited ? Date.now() + err.retryAfter * 1000 : 0,
     };
   }
   const { userId, username, avatarUrl, scoreFormat, animeList } = userAnimeList;
+  const viewer = domain === 'anilist' ? locals.session : locals.malSession;
+  const unmatched = withoutHiddenMature(
+    userAnimeList.unmatched ?? [],
+    locals.preferences.showMature
+  );
 
   return {
     airingsEnriched: url?.searchParams.get('view') !== 'calendar',
-    domain: params.domain,
+    domain,
     username,
     avatarUrl,
-    canEdit: userId !== null && locals.session?.user.id === userId,
+    canEdit: userId !== null && viewer?.user.id === userId,
     // Anime AniList marks as adult are left out entirely when the viewer chose not to see them
     watchingList: withoutHiddenMature(animeList, locals.preferences.showMature),
     scoreFormat,
     hiddenSections,
-    userProfileLink: `https://anilist.co/user/${encodeURIComponent(username)}/animelist/Watching`,
+    userProfileLink:
+      domain === 'anilist'
+        ? `https://anilist.co/user/${encodeURIComponent(username)}/animelist/Watching`
+        : `https://myanimelist.net/animelist/${encodeURIComponent(username)}?status=1`,
+    ...(unmatched.length ? { unmatched } : {}),
   };
 }
 
-async function getUserAnimeList(
+function getUserAnimeList(
+  domain: Domain,
   username: string,
-  locals: App.Locals,
-  cookies: Cookies,
+  event: ListEvent,
+  enrichAirings: boolean
+): Promise<UserAnimeList> {
+  return domain === 'anilist'
+    ? getAniListList(username, event, enrichAirings)
+    : getMalList(username, event, enrichAirings);
+}
+
+async function getAniListList(
+  username: string,
+  { locals, cookies }: ListEvent,
   enrichAirings: boolean
 ) {
   try {
@@ -95,4 +131,23 @@ async function getUserAnimeList(
     locals.session = null;
     return await new AniListApi().getUserAnimeList(username, enrichAirings);
   }
+}
+
+async function getMalList(username: string, event: ListEvent, enrichAirings: boolean) {
+  const session = event.locals.malSession;
+  // Their own list is read with their token, which shows it to them even when it's private
+  if (session && session.user.name.toLowerCase() === username.toLowerCase()) {
+    try {
+      return await withMalToken(event, (token) =>
+        new MyAnimeListApi({ token, owner: session.user }).getUserAnimeList(username, enrichAirings)
+      );
+    } catch (err) {
+      if (!(err instanceof MalTokenError)) throw err;
+      // The sign-in can't be renewed: sign them out and read the public list instead
+      clearMalSession(event.cookies);
+      event.locals.malSession = null;
+    }
+  }
+  if (!isUserName(username)) throw new MalNotFoundError(`Not a MyAnimeList name: ${username}`);
+  return await new MyAnimeListApi().getUserAnimeList(username, enrichAirings);
 }

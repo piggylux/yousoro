@@ -1,7 +1,6 @@
 import { error, redirect } from '@sveltejs/kit';
 
 import { matchPath, parseUserName } from '#lib/match.js';
-import { isDomain } from '#lib/types/domain.js';
 
 import type { PageLoad } from './$types';
 
@@ -12,7 +11,7 @@ import type { PageLoad } from './$types';
  * is the invitation, with a note when they typed their own name
  */
 export const load: PageLoad = async ({ params, parent, url }) => {
-  if (!isDomain(params.domain)) error(404, `Unknown domain: ${params.domain}`);
+  if (params.domain !== 'anilist') error(404, `Unknown domain: ${params.domain}`);
   const page = { name: params.username, other: null, invalidName: null, same: false };
   const isOwner = (name: string) => name.toLowerCase() === params.username.toLowerCase();
 

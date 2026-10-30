@@ -8,7 +8,6 @@ import {
 import { renderGroupPreview, renderSitePreview } from '#lib/server/preview-image.js';
 import { takeClientLimit } from '#lib/server/rate-limit.js';
 import { groupNames } from '#lib/together.js';
-import { isDomain } from '#lib/types/domain.js';
 
 import type { RequestHandler } from './$types';
 
@@ -21,7 +20,7 @@ const CACHE = 'public, max-age=3600, s-maxage=3600, stale-while-revalidate=86400
  * and two names of one account are one person
  */
 export const GET: RequestHandler = async ({ params, getClientAddress }) => {
-  if (!isDomain(params.domain)) error(404, `Unknown domain: ${params.domain}`);
+  if (params.domain !== 'anilist') error(404, `Unknown domain: ${params.domain}`);
   const fallback = (cacheControl: string) => renderSitePreview(cacheControl, 'jpeg');
   const names = [params.username, ...groupNames(params.username, params.others)];
 

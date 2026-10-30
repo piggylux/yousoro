@@ -2,16 +2,17 @@ import { type RequestEvent } from '@sveltejs/kit';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SITE_ORIGIN } from '#lib/seo.js';
-import { getSession } from '#lib/server/session.js';
+import { getMalSession, getSession } from '#lib/server/session.js';
 
 import { handle } from './hooks.server';
 
 vi.mock('$app/env', () => ({ building: false }));
-vi.mock('#lib/server/session.js', () => ({ getSession: vi.fn() }));
+vi.mock('#lib/server/session.js', () => ({ getSession: vi.fn(), getMalSession: vi.fn() }));
 
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getSession).mockReturnValue(null);
+  vi.mocked(getMalSession).mockReturnValue(null);
 });
 function event(path: string, origin = SITE_ORIGIN, routeId: string | null = null) {
   return {
@@ -118,7 +119,7 @@ describe('request security', () => {
     ['/user/anilist/fixture/preview.jpg', '/user/[domain]/[username]'],
     ['/user/anilist/fixture/friends', '/user/[domain]/[username]/friends'],
     ['/user/anilist/fixture/match/other', '/user/[domain]/[username]/match/[[other]]'],
-    ['/api/list/fixture', '/api/list/[username]'],
+    ['/api/list/anilist/fixture', '/api/list/[domain]/[username]'],
     ['/preview.png/x', null],
   ])('keeps other routes private, whatever their path: %s', async (path, routeId) => {
     const response = await handle({

@@ -10,15 +10,17 @@
   type Props = {
     /** The anime just completed, which has already left the Watching list */
     anime: Anime;
-    /** The user's AniList score format */
+    /** The user's score format on the list's service */
     format: ScoreFormat;
+    /** The service the list is on */
+    service?: string;
     /** The viewer's setting: blur covers of anime AniList marks as adult */
     blurMature?: boolean;
     /** Called once the prompt is closed, scored or not */
     onClose: () => void;
   };
 
-  let { anime, format, blurMature = true, onClose }: Props = $props();
+  let { anime, format, service = 'AniList', blurMature = true, onClose }: Props = $props();
 
   let dialog = $state<HTMLDialogElement>();
   // Starts from the score they may have given before, or "No score" / an empty field
@@ -77,11 +79,12 @@
       }}
     >
       <input type="hidden" name="mediaId" value={anime.id} />
+      {#if anime.malId !== null}<input type="hidden" name="malId" value={anime.malId} />{/if}
       <input type="hidden" name="scoreFormat" value={format} />
       <div class="field">
         <ScoreInput {format} bind:value={score} label="Your score" size="large" />
       </div>
-      <p class="note">Your score is saved to your AniList list.</p>
+      <p class="note">Your score is saved to your {service} list.</p>
 
       {#if errorMessage}
         <p class="tw:text-error tw:text-sm" role="alert">{errorMessage}</p>

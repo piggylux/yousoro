@@ -1,6 +1,7 @@
 import { joinNames } from '#lib/match-words.js';
 import { matchPath } from '#lib/match.js';
 import { togetherPath } from '#lib/together.js';
+import { DOMAIN_NAMES, listPath, type Domain } from '#lib/types/domain.js';
 import { wrappedPath } from '#lib/wrapped.js';
 
 export const SITE_ORIGIN = 'https://yousoro.vercel.app';
@@ -15,9 +16,9 @@ export const PREVIEW_IMAGE_SIZE = { width: 1200, height: 630 } as const;
 export const SHARE_IMAGE = `${SITE_ORIGIN}/preview.png`;
 const SHARE_IMAGE_ALT = 'Yousoro: keep up with what you watch';
 
-/** The link preview of a list, drawn from its public AniList entries */
-export function listPreviewImage(username: string): string {
-  return `${SITE_ORIGIN}/user/anilist/${encodeURIComponent(username)}/preview.jpg`;
+/** The link preview of a list, drawn from its public entries */
+export function listPreviewImage(username: string, domain: Domain = 'anilist'): string {
+  return `${SITE_ORIGIN}${listPath(domain, username)}/preview.jpg`;
 }
 
 /** A profile badge of a list, as badge.jpg draws it, for light or dark pages */
@@ -133,27 +134,31 @@ export function getPageSeo(url: SeoUrl, status = 200, resolvedUsername?: string)
       };
     }
   } else {
-    const match = path.match(/^\/user\/anilist\/([^/]+)(\/friends)?$/);
-    if (match) {
+    // Friends are AniList's only
+    const match = path.match(/^\/user\/(?:(anilist)|myanimelist)\/([^/]+)(\/friends)?$/);
+    if (match && (match[1] || !match[3])) {
+      const domain: Domain = match[1] ? 'anilist' : 'myanimelist';
       let username: string;
       try {
-        username = decodeURIComponent(match[1]);
+        username = decodeURIComponent(match[2]);
       } catch {
         return { title, description, canonical, image, noindex: true, home: false };
       }
       // AniList returns its canonical spelling even when the requested name uses another case.
       username = resolvedUsername || username;
-      if (match[2]) {
+      if (match[3]) {
         title = `${username}'s friends | ${SITE_NAME}`;
         description = `The people ${username} follows on AniList.`;
       } else {
         const calendar = url.searchParams.get('view') === 'calendar';
         title = `${username}'s ${calendar ? 'Anime Episode Calendar' : 'Anime Watching List'} | ${SITE_NAME}`;
-        description = `Explore ${username}'s AniList watching list on Yousoro. See aired anime episodes, catch-up progress, and upcoming release dates.`;
+        description = `Explore ${username}'s ${DOMAIN_NAMES[domain]} watching list on Yousoro. See aired anime episodes, catch-up progress, and upcoming release dates.`;
+        // MyAnimeList names ignore case, and its public lists don't say how their owner spells it
+        const canonicalName = domain === 'myanimelist' ? username.toLowerCase() : username;
         // The calendar and filtered views are alternate presentations of this public list.
-        canonical = `${SITE_ORIGIN}/user/anilist/${encodeURIComponent(username)}`;
+        canonical = `${SITE_ORIGIN}${listPath(domain, canonicalName)}`;
         image = {
-          url: listPreviewImage(username),
+          url: listPreviewImage(canonicalName, domain),
           type: 'image/jpeg',
           alt: `${username}'s anime watching list`,
         };

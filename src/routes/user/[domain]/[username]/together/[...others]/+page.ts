@@ -2,7 +2,6 @@ import { error, redirect } from '@sveltejs/kit';
 
 import { parseUserName } from '#lib/match.js';
 import { groupNames, MAX_GROUP, togetherPath } from '#lib/together.js';
-import { isDomain } from '#lib/types/domain.js';
 
 import type { PageLoad } from './$types';
 
@@ -13,7 +12,7 @@ import type { PageLoad } from './$types';
  * names that can't be AniList's, or too many goes to the group it describes
  */
 export const load: PageLoad = async ({ params, parent, url }) => {
-  if (!isDomain(params.domain)) error(404, `Unknown domain: ${params.domain}`);
+  if (params.domain !== 'anilist') error(404, `Unknown domain: ${params.domain}`);
   const host = params.username;
   const others = groupNames(host, params.others);
   const page = { host, others, formError: null as 'invalid' | 'full' | null, typed: '' };

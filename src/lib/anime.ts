@@ -220,7 +220,10 @@ export function countBySection(animeList: Anime[]): Record<ListSection, number> 
 }
 
 /** The anime to list: all of them, or without those AniList marks as adult when they're hidden */
-export function withoutHiddenMature(animeList: Anime[], showMature: boolean): Anime[] {
+export function withoutHiddenMature<T extends Pick<Anime, 'isAdult'>>(
+  animeList: T[],
+  showMature: boolean
+): T[] {
   return showMature ? animeList : animeList.filter((anime) => !anime.isAdult);
 }
 

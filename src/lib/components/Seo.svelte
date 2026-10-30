@@ -13,7 +13,7 @@
     typeof page.data.username === 'string' ? page.data.username : undefined
   );
   const seo = $derived(getPageSeo(page.url, page.status, resolvedUsername));
-  const noindex = $derived(seo.noindex || Boolean(page.data.user));
+  const noindex = $derived(seo.noindex || Boolean(page.data.user || page.data.malUser));
 </script>
 
 <svelte:head>

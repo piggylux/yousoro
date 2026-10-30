@@ -16,3 +16,16 @@ export function getAuthorizeUrl(state: string): string {
   });
   return `${AUTHORIZE_URL}?${params}`;
 }
+
+/** Sends the browser to AniList to sign in, then back to `redirectTo` */
+export function startAniListSignIn(redirectTo: string) {
+  const state = crypto.randomUUID();
+  try {
+    sessionStorage.setItem(PENDING_SIGN_IN_KEY, JSON.stringify({ state, redirectTo }));
+  } catch {
+    // Without sessionStorage the callback can't confirm this browser started the sign-in
+    alert('Signing in needs browser storage, which is blocked in this window.');
+    return;
+  }
+  location.assign(getAuthorizeUrl(state));
+}

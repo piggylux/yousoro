@@ -46,6 +46,7 @@ describe('image fallback', () => {
 
 const anime: Anime = {
   id: 1,
+  malId: null,
   title: 'Test anime',
   englishTitle: null,
   otherTitles: [],

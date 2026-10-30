@@ -51,4 +51,27 @@ describe('parseEntryUpdate', () => {
   ])('refuses %s', (_, fields, message) => {
     expect(parseEntryUpdate(form(fields))).toEqual({ message });
   });
+
+  describe('on MyAnimeList', () => {
+    it("needs the anime's MyAnimeList id, and passes it on", () => {
+      expect(parseEntryUpdate(form({ mediaId: '7', progress: '3' }), 'myanimelist')).toEqual({
+        message: 'Unknown anime',
+      });
+      expect(
+        parseEntryUpdate(form({ mediaId: '7', malId: '52991', progress: '3' }), 'myanimelist')
+      ).toEqual({ mediaId: 7, malId: 52991, changes: { progress: 3 } });
+    });
+
+    it('reads scores as whole numbers out of 10, whatever format the form names', () => {
+      const fields = { mediaId: '7', malId: '1', scoreFormat: 'POINT_100' };
+      expect(parseEntryUpdate(form({ ...fields, score: '8' }), 'myanimelist')).toEqual({
+        mediaId: 7,
+        malId: 1,
+        changes: { score: 8 },
+      });
+      expect(parseEntryUpdate(form({ ...fields, score: '85' }), 'myanimelist')).toEqual({
+        message: "That score doesn't fit your MyAnimeList scoring system",
+      });
+    });
+  });
 });

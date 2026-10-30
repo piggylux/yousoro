@@ -33,6 +33,19 @@ describe('search metadata', () => {
     expect(seo.noindex).toBe(false);
   });
 
+  it('gives a MyAnimeList list its own canonical, preview and description', () => {
+    const seo = getPageSeo(new URL(`${SITE_ORIGIN}/user/myanimelist/ShowFan?view=calendar`));
+    // MyAnimeList names ignore case, so every spelling shares one canonical
+    expect(seo.canonical).toBe(`${SITE_ORIGIN}/user/myanimelist/showfan`);
+    expect(seo.image.url).toBe(`${SITE_ORIGIN}/user/myanimelist/showfan/preview.jpg`);
+    expect(seo.description).toContain("ShowFan's MyAnimeList watching list");
+    expect(seo.noindex).toBe(false);
+    // Friends are AniList's only
+    expect(getPageSeo(new URL(`${SITE_ORIGIN}/user/myanimelist/ShowFan/friends`)).noindex).toBe(
+      true
+    );
+  });
+
   it('uses AniList’s resolved username so alternate case and URL encodings share one canonical', () => {
     for (const path of [
       '/user/anilist/showfan',

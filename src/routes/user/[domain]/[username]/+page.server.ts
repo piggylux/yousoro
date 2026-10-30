@@ -3,9 +3,15 @@ import { error, fail, type RequestEvent } from '@sveltejs/kit';
 import { AniListTokenError, AniListRateLimitError, saveEntry } from '#lib/server/anilist-client.js';
 import { parseEntryUpdate } from '#lib/server/entry-update.js';
 import { loadAnimePage } from '#lib/server/list-page.js';
+import { withMalToken } from '#lib/server/myanimelist-auth.js';
+import {
+  MalRateLimitError,
+  MalTokenError,
+  saveEntry as saveMalEntry,
+} from '#lib/server/myanimelist-client.js';
 import { takeClientLimit } from '#lib/server/rate-limit.js';
-import { clearSession, type Session } from '#lib/server/session.js';
-import { isDomain } from '#lib/types/domain.js';
+import { clearMalSession, clearSession } from '#lib/server/session.js';
+import { DOMAIN_NAMES, isDomain, type Domain } from '#lib/types/domain.js';
 
 import type { Actions } from './$types';
 
@@ -17,32 +23,32 @@ export const load: import('./$types').PageServerLoad = async (event) => {
 };
 
 /**
- * Runs an update on the signed-in user's own AniList list, whatever list the page shows, and
- * turns what can go wrong into a message for the card
+ * Runs an update on the signed-in user's own list on the page's service, whatever list the page
+ * shows, and turns what can go wrong into a message for the card
  */
 async function updateOwnList<T>(
-  { params, locals, cookies }: Pick<RequestEvent, 'params' | 'locals' | 'cookies'>,
-  update: (session: Session) => Promise<T>
+  { locals, cookies }: Pick<RequestEvent, 'locals' | 'cookies'>,
+  domain: Domain,
+  update: () => Promise<T>
 ) {
-  if (params.domain !== 'anilist') {
-    return fail(400, { message: 'Only AniList lists can be updated' });
-  }
-  if (!locals.session) {
-    return fail(401, { message: 'Sign in with AniList to update your list' });
+  const service = DOMAIN_NAMES[domain];
+  if (!(domain === 'anilist' ? locals.session : locals.malSession)) {
+    return fail(401, { message: `Sign in with ${service} to update your list` });
   }
   try {
-    return await update(locals.session);
+    return await update();
   } catch (err) {
-    if (err instanceof AniListRateLimitError) {
+    if (err instanceof AniListRateLimitError || err instanceof MalRateLimitError) {
       locals.retryAfter = Math.max(locals.retryAfter ?? 0, err.retryAfter);
       return fail(429, { message: err.message });
     }
     console.error(err);
-    if (err instanceof AniListTokenError) {
-      clearSession(cookies);
-      return fail(401, { message: 'Your AniList sign-in expired, please sign in again' });
+    if (err instanceof AniListTokenError || err instanceof MalTokenError) {
+      if (domain === 'anilist') clearSession(cookies);
+      else clearMalSession(cookies);
+      return fail(401, { message: `Your ${service} sign-in expired, please sign in again` });
     }
-    return fail(502, { message: 'AniList rejected the update, please try again' });
+    return fail(502, { message: `${service} rejected the update, please try again` });
   }
 }
 
@@ -57,12 +63,16 @@ export const actions: Actions = {
       event.locals.retryAfter = Math.max(event.locals.retryAfter ?? 0, limit.retryAfter);
       return fail(429, { message: 'Too many updates, please try again shortly' });
     }
-    const update = parseEntryUpdate(await event.request.formData());
+    const domain = event.params.domain;
+    if (!isDomain(domain)) return fail(400, { message: 'Unknown list' });
+    const update = parseEntryUpdate(await event.request.formData(), domain);
     if ('message' in update) return fail(400, { message: update.message });
-    const { mediaId, changes } = update;
-    return updateOwnList(event, async (session) => ({
+    const { mediaId, malId, changes } = update;
+    return updateOwnList(event, domain, async () => ({
       mediaId,
-      ...(await saveEntry(session.token, mediaId, changes)),
+      ...(domain === 'anilist'
+        ? await saveEntry(event.locals.session!.token, mediaId, changes)
+        : await withMalToken(event, (token) => saveMalEntry(token, malId!, changes))),
     }));
   },
 };

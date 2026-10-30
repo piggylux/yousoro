@@ -4,7 +4,6 @@ import { AniListNotFoundError, AniListRateLimitError } from '#lib/server/anilist
 import { AniListApi } from '#lib/server/anilist.js';
 import { renderBadge, type BadgeTheme } from '#lib/server/preview-image.js';
 import { takeClientLimit } from '#lib/server/rate-limit.js';
-import { isDomain } from '#lib/types/domain.js';
 
 import type { RequestHandler } from './$types';
 
@@ -16,7 +15,7 @@ import type { RequestHandler } from './$types';
  * can't be read gets a badge of the site for a few minutes, so a busy AniList doesn't stick to it
  */
 export const GET: RequestHandler = async ({ params, url, getClientAddress }) => {
-  if (!isDomain(params.domain)) error(404, `Unknown domain: ${params.domain}`);
+  if (params.domain !== 'anilist') error(404, `Unknown domain: ${params.domain}`);
   const theme: BadgeTheme = url.searchParams.get('theme') === 'dark' ? 'dark' : 'light';
   const fallback = (cacheControl: string) => renderBadge(null, theme, cacheControl);
 

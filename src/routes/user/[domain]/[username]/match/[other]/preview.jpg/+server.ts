@@ -11,7 +11,6 @@ import {
   renderSitePreview,
 } from '#lib/server/preview-image.js';
 import { takeClientLimit } from '#lib/server/rate-limit.js';
-import { isDomain } from '#lib/types/domain.js';
 
 import type { RequestHandler } from './$types';
 
@@ -24,7 +23,7 @@ const CACHE = 'public, max-age=3600, s-maxage=3600, stale-while-revalidate=86400
  * get that person's invitation instead
  */
 export const GET: RequestHandler = async ({ params, getClientAddress }) => {
-  if (!isDomain(params.domain)) error(404, `Unknown domain: ${params.domain}`);
+  if (params.domain !== 'anilist') error(404, `Unknown domain: ${params.domain}`);
   const fallback = (cacheControl: string) => renderSitePreview(cacheControl, 'jpeg');
 
   // Only this client is over its limit, so the fallback must not be cached for everyone else

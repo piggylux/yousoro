@@ -13,9 +13,11 @@
     username: string;
     /** Speaks to the visitor on their own list, and about the owner on anyone else's */
     isOwnList: boolean;
+    /** The service the list is on */
+    service?: string;
   };
 
-  let { animeList, username, isOwnList }: Props = $props();
+  let { animeList, username, isOwnList, service = 'AniList' }: Props = $props();
 
   const backlog = $derived(getBacklog(animeList));
   const mood = $derived(
@@ -118,7 +120,7 @@
         <p class="headline">Nothing to watch yet</p>
         <p class="detail">
           {isOwnList
-            ? 'Start an anime on AniList and it will show up here.'
+            ? `Start an anime on ${service} and it will show up here.`
             : `${username} isn't watching anything right now.`}
         </p>
       </div>
