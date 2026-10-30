@@ -19,19 +19,19 @@ describe('parseEntryUpdate', () => {
   it('reads a score alone, as the score prompt sends it', () => {
     expect(
       parseEntryUpdate(form({ mediaId: '7', score: '8.5', scoreFormat: 'POINT_10_DECIMAL' }))
-    ).toEqual({ mediaId: 7, changes: { score: 8.5 } });
+    ).toEqual({ mediaId: 7, changes: { score: 8.5 }, scoreFormat: 'POINT_10_DECIMAL' });
   });
 
   it("reads both, as the card's back sends them", () => {
     expect(
       parseEntryUpdate(form({ mediaId: '7', progress: '12', score: '4', scoreFormat: 'POINT_5' }))
-    ).toEqual({ mediaId: 7, changes: { progress: 12, score: 4 } });
+    ).toEqual({ mediaId: 7, changes: { progress: 12, score: 4 }, scoreFormat: 'POINT_5' });
   });
 
   it('takes an empty score field as no score', () => {
     expect(
       parseEntryUpdate(form({ mediaId: '7', progress: '2', score: '', scoreFormat: 'POINT_100' }))
-    ).toEqual({ mediaId: 7, changes: { progress: 2, score: 0 } });
+    ).toEqual({ mediaId: 7, changes: { progress: 2, score: 0 }, scoreFormat: 'POINT_100' });
   });
 
   it.each([
@@ -52,6 +52,22 @@ describe('parseEntryUpdate', () => {
     expect(parseEntryUpdate(form(fields))).toEqual({ message });
   });
 
+  it('passes on how many episodes the card says the anime has', () => {
+    expect(parseEntryUpdate(form({ mediaId: '7', progress: '3', episodes: '12' }))).toEqual({
+      mediaId: 7,
+      episodes: 12,
+      changes: { progress: 3 },
+    });
+  });
+
+  it('passes on the MyAnimeList id an AniList card sends, for a linked account', () => {
+    expect(parseEntryUpdate(form({ mediaId: '7', malId: '52991', progress: '3' }))).toEqual({
+      mediaId: 7,
+      malId: 52991,
+      changes: { progress: 3 },
+    });
+  });
+
   describe('on MyAnimeList', () => {
     it("needs the anime's MyAnimeList id, and passes it on", () => {
       expect(parseEntryUpdate(form({ mediaId: '7', progress: '3' }), 'myanimelist')).toEqual({
@@ -68,6 +84,7 @@ describe('parseEntryUpdate', () => {
         mediaId: 7,
         malId: 1,
         changes: { score: 8 },
+        scoreFormat: 'POINT_10',
       });
       expect(parseEntryUpdate(form({ ...fields, score: '85' }), 'myanimelist')).toEqual({
         message: "That score doesn't fit your MyAnimeList scoring system",

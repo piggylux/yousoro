@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  copyEntry,
   getWatchingEntries,
   MalForbiddenError,
   MalNotFoundError,
@@ -12,7 +13,13 @@ import {
 import { pauseMal, takeMalRequest } from '#lib/server/rate-limit.js';
 
 vi.mock('$app/env/private', () => ({ MAL_CLIENT_ID: 'client-id' }));
-vi.mock('#lib/server/rate-limit.js', () => ({ takeMalRequest: vi.fn(), pauseMal: vi.fn() }));
+// Each test reads through a cache of its own
+const cacheNamespace = vi.hoisted(() => ({ value: 0 }));
+vi.mock('#lib/server/rate-limit.js', () => ({
+  fingerprint: (value: string) => `${cacheNamespace.value}:${value}`,
+  takeMalRequest: vi.fn(),
+  pauseMal: vi.fn(),
+}));
 
 const API = 'https://api.myanimelist.net/v2';
 
@@ -31,6 +38,7 @@ function entry(id: number, status: string, isRewatching = false): MalEntry {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  cacheNamespace.value++;
   vi.mocked(takeMalRequest).mockResolvedValue({ allowed: true, retryAfter: 60 });
   vi.stubGlobal('fetch', vi.fn());
 });
@@ -89,6 +97,37 @@ describe('getWatchingEntries', () => {
     await expect(getWatchingEntries('Fixture')).rejects.toBeInstanceOf(type);
   });
 
+  it('takes a refusal of a user’s own request as MyAnimeList asking to slow down', async () => {
+    vi.mocked(fetch).mockImplementation(async () => new Response(null, { status: 403 }));
+    await expect(getWatchingEntries('Fixture', 'token')).rejects.toBeInstanceOf(MalRateLimitError);
+    expect(pauseMal).toHaveBeenCalledWith(60);
+  });
+
+  it('reads a public list once for everyone, for 30 seconds', async () => {
+    vi.mocked(fetch).mockImplementation(async () => Response.json({ data: [] }));
+
+    await Promise.all([getWatchingEntries('Fixture'), getWatchingEntries('Fixture')]);
+    await getWatchingEntries('Fixture');
+    expect(fetch).toHaveBeenCalledTimes(2);
+
+    vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 31_000);
+    await getWatchingEntries('Fixture');
+    expect(fetch).toHaveBeenCalledTimes(4);
+    vi.restoreAllMocks();
+  });
+
+  it('never keeps a user’s own list, only shares a read already under way', async () => {
+    vi.mocked(fetch).mockImplementation(async () => Response.json({ data: [] }));
+
+    await Promise.all([
+      getWatchingEntries('Fixture', 'token'),
+      getWatchingEntries('Fixture', 'token'),
+    ]);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    await getWatchingEntries('Fixture', 'token');
+    expect(fetch).toHaveBeenCalledTimes(4);
+  });
+
   it('pauses MyAnimeList when it says to slow down', async () => {
     vi.mocked(fetch).mockImplementation(
       async () => new Response(null, { status: 429, headers: { 'Retry-After': '30' } })
@@ -136,9 +175,33 @@ describe('saveEntry', () => {
     const saved = await saveEntry('token', 52991, { progress: 3 });
 
     expect(sentBody()).toEqual({ num_watched_episodes: '3' });
-    expect(saved).toEqual({ progress: 3, score: 0, status: 'CURRENT' });
+    expect(saved).toEqual({
+      progress: 3,
+      score: 0,
+      status: 'CURRENT',
+      startedAt: null,
+      completedAt: null,
+    });
     const [url] = vi.mocked(fetch).mock.calls[1];
     expect(String(url)).toBe(`${API}/anime/52991/my_list_status`);
+  });
+
+  it('saves in one request when the page says the episode doesn’t finish the anime', async () => {
+    answer({ num_episodes: 12, my_list_status: { status: 'watching', is_rewatching: false } });
+
+    await saveEntry('token', 1, { progress: 3 }, { episodes: 12 });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(sentBody()).toEqual({ num_watched_episodes: '3' });
+  });
+
+  it('reads the entry when the page says the episode may finish it', async () => {
+    answer({ num_episodes: 12, my_list_status: { status: 'watching', is_rewatching: false } });
+
+    await saveEntry('token', 1, { progress: 12 }, { episodes: 12 });
+
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(sentBody()).toMatchObject({ status: 'completed' });
   });
 
   it('completes the anime on its last episode, as AniList does', async () => {
@@ -193,5 +256,77 @@ describe('saveEntry', () => {
     );
 
     expect(await saveEntry('token', 1, { progress: 4 })).toMatchObject({ status: 'REPEATING' });
+  });
+});
+
+describe('copyEntry', () => {
+  function patched() {
+    const patch = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === 'PATCH');
+    return Object.fromEntries(new URLSearchParams(String(patch?.[1]?.body)));
+  }
+
+  beforeEach(() => {
+    vi.mocked(fetch).mockImplementation(async (_, init) =>
+      init?.method === 'PATCH'
+        ? Response.json({})
+        : Response.json({ my_list_status: { is_rewatching: true, num_times_rewatched: 2 } })
+    );
+  });
+
+  it('sets the episode count and status AniList saved, in one request', async () => {
+    await copyEntry('token', 1, { progress: 4, status: 'CURRENT' });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(patched()).toEqual({
+      num_watched_episodes: '4',
+      status: 'watching',
+      is_rewatching: 'false',
+    });
+  });
+
+  it("sets the dates it's given, and leaves those it isn't", async () => {
+    await copyEntry('token', 1, {
+      progress: 4,
+      status: 'CURRENT',
+      startedAt: '2026-10-01',
+      completedAt: null,
+    });
+
+    expect(patched()).toMatchObject({ start_date: '2026-10-01' });
+    expect(patched()).not.toHaveProperty('finish_date');
+  });
+
+  it('keeps a rewatch as a completed anime watched again, with its score', async () => {
+    await copyEntry('token', 1, { progress: 2, status: 'REPEATING', score: 8 });
+
+    expect(patched()).toEqual({
+      num_watched_episodes: '2',
+      status: 'completed',
+      is_rewatching: 'true',
+      score: '8',
+    });
+  });
+
+  it('makes a single request, within its share of the budget, when told not to count', async () => {
+    await copyEntry(
+      'token',
+      1,
+      { progress: 12, status: 'COMPLETED' },
+      { countRewatch: false, priority: 'optional' }
+    );
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(patched()).not.toHaveProperty('num_times_rewatched');
+    expect(takeMalRequest).toHaveBeenCalledWith('optional');
+  });
+
+  it('counts a rewatch AniList finished as one more time watched', async () => {
+    await copyEntry('token', 1, { progress: 12, status: 'COMPLETED' });
+
+    expect(patched()).toMatchObject({
+      status: 'completed',
+      is_rewatching: 'false',
+      num_times_rewatched: '3',
+    });
   });
 });

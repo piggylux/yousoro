@@ -6,6 +6,7 @@
   import SettingsDrawer from '#lib/components/SettingsDrawer.svelte';
   import SignInButton from '#lib/components/SignInButton.svelte';
   import { malSignInPath } from '#lib/myanimelist-auth.js';
+  import { SYNC_ENABLED } from '#lib/sync.js';
   import { DOMAIN_NAMES, isDomain, listPath as pathOfList } from '#lib/types/domain.js';
   import type { Preferences } from '#lib/types/preferences.js';
   import type { SessionUser } from '#lib/types/session-user.js';
@@ -22,11 +23,16 @@
 
   let { user, malUser, malEnabled, preferences }: Props = $props();
 
-  // Every account signed in, AniList's first
-  const accounts = $derived([
-    ...(user ? [{ domain: 'anilist' as const, user }] : []),
-    ...(malUser ? [{ domain: 'myanimelist' as const, user: malUser }] : []),
-  ]);
+  // Every account signed in, the main list's first
+  const accounts = $derived(
+    [
+      ...(user ? [{ domain: 'anilist' as const, user }] : []),
+      ...(malUser ? [{ domain: 'myanimelist' as const, user: malUser }] : []),
+    ].sort(
+      (a, b) =>
+        Number(b.domain === preferences.mainList) - Number(a.domain === preferences.mainList)
+    )
+  );
 
   let settingsOpen = $state(false);
   const logoutFormId = $props.id();
@@ -251,6 +257,9 @@
                   <li><a href={`${pathOfList(domain, signedIn.name)}/friends`}>My friends</a></li>
                 {/if}
               {/each}
+              {#if SYNC_ENABLED && accounts.length > 1}
+                <li><a href="/sync">Sync lists</a></li>
+              {/if}
               <li class="sign-out">
                 <button type="submit" form={logoutFormId}>Sign out</button>
               </li>
@@ -294,7 +303,7 @@
   </nav>
 </header>
 
-<SettingsDrawer {preferences} bind:open={settingsOpen} />
+<SettingsDrawer {preferences} {user} {malUser} {malEnabled} bind:open={settingsOpen} />
 
 <style>
   header {

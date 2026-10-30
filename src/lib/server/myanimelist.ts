@@ -1,7 +1,7 @@
 import { getMediaByMalIds } from '#lib/server/anilist-client.js';
 import { toAnime, withRecentAirings } from '#lib/server/anilist.js';
 import { getWatchingEntries } from '#lib/server/myanimelist-client.js';
-import type { AniListPriority } from '#lib/server/rate-limit.js';
+import type { RequestPriority } from '#lib/server/rate-limit.js';
 import type { Anime } from '#lib/types/anime.js';
 import type { Api, UnmatchedAnime, UserAnimeList } from '#lib/types/api.js';
 import type { SessionUser } from '#lib/types/session-user.js';
@@ -20,7 +20,7 @@ export class MyAnimeListApi implements Api {
   async getUserAnimeList(
     username: string,
     enrichAirings = true,
-    priority?: AniListPriority
+    priority?: RequestPriority
   ): Promise<UserAnimeList> {
     const entries = await getWatchingEntries(username, this.signedIn?.token);
     const media = await getMediaByMalIds(

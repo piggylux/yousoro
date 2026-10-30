@@ -2,6 +2,7 @@ import { error, fail, type RequestEvent } from '@sveltejs/kit';
 
 import { AniListTokenError, AniListRateLimitError, saveEntry } from '#lib/server/anilist-client.js';
 import { parseEntryUpdate } from '#lib/server/entry-update.js';
+import { copyToLinkedAccount } from '#lib/server/linked-save.js';
 import { loadAnimePage } from '#lib/server/list-page.js';
 import { withMalToken } from '#lib/server/myanimelist-auth.js';
 import {
@@ -55,7 +56,9 @@ async function updateOwnList<T>(
 export const actions: Actions = {
   /**
    * Saves the watched episode count, the score, or both, from the card's +1 button, the card's
-   * back, or the score prompt after completing an anime. A field that isn't sent stays as it is
+   * back, or the score prompt after completing an anime. A field that isn't sent stays as it is.
+   * The save is then copied to the account linked on the other service, if any; `linked` says when
+   * that copy failed
    */
   updateEntry: async (event) => {
     const limit = await takeClientLimit(event.getClientAddress(), 'write');
@@ -67,12 +70,16 @@ export const actions: Actions = {
     if (!isDomain(domain)) return fail(400, { message: 'Unknown list' });
     const update = parseEntryUpdate(await event.request.formData(), domain);
     if ('message' in update) return fail(400, { message: update.message });
-    const { mediaId, malId, changes } = update;
-    return updateOwnList(event, domain, async () => ({
-      mediaId,
-      ...(domain === 'anilist'
-        ? await saveEntry(event.locals.session!.token, mediaId, changes)
-        : await withMalToken(event, (token) => saveMalEntry(token, malId!, changes))),
-    }));
+    const { mediaId, malId, changes, episodes } = update;
+    return updateOwnList(event, domain, async () => {
+      const saved =
+        domain === 'anilist'
+          ? await saveEntry(event.locals.session!.token, mediaId, changes)
+          : await withMalToken(event, (token) =>
+              saveMalEntry(token, malId!, changes, { episodes })
+            );
+      const linked = await copyToLinkedAccount(event, domain, update, saved);
+      return { mediaId, ...saved, ...(linked && { linked }) };
+    });
   },
 };

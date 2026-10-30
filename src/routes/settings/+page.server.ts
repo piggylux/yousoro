@@ -13,6 +13,7 @@ export const actions: Actions = {
       cardSize: form.get('cardSize'),
       downloadLanguage: form.get('downloadLanguage'),
       downloadVersion: form.get('downloadVersion'),
+      mainList: form.get('mainList'),
     });
     setPreferences(cookies, preferences);
     locals.preferences = preferences;

@@ -17,6 +17,14 @@ export type UserAnimeList = {
   unmatched?: UnmatchedAnime[];
 };
 
+/** A save that reached the list's service but not the account linked to it */
+export type LinkedFailure = {
+  /** What was saved where, and why the linked account wasn't updated */
+  message: string;
+  /** Whether saving again may help, as when the service was busy */
+  retry: boolean;
+};
+
 export type UnmatchedAnime = {
   malId: number;
   title: string;

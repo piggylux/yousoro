@@ -4,14 +4,19 @@
   import CloseButton from '#lib/components/CloseButton.svelte';
   import SettingsForm from '#lib/components/SettingsForm.svelte';
   import type { Preferences } from '#lib/types/preferences.js';
+  import type { SessionUser } from '#lib/types/session-user.js';
 
   type Props = {
     preferences: Preferences;
+    /** The AniList and MyAnimeList accounts signed in, for the account settings */
+    user: SessionUser | null;
+    malUser: SessionUser | null;
+    malEnabled: boolean;
     /** Whether the drawer is showing; set back to false when it closes */
     open: boolean;
   };
 
-  let { preferences, open = $bindable() }: Props = $props();
+  let { preferences, user, malUser, malEnabled, open = $bindable() }: Props = $props();
 
   let dialog = $state<HTMLDialogElement>();
   // Only a press that starts on the dimmed page closes the drawer, not a drag that ends there
@@ -44,7 +49,7 @@
       <CloseButton label="Close settings" onclick={() => (open = false)} />
     </div>
     <div class="settings-content">
-      <SettingsForm {preferences} shown={open} />
+      <SettingsForm {preferences} {user} {malUser} {malEnabled} shown={open} headingLevel={3} />
     </div>
   </div>
 </dialog>

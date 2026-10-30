@@ -10,7 +10,12 @@
   JavaScript, and where the form saves to -->
 <section class="settings">
   <h1 class="heading">Settings</h1>
-  <SettingsForm preferences={data.preferences} />
+  <SettingsForm
+    preferences={data.preferences}
+    user={data.user}
+    malUser={data.malUser}
+    malEnabled={data.malEnabled}
+  />
 </section>
 
 <style>

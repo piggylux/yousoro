@@ -40,6 +40,7 @@
     type ScoreFormat,
   } from '#lib/score.js';
   import type { Anime } from '#lib/types/anime.js';
+  import type { LinkedFailure } from '#lib/types/api.js';
   import type { FriendWatching } from '#lib/types/friend-watching.js';
   import type { DownloadLanguage, DownloadVersion } from '#lib/types/preferences.js';
 
@@ -76,6 +77,11 @@
     position?: number;
     /** Apply AniList's confirmed response to the visible list. */
     onConfirmed: (saved: Anime, status: string) => void;
+    /**
+     * Called when a save reached the list's service but not the account linked to it, with the
+     * anime as saved; `scored` says the save set its score
+     */
+    onLinkedFailure?: (failure: LinkedFailure, saved: Anime, scored: boolean) => void;
     /** Called once a save is applied, with where the card was before */
     onSaved?: (animeId: number, positionBefore: number) => void;
     /** Glows for a moment, so the eye finds the card in its new place after a save */
@@ -98,6 +104,7 @@
     position = 0,
     onSaved,
     onConfirmed,
+    onLinkedFailure,
     highlighted = false,
   }: Props = $props();
 
@@ -784,6 +791,8 @@
               saved.currentEpisode
             );
           onConfirmed(saved, String(result.data?.status ?? ''));
+          const linked = result.data?.linked as LinkedFailure | undefined;
+          if (linked) onLinkedFailure?.(linked, saved, scored);
         }
         // onConfirmed applies AniList's response; a full list reload adds no useful data.
         await update({ reset: false, refreshAll: result.type !== 'success' });
@@ -1051,6 +1060,12 @@
                   name="malId"
                   value={anime.malId}
                 />{/if}
+              <!-- Spares MyAnimeList a read when this episode doesn't finish the anime -->
+              {#if anime.numberEpisodes}<input
+                  type="hidden"
+                  name="episodes"
+                  value={anime.numberEpisodes}
+                />{/if}
               <input type="hidden" name="progress" value={anime.currentEpisode + 1} />
               <button
                 class="quick-watch"
@@ -1199,6 +1214,11 @@
                     type="hidden"
                     name="malId"
                     value={anime.malId}
+                  />{/if}
+                {#if anime.numberEpisodes}<input
+                    type="hidden"
+                    name="episodes"
+                    value={anime.numberEpisodes}
                   />{/if}
                 <input type="hidden" name="scoreFormat" value={scoreFormat} />
                 <button

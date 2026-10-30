@@ -11,6 +11,8 @@ shows you're actively watching come first. Once you've watched an episode, mark 
 - **Sign in with AniList or MyAnimeList**: use your existing account to get started.
 - **See what to watch**: check your unwatched episodes at a glance, with active shows first.
 - **Track your progress**: mark episodes as watched in one click and save updates to your list.
+- **Keep both lists in step**: link your AniList and MyAnimeList accounts in the settings, and every
+  episode and score you save goes to both.
 - **Plan your next watch**: see next-episode countdowns and browse four weeks of airing dates in
   your local time zone.
 - **Keep up with rewatches**: track rewatch progress alongside your current shows.

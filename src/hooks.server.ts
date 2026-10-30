@@ -2,6 +2,7 @@ import { building } from '$app/env';
 import type { Handle } from '@sveltejs/kit/hooks';
 
 import { getPageSeo } from '#lib/seo.js';
+import { MAL_ENABLED } from '#lib/server/myanimelist-auth.js';
 import { getPreferences } from '#lib/server/preferences.js';
 import { getMalSession, getSession } from '#lib/server/session.js';
 import { DEFAULT_PREFERENCES } from '#lib/types/preferences.js';
@@ -28,7 +29,8 @@ export const handle: Handle = async ({ event, resolve }) => {
   const path = url.pathname;
   // Prerendered pages are shared, so they never see personal cookies.
   event.locals.session = building ? null : getSession(event.cookies);
-  event.locals.malSession = building ? null : getMalSession(event.cookies);
+  // A MyAnimeList sign-in left from before the site switched MyAnimeList off counts for nothing
+  event.locals.malSession = building || !MAL_ENABLED ? null : getMalSession(event.cookies);
   event.locals.preferences = building ? DEFAULT_PREFERENCES : getPreferences(event.cookies);
   const response = await resolve(event, {
     transformPageChunk: ({ html }) => {

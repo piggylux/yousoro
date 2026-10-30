@@ -1,6 +1,7 @@
 import type { Cookies } from '@sveltejs/kit';
 
 import { type CookieFormat, readVersioned, writeVersioned } from '#lib/server/versioned-cookie.js';
+import { isDomain } from '#lib/types/domain.js';
 import {
   DEFAULT_PREFERENCES,
   isCardSize,
@@ -32,6 +33,10 @@ export function toPreferences(values: Partial<Record<keyof Preferences, unknown>
     downloadVersion: isDownloadVersion(values.downloadVersion)
       ? values.downloadVersion
       : DEFAULT_PREFERENCES.downloadVersion,
+    mainList:
+      typeof values.mainList === 'string' && isDomain(values.mainList)
+        ? values.mainList
+        : DEFAULT_PREFERENCES.mainList,
   };
 }
 
