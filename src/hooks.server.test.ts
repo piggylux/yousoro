@@ -7,10 +7,14 @@ import { getMalSession, getSession } from '#lib/server/session.js';
 import { handle } from './hooks.server';
 
 vi.mock('$app/env', () => ({ building: false }));
+// Whether the site has a MyAnimeList client, whatever the local environment has
+const mal = vi.hoisted(() => ({ MAL_ENABLED: true }));
+vi.mock('#lib/server/myanimelist-auth.js', () => mal);
 vi.mock('#lib/server/session.js', () => ({ getSession: vi.fn(), getMalSession: vi.fn() }));
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mal.MAL_ENABLED = true;
   vi.mocked(getSession).mockReturnValue(null);
   vi.mocked(getMalSession).mockReturnValue(null);
 });
@@ -63,6 +67,23 @@ describe('request security', () => {
     });
     expect(response.headers.get('X-Robots-Tag')).toBe('noindex, follow');
   });
+  it.each([
+    [true, 'noindex, follow'],
+    [false, null],
+  ])('with MyAnimeList on: %s, counts its sign-in as one', async (enabled, robots) => {
+    mal.MAL_ENABLED = enabled;
+    vi.mocked(getMalSession).mockReturnValue({
+      token: 'fixture',
+      refreshToken: 'fixture',
+      expiresAt: Infinity,
+      user: { id: 1, name: 'fixture', avatarUrl: null },
+    });
+    const request = event('/user/anilist/fixture');
+    const response = await handle({ event: request, resolve: async () => new Response('fixture') });
+    expect(response.headers.get('X-Robots-Tag')).toBe(robots);
+    expect(request.locals.malSession).toEqual(enabled ? expect.anything() : null);
+  });
+
   it('does not index responses rendered with an account session', async () => {
     vi.mocked(getSession).mockReturnValue({
       token: 'fixture',

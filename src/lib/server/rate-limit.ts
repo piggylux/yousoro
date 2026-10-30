@@ -34,14 +34,16 @@ export async function takeLimit(key: string, limit: number, seconds = 60, cost =
 }
 
 /**
- * How much of the outbound budget a request may use. Optional ones (social matches and decorative
- * airings) leave five slots for lists and progress saves; spare ones (taste comparisons, which
- * anyone can start by sharing a link) leave ten, so a link going around can't crowd out the rest
+ * How much of the outbound budget a request may use. Optional ones (social matches, decorative
+ * airings and syncs) leave five slots for lists and progress saves; spare ones (taste comparisons,
+ * which anyone can start by sharing a link) leave ten, so a link going around can't crowd out the
+ * rest
  */
-export type AniListPriority = 'required' | 'optional' | 'spare';
-const ANILIST_BUDGET: Record<AniListPriority, number> = { required: 25, optional: 20, spare: 15 };
+export type RequestPriority = 'required' | 'optional' | 'spare';
+// AniList allows 30 requests a minute while its API is degraded, and 90 otherwise
+const ANILIST_BUDGET: Record<RequestPriority, number> = { required: 25, optional: 20, spare: 15 };
 
-export async function takeAniListRequest(priority: AniListPriority = 'required') {
+export async function takeAniListRequest(priority: RequestPriority = 'required') {
   const retryAfter = Math.ceil((cooldownUntil - Date.now()) / 1000);
   if (retryAfter > 0) return { allowed: false, retryAfter };
   return takeLimit('anilist', ANILIST_BUDGET[priority]);
@@ -51,14 +53,17 @@ export async function pauseAniList(seconds: number) {
   cooldownUntil = Math.max(cooldownUntil, Date.now() + seconds * 1000);
 }
 
-// MyAnimeList doesn't publish its limits, and blocks clients it thinks send too many requests, so
-// it gets a budget of its own, as cautious as AniList's
+// MyAnimeList doesn't publish its limits, and blocks clients it thinks send too many requests.
+// Developers report about one request a second is safe, so its budget stays just under that, shared
+// out like AniList's: a sync gives way to lists and progress saves. When MyAnimeList asks to slow
+// down anyway, it's paused (see pauseMal)
+const MAL_BUDGET: Record<RequestPriority, number> = { required: 50, optional: 40, spare: 30 };
 let malCooldownUntil = 0;
 
-export async function takeMalRequest() {
+export async function takeMalRequest(priority: RequestPriority = 'required') {
   const retryAfter = Math.ceil((malCooldownUntil - Date.now()) / 1000);
   if (retryAfter > 0) return { allowed: false, retryAfter };
-  return takeLimit('myanimelist', 25);
+  return takeLimit('myanimelist', MAL_BUDGET[priority]);
 }
 
 export async function pauseMal(seconds: number) {

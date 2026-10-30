@@ -6,6 +6,7 @@
   import ScoreInput from '#lib/components/ScoreInput.svelte';
   import { scoreChoices, type ScoreFormat } from '#lib/score.js';
   import type { Anime } from '#lib/types/anime.js';
+  import type { LinkedFailure } from '#lib/types/api.js';
 
   type Props = {
     /** The anime just completed, which has already left the Watching list */
@@ -18,9 +19,18 @@
     blurMature?: boolean;
     /** Called once the prompt is closed, scored or not */
     onClose: () => void;
+    /** Called when the score was saved, but not to the account linked to the list's service */
+    onLinkedFailure?: (failure: LinkedFailure, saved: Anime) => void;
   };
 
-  let { anime, format, service = 'AniList', blurMature = true, onClose }: Props = $props();
+  let {
+    anime,
+    format,
+    service = 'AniList',
+    blurMature = true,
+    onClose,
+    onLinkedFailure,
+  }: Props = $props();
 
   let dialog = $state<HTMLDialogElement>();
   // Starts from the score they may have given before, or "No score" / an empty field
@@ -73,6 +83,9 @@
             errorMessage = (result.data?.message as string | undefined) ?? 'The update failed';
             return;
           }
+          const linked = result.type === 'success' && (result.data?.linked as LinkedFailure);
+          if (linked)
+            onLinkedFailure?.(linked, { ...anime, userScore: Number(result.data?.score) || null });
           await update({ reset: false, refreshAll: result.type !== 'success' });
           dialog?.close();
         };

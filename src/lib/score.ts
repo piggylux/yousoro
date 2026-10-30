@@ -91,6 +91,19 @@ export function toScore100(score: number, format: ScoreFormat): number {
   return Math.round((score * 100) / SCORE_SCALES[format].max);
 }
 
+/**
+ * A score in MyAnimeList's whole numbers out of 10, 0 meaning no score. A low score still counts as
+ * 1, as rounding it to 0 would clear it
+ */
+export function toMalScore(score: number, format: ScoreFormat): number {
+  return score100ToMal(toScore100(score, format));
+}
+
+/** A score out of 100 in MyAnimeList's whole numbers out of 10, as toMalScore gives it */
+export function score100ToMal(score100: number): number {
+  return score100 > 0 ? Math.max(1, Math.round(score100 / 10)) : 0;
+}
+
 /** AniList's mean score, out of 100, as AniList shows it */
 export function formatMeanScore(meanScore: number) {
   return `${meanScore}%`;

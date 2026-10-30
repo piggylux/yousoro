@@ -1,3 +1,5 @@
+import type { Domain } from '#lib/types/domain.js';
+
 /** The language of the releases the nyaa.si download search looks for */
 export const DOWNLOAD_LANGUAGES = ['any', 'english', 'french'] as const;
 export type DownloadLanguage = (typeof DOWNLOAD_LANGUAGES)[number];
@@ -42,6 +44,8 @@ export type Preferences = {
   downloadLanguage: DownloadLanguage;
   /** Subbed, dubbed or dual-audio releases, for the same search */
   downloadVersion: DownloadVersion;
+  /** Which list "My anime" opens when signed in to both services */
+  mainList: Domain;
 };
 
 /** What a visitor gets before choosing anything: the safe choice for lists others may see */
@@ -52,4 +56,5 @@ export const DEFAULT_PREFERENCES: Preferences = {
   cardSize: 'medium',
   downloadLanguage: 'any',
   downloadVersion: 'any',
+  mainList: 'anilist',
 };

@@ -4,12 +4,15 @@ import {
   AniListNotFoundError,
   AniListRateLimitError,
   AniListTokenError,
+  fromFuzzyDate,
+  getAllListEntries,
   getAnimeYear,
   getFollowing,
   getLatestAirings,
   getSeries,
   getTasteProfile,
   getViewer,
+  saveEntries,
   saveEntry,
 } from '#lib/server/anilist-client.js';
 import { pauseAniList, takeAniListRequest } from '#lib/server/rate-limit.js';
@@ -141,6 +144,121 @@ describe('AniList request protection', () => {
     expect(body.variables).toEqual({ mediaId: 123, progress: 3 });
     expect(body.query).not.toContain('userId');
     expect(body.query).toContain('progress score status');
+  });
+
+  it('reads a whole list 500 entries at a time, each anime once, hidden ones included', async () => {
+    const entry = (id: number) => ({
+      status: 'COMPLETED',
+      progress: 1,
+      score: 0,
+      updatedAt: 1,
+      media: { id },
+    });
+    vi.mocked(fetch)
+      .mockImplementationOnce(async () =>
+        Response.json({
+          data: {
+            MediaListCollection: {
+              hasNextChunk: true,
+              lists: [
+                { isCustomList: false, entries: [entry(1)] },
+                // A custom list repeats entry 1, and holds entry 3, hidden from the status lists
+                { isCustomList: true, entries: [entry(1), entry(3)] },
+              ],
+            },
+          },
+        })
+      )
+      .mockImplementationOnce(async () =>
+        Response.json({
+          data: {
+            MediaListCollection: {
+              hasNextChunk: false,
+              lists: [{ isCustomList: false, entries: [entry(2)] }],
+            },
+          },
+        })
+      );
+
+    const entries = await getAllListEntries(40, 'owner-token');
+
+    expect(entries.map((listEntry) => listEntry.media.id)).toEqual([1, 3, 2]);
+    const chunks = vi
+      .mocked(fetch)
+      .mock.calls.map(([, init]) => JSON.parse(init!.body as string).variables);
+    expect(chunks).toEqual([
+      { userId: 40, chunk: 1 },
+      { userId: 40, chunk: 2 },
+    ]);
+  });
+
+  it('saves several entries in one request, within the budget it was given', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      Response.json({ data: { save0: { id: 1 }, save1: { id: 2 } } })
+    );
+
+    await saveEntries(
+      'owner-token',
+      [
+        { mediaId: 1, progress: 3, status: 'CURRENT', scoreRaw: 80 },
+        { mediaId: 2, progress: 12, status: 'COMPLETED' },
+      ],
+      'optional'
+    );
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(takeAniListRequest).toHaveBeenCalledWith('optional');
+    const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string);
+    expect(body.query).toMatch(/save0: SaveMediaListEntry[\s\S]*save1: SaveMediaListEntry/);
+    // A score left out stays as it is on AniList
+    expect(body.variables).toEqual({
+      mediaId0: 1,
+      progress0: 3,
+      status0: 'CURRENT',
+      scoreRaw0: 80,
+      mediaId1: 2,
+      progress1: 12,
+      status1: 'COMPLETED',
+    });
+  });
+
+  it('writes dates in parts and reads them back as text', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      Response.json({
+        data: {
+          SaveMediaListEntry: {
+            progress: 12,
+            score: 0,
+            status: 'COMPLETED',
+            startedAt: { year: 2026, month: 9, day: 1 },
+            completedAt: { year: 2026, month: 10, day: null },
+          },
+        },
+      })
+    );
+
+    const saved = await saveEntry('owner-token', 1, {
+      progress: 12,
+      startedAt: '2026-09-01',
+      completedAt: '2026-10',
+    });
+
+    const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string);
+    expect(body.variables).toMatchObject({
+      startedAt: { year: 2026, month: 9, day: 1 },
+      completedAt: { year: 2026, month: 10, day: null },
+    });
+    expect(saved).toMatchObject({ startedAt: '2026-09-01', completedAt: '2026-10' });
+  });
+
+  it.each([
+    [{ year: 2026, month: 9, day: 1 }, '2026-09-01'],
+    [{ year: 2026, month: 9, day: null }, '2026-09'],
+    [{ year: 2026, month: null, day: null }, '2026'],
+    [{ year: null, month: 9, day: 1 }, null],
+    [null, null],
+  ])('reads the date %o as %s', (date, text) => {
+    expect(fromFuzzyDate(date)).toBe(text);
   });
 
   it('propagates AniList rejection of a forged or expired token on writes', async () => {

@@ -26,13 +26,17 @@ function malSession(expiresAt = Date.now() + 3_600_000): MalSession {
   return { token: 'mal-token', refreshToken: 'refresh', expiresAt, user };
 }
 
-function event(malSignIn: MalSession | null, fields: Record<string, string> = {}) {
+function event(
+  malSignIn: MalSession | null,
+  fields: Record<string, string> = {},
+  aniListSignIn: Session | null = null
+) {
   const deleted: string[] = [];
   const form = new FormData();
   for (const [name, value] of Object.entries(fields)) form.set(name, value);
   const request = {
     params: { domain: 'myanimelist', username: 'Fixture' },
-    locals: { session: aniListSession, malSession: malSignIn, preferences: DEFAULT_PREFERENCES },
+    locals: { session: aniListSignIn, malSession: malSignIn, preferences: DEFAULT_PREFERENCES },
     cookies: {
       get: () => undefined,
       set: vi.fn(),
@@ -77,15 +81,22 @@ beforeEach(() => {
 
 describe('saving to a MyAnimeList list', () => {
   it("saves with the anime's MyAnimeList id and the user's token", async () => {
-    vi.mocked(saveEntry).mockResolvedValue({ progress: 3, score: 0, status: 'CURRENT' });
-    const { request } = event(malSession(), { mediaId: '7', malId: '52991', progress: '3' });
+    const saved = { progress: 3, score: 0, status: 'CURRENT', startedAt: null, completedAt: null };
+    vi.mocked(saveEntry).mockResolvedValue(saved);
+    const { request } = event(malSession(), {
+      mediaId: '7',
+      malId: '52991',
+      progress: '3',
+      episodes: '12',
+    });
 
-    expect(await update(request)).toEqual({ mediaId: 7, progress: 3, score: 0, status: 'CURRENT' });
-    expect(saveEntry).toHaveBeenCalledWith('mal-token', 52991, { progress: 3 });
+    expect(await update(request)).toEqual({ mediaId: 7, ...saved });
+    expect(saveEntry).toHaveBeenCalledWith('mal-token', 52991, { progress: 3 }, { episodes: 12 });
   });
 
   it('asks to sign in with MyAnimeList, even when signed in with AniList', async () => {
-    const { request } = event(null, { mediaId: '7', malId: '52991', progress: '3' });
+    const fields = { mediaId: '7', malId: '52991', progress: '3' };
+    const { request } = event(null, fields, aniListSession);
 
     const result = (await update(request)) as ActionFailure<{ message: string }>;
 

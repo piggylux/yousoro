@@ -29,6 +29,7 @@ describe('getPreferences', () => {
       cardSize: 'medium',
       downloadLanguage: 'any',
       downloadVersion: 'any',
+      mainList: 'anilist',
     });
   });
 
@@ -40,8 +41,13 @@ describe('getPreferences', () => {
       cardSize: 'small',
       downloadLanguage: 'french',
       downloadVersion: 'dubbed',
+      mainList: 'myanimelist',
     };
     expect(getPreferences(cookiesWith(cookie(saved)))).toEqual(saved);
+  });
+
+  it('opens the AniList list first unless MyAnimeList was chosen', () => {
+    expect(getPreferences(cookiesWith(cookie({ mainList: 'kitsu' }))).mainList).toBe('anilist');
   });
 
   it('gives settings added later their default, keeping the others', () => {
@@ -103,17 +109,20 @@ describe('setPreferences', () => {
           for (const downloadVersion of DOWNLOAD_VERSIONS) {
             for (const cardSize of CARD_SIZES) {
               for (const theme of THEMES) {
-                const preferences = {
-                  theme,
-                  showMature,
-                  blurMature,
-                  cardSize,
-                  downloadLanguage,
-                  downloadVersion,
-                };
-                const cookies = cookiesWith();
-                setPreferences(cookies, preferences);
-                expect(getPreferences(cookies)).toEqual(preferences);
+                for (const mainList of ['anilist', 'myanimelist'] as const) {
+                  const preferences = {
+                    theme,
+                    showMature,
+                    blurMature,
+                    cardSize,
+                    downloadLanguage,
+                    downloadVersion,
+                    mainList,
+                  };
+                  const cookies = cookiesWith();
+                  setPreferences(cookies, preferences);
+                  expect(getPreferences(cookies)).toEqual(preferences);
+                }
               }
             }
           }

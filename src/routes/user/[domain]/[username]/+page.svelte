@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { enhance, type SubmitFunction } from '$app/forms';
   import { beforeNavigate, invalidateAll } from '$app/navigation';
   import { page } from '$app/state';
   import { onMount, tick } from 'svelte';
@@ -36,7 +37,7 @@
   import { matchPath } from '#lib/match.js';
   import { togetherPath } from '#lib/together.js';
   import type { Anime } from '#lib/types/anime.js';
-  import type { AnimePageData } from '#lib/types/api.js';
+  import type { AnimePageData, LinkedFailure } from '#lib/types/api.js';
   import { DOMAIN_NAMES, listPath } from '#lib/types/domain.js';
   import type { FriendWatching, FriendWatchingResult } from '#lib/types/friend-watching.js';
   import { countColumns, getVisibleRange, type VisibleRange } from '#lib/virtual-grid.js';
@@ -86,6 +87,9 @@
   });
 
   function confirmSaved(saved: Anime, status: string) {
+    // A newer save of the anime makes its last failure notice out of date, and its Try again would
+    // save the older episode count over it
+    if (linkedNote?.animeId === saved.id) linkedNote = null;
     if (data.canEdit && friendsViewer) recordOwnWatchingEntry(friendsViewer, saved, status);
     data = recordSavedEntry(data, saved, status);
   }
@@ -145,6 +149,45 @@
     clearTimeout(movedNoteTimer);
     movedNote = null;
   }
+
+  /*
+   * A save that reached this list's service but not the account linked to it. It's said here
+   * rather than on the card, which may have left the list, with a button to save it again: the
+   * card's values are the whole entry, so saving them twice changes nothing on the service that has
+   * them already
+   */
+  let linkedNote = $state<{
+    message: string;
+    animeId: number;
+    retry: { anime: Anime; scored: boolean } | null;
+  } | null>(null);
+  let retrying = $state(false);
+
+  function noteLinkedFailure(failure: LinkedFailure, saved: Anime, scored: boolean) {
+    linkedNote = {
+      message: failure.message,
+      animeId: saved.id,
+      retry: failure.retry ? { anime: saved, scored } : null,
+    };
+  }
+
+  const retryLinked: SubmitFunction = () => {
+    retrying = true;
+    return async ({ result, update }) => {
+      retrying = false;
+      const note = linkedNote;
+      if (!note) return;
+      if (result.type === 'failure') {
+        linkedNote = { ...note, message: String(result.data?.message ?? 'The update failed') };
+      } else if (result.type === 'success') {
+        const linked = result.data?.linked as LinkedFailure | undefined;
+        linkedNote = linked
+          ? { ...note, message: linked.message, retry: linked.retry ? note.retry : null }
+          : null;
+      }
+      await update({ reset: false, refreshAll: false });
+    };
+  };
 
   // Cards slide to their new place when an update reorders the list, instead of jumping there
   const duration = $derived(prefersReducedMotion.current ? 0 : 500);
@@ -560,6 +603,7 @@
             scoreFormat={data.scoreFormat}
             position={range.start + i}
             onConfirmed={confirmSaved}
+            onLinkedFailure={noteLinkedFailure}
             onSaved={followCard}
             highlighted={highlightId === anime.id}
           />
@@ -582,19 +626,48 @@
 
 <FriendsWatchingDialog selection={friendSelection} onclose={() => (friendSelection = null)} />
 
-{#if movedNote}
-  <div class="moved-note" role="status">
-    <span>
-      {movedNote.title} moved to {LIST_SECTION_LABELS[movedNote.section]}, which the filters hide.
-    </span>
-    <button
-      type="button"
-      class="tw:btn tw:btn-xs show-section"
-      onclick={() => movedNote && toggleSection(movedNote.section)}
-    >
-      Show {LIST_SECTION_LABELS[movedNote.section]}
-    </button>
-    <CloseButton label="Dismiss notification" onclick={dismissMovedNote} />
+{#if linkedNote || movedNote}
+  <div class="notes">
+    {#if linkedNote}
+      <div class="note" role="alert">
+        <span>{linkedNote.message}</span>
+        {#if linkedNote.retry}
+          {@const { anime: saved, scored } = linkedNote.retry}
+          <form method="POST" action="?/updateEntry" use:enhance={retryLinked}>
+            <input type="hidden" name="mediaId" value={saved.id} />
+            {#if saved.malId !== null}<input type="hidden" name="malId" value={saved.malId} />{/if}
+            <input type="hidden" name="progress" value={saved.currentEpisode} />
+            {#if scored}
+              <input type="hidden" name="scoreFormat" value={data.scoreFormat} />
+              <input type="hidden" name="score" value={saved.userScore ?? ''} />
+            {/if}
+            <button
+              type="submit"
+              class="tw:btn tw:btn-xs note-action"
+              disabled={retrying}
+              aria-busy={retrying}>Try again</button
+            >
+          </form>
+        {/if}
+        <CloseButton label="Dismiss notification" onclick={() => (linkedNote = null)} />
+      </div>
+    {/if}
+    {#if movedNote}
+      <div class="note" role="status">
+        <span>
+          {movedNote.title} moved to {LIST_SECTION_LABELS[movedNote.section]}, which the filters
+          hide.
+        </span>
+        <button
+          type="button"
+          class="tw:btn tw:btn-xs note-action"
+          onclick={() => movedNote && toggleSection(movedNote.section)}
+        >
+          Show {LIST_SECTION_LABELS[movedNote.section]}
+        </button>
+        <CloseButton label="Dismiss notification" onclick={dismissMovedNote} />
+      </div>
+    {/if}
   </div>
 {/if}
 
@@ -615,23 +688,35 @@
       format={data.scoreFormat}
       {service}
       blurMature={data.preferences.blurMature}
+      onLinkedFailure={(failure, saved) => noteLinkedFailure(failure, saved, true)}
       onClose={askNextScore}
     />
   {/key}
 {/if}
 
 <style>
-  /* Floats just below the header, as the card that moved may have been anywhere down the list */
-  .moved-note {
+  /*
+   * Float just below the header, one above the other, as the card they're about may have been
+   * anywhere down the list
+   */
+  .notes {
     position: fixed;
     top: 72px;
     left: 50%;
     z-index: 40;
-    display: flex;
-    align-items: center;
+    display: grid;
+    justify-items: center;
     gap: 8px;
     width: max-content;
     max-width: calc(100vw - 32px);
+    translate: -50% 0;
+  }
+
+  .note {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 100%;
     padding: 8px 8px 8px 14px;
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-panel);
@@ -639,23 +724,22 @@
     box-shadow: var(--shadow-popover);
     color: var(--text-heading);
     font-size: 0.9rem;
-    translate: -50% 0;
     animation: note-in 0.25s ease-out;
   }
 
-  .show-section {
+  .note-action {
     flex: none;
     border-color: var(--text-accent);
     background: var(--sea-blue);
     color: #ffffff;
   }
 
-  .moved-note > span {
+  .note > span {
     min-width: 0;
     overflow-wrap: anywhere;
   }
 
-  .show-section:hover {
+  .note-action:hover {
     border-color: var(--text-heading);
     background: var(--navy);
   }
@@ -663,12 +747,12 @@
   @keyframes note-in {
     from {
       opacity: 0;
-      translate: -50% -8px;
+      translate: 0 -8px;
     }
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .moved-note {
+    .note {
       animation: none;
     }
   }

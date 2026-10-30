@@ -5,7 +5,7 @@ import {
   getWatchingEntries,
   type AniListMedia,
 } from '#lib/server/anilist-client.js';
-import type { AniListPriority } from '#lib/server/rate-limit.js';
+import type { RequestPriority } from '#lib/server/rate-limit.js';
 import type { Anime } from '#lib/types/anime.js';
 import type { Api, UserAnimeList } from '#lib/types/api.js';
 
@@ -16,7 +16,7 @@ export class AniListApi implements Api {
   async getUserAnimeList(
     username: string,
     enrichAirings = true,
-    priority?: AniListPriority
+    priority?: RequestPriority
   ): Promise<UserAnimeList> {
     const { userId, userName, avatarUrl, scoreFormat, entries } = await getWatchingEntries(
       username,

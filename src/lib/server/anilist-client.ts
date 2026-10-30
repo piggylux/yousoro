@@ -6,7 +6,7 @@ import {
   fingerprint,
   pauseAniList,
   takeAniListRequest,
-  type AniListPriority,
+  type RequestPriority,
 } from '#lib/server/rate-limit.js';
 import type { AiringStatus } from '#lib/types/anime.js';
 import type { FriendWatchingResult, SharedAnime } from '#lib/types/friend-watching.js';
@@ -93,7 +93,7 @@ async function query<T>(
   variables: Record<string, unknown>,
   token?: string,
   /** `cacheTtlMs: 0` coalesces a public read while pending without storing its answer here */
-  options: { cacheTtlMs?: number; priority?: AniListPriority } = {}
+  options: { cacheTtlMs?: number; priority?: RequestPriority } = {}
 ): Promise<T> {
   const readKey = query.trimStart().startsWith('query')
     ? fingerprint(JSON.stringify([query, variables, token || null]))
@@ -130,7 +130,7 @@ async function sendQuery<T>(
   query: string,
   variables: Record<string, unknown>,
   token?: string,
-  priority?: AniListPriority
+  priority?: RequestPriority
 ): Promise<T> {
   const budget = await takeAniListRequest(priority);
   if (!budget.allowed) throw new AniListRateLimitError(budget.retryAfter);
@@ -167,6 +167,14 @@ async function sendQuery<T>(
   return body.data;
 }
 
+/** Ids in groups of 50, the most one page of AniList results holds */
+function inPages(ids: number[]): number[][] {
+  const unique = [...new Set(ids)];
+  return Array.from({ length: Math.ceil(unique.length / 50) }, (_, i) =>
+    unique.slice(i * 50, i * 50 + 50)
+  );
+}
+
 /**
  * Fetches a user's "Watching" and "Rewatching" lists, media details included, in one request. A
  * read for something decorative, like a badge, can give way first when AniList is busy
@@ -174,7 +182,7 @@ async function sendQuery<T>(
 export async function getWatchingEntries(
   userName: string,
   token?: string,
-  priority?: AniListPriority
+  priority?: RequestPriority
 ): Promise<{
   userId: number;
   userName: string;
@@ -250,14 +258,10 @@ function onePerAnime<T extends { media: { id: number }; updatedAt?: number }>(en
  */
 export async function getMediaByMalIds(
   malIds: number[],
-  priority?: AniListPriority
+  priority?: RequestPriority
 ): Promise<Map<number, AniListMedia>> {
-  const ids = [...new Set(malIds)].sort((a, b) => a - b);
-  const chunks = Array.from({ length: Math.ceil(ids.length / 50) }, (_, i) =>
-    ids.slice(i * 50, i * 50 + 50)
-  );
   const pages = await Promise.all(
-    chunks.map((chunk) =>
+    inPages([...malIds].sort((a, b) => a - b)).map((chunk) =>
       query<{ Page: { media: AniListMedia[] } }>(
         `query ($ids: [Int]) {
           Page(perPage: 50) {
@@ -999,29 +1003,193 @@ export async function getViewer(token: string): Promise<AniListUser> {
   return toUser(data.Viewer);
 }
 
+/** A date AniList keeps in parts, any of which may be unknown */
+type FuzzyDate = { year: number | null; month: number | null; day: number | null };
+
+const FUZZY_DATE_FIELDS = 'year month day';
+
+/** An AniList date as text: YYYY-MM-DD, or YYYY-MM or YYYY as far as it's known; null without a year */
+export function fromFuzzyDate(date: FuzzyDate | null | undefined): string | null {
+  if (!date?.year) return null;
+  const pad = (part: number) => String(part).padStart(2, '0');
+  if (!date.month) return String(date.year);
+  return `${date.year}-${pad(date.month)}${date.day ? `-${pad(date.day)}` : ''}`;
+}
+
+/** A date written as fromFuzzyDate writes it, for AniList; undefined leaves AniList's date as it is */
+function toFuzzyDate(date: string | null | undefined): FuzzyDate | undefined {
+  if (!date) return undefined;
+  const [year, month, day] = date.split('-').map(Number);
+  return { year, month: month ?? null, day: day ?? null };
+}
+
+/** A list entry's dates, as fromFuzzyDate writes them */
+export type EntryDates = { startedAt: string | null; completedAt: string | null };
+
 /**
  * Updates the token owner's own list entry: the watched episode count, the score (in their own
- * score format, 0 clearing it), or both. What isn't given is left as it is.
+ * score format, 0 clearing it), or both. What isn't given is left as it is. A save copied from
+ * another service also sets the status and dates, and gives the score out of 100 (`scoreRaw`),
+ * whatever format the user scores in; an anime not yet on the list is added.
  */
 export async function saveEntry(
   token: string,
   mediaId: number,
-  changes: { progress?: number; score?: number }
-): Promise<{ progress: number; score: number; status: string }> {
+  changes: {
+    progress?: number;
+    score?: number;
+    status?: string;
+    scoreRaw?: number;
+    startedAt?: string | null;
+    completedAt?: string | null;
+  },
+  priority?: RequestPriority
+): Promise<{ progress: number; score: number; status: string } & EntryDates> {
   if (!token) throw new AniListTokenError('An access token is required to update a list');
 
   const data = await query<{
-    SaveMediaListEntry: { progress: number; score: number; status: string };
+    SaveMediaListEntry: {
+      progress: number;
+      score: number;
+      status: string;
+      startedAt: FuzzyDate | null;
+      completedAt: FuzzyDate | null;
+    };
   }>(
-    `mutation ($mediaId: Int, $progress: Int, $score: Float) {
-      SaveMediaListEntry(mediaId: $mediaId, progress: $progress, score: $score) { progress score status }
+    `mutation (
+      $mediaId: Int
+      $progress: Int
+      $score: Float
+      $status: MediaListStatus
+      $scoreRaw: Int
+      $startedAt: FuzzyDateInput
+      $completedAt: FuzzyDateInput
+    ) {
+      SaveMediaListEntry(
+        mediaId: $mediaId
+        progress: $progress
+        score: $score
+        status: $status
+        scoreRaw: $scoreRaw
+        startedAt: $startedAt
+        completedAt: $completedAt
+      ) { progress score status startedAt { ${FUZZY_DATE_FIELDS} } completedAt { ${FUZZY_DATE_FIELDS} } }
     }`,
     // Left out of the JSON when undefined, so AniList keeps the current value
-    { mediaId, progress: changes.progress, score: changes.score },
-    token
+    {
+      mediaId,
+      ...changes,
+      startedAt: toFuzzyDate(changes.startedAt),
+      completedAt: toFuzzyDate(changes.completedAt),
+    },
+    token,
+    { priority }
   );
 
-  return data.SaveMediaListEntry;
+  const { startedAt, completedAt, ...saved } = data.SaveMediaListEntry;
+  return { ...saved, startedAt: fromFuzzyDate(startedAt), completedAt: fromFuzzyDate(completedAt) };
+}
+
+/**
+ * Saves several of the token owner's entries in one request, as AniList limits requests rather than
+ * the changes in them: each one's episode count and status, and its score out of 100 and dates when
+ * given. Anime not yet on the list are added. AniList refuses the whole request when it refuses one
+ * of them
+ */
+export async function saveEntries(
+  token: string,
+  entries: ({
+    mediaId: number;
+    progress: number;
+    status: string;
+    scoreRaw?: number;
+  } & Partial<EntryDates>)[],
+  priority?: RequestPriority
+): Promise<void> {
+  if (!token) throw new AniListTokenError('An access token is required to update a list');
+  if (!entries.length) return;
+  const variables: Record<string, unknown> = {};
+  const declarations = entries.map((entry, i) => {
+    Object.assign(variables, {
+      [`mediaId${i}`]: entry.mediaId,
+      [`progress${i}`]: entry.progress,
+      [`status${i}`]: entry.status,
+      // Left out of the JSON when undefined, so AniList keeps the current score and dates
+      [`scoreRaw${i}`]: entry.scoreRaw,
+      [`startedAt${i}`]: toFuzzyDate(entry.startedAt),
+      [`completedAt${i}`]: toFuzzyDate(entry.completedAt),
+    });
+    return `$mediaId${i}: Int, $progress${i}: Int, $status${i}: MediaListStatus, $scoreRaw${i}: Int, $startedAt${i}: FuzzyDateInput, $completedAt${i}: FuzzyDateInput`;
+  });
+  const saves = entries.map(
+    (_, i) =>
+      `save${i}: SaveMediaListEntry(mediaId: $mediaId${i}, progress: $progress${i}, status: $status${i}, scoreRaw: $scoreRaw${i}, startedAt: $startedAt${i}, completedAt: $completedAt${i}) { id }`
+  );
+  await query(`mutation (${declarations.join(', ')}) {\n${saves.join('\n')}\n}`, variables, token, {
+    priority,
+  });
+}
+
+/** An entry on a user's whole list, with what the sync page shows of its anime */
+export type AniListListEntry = {
+  status: string;
+  progress: number;
+  /** Out of 100; 0 when unscored */
+  score: number;
+  /** Unix time in seconds of the last change to the entry, or 0 when AniList doesn't know */
+  updatedAt: number;
+  startedAt: FuzzyDate | null;
+  completedAt: FuzzyDate | null;
+  media: {
+    id: number;
+    idMal: number | null;
+    title: { romaji: string };
+    coverImage: { extraLarge: string };
+    isAdult: boolean;
+  };
+};
+
+/**
+ * Every anime on a user's own list, whatever its status, read 500 at a time (the most AniList
+ * gives at once), up to 10,000
+ */
+export async function getAllListEntries(
+  userId: number,
+  token: string
+): Promise<AniListListEntry[]> {
+  const entries: AniListListEntry[] = [];
+  for (let chunk = 1, more = true; more && chunk <= 20; chunk++) {
+    const data = await query<{
+      MediaListCollection: {
+        hasNextChunk: boolean;
+        lists: { entries: AniListListEntry[] }[];
+      };
+    }>(
+      `query ($userId: Int, $chunk: Int) {
+        MediaListCollection(userId: $userId, type: ANIME, chunk: $chunk, perChunk: 500) {
+          hasNextChunk
+          lists {
+            entries {
+              status
+              progress
+              score(format: POINT_100)
+              updatedAt
+              startedAt { ${FUZZY_DATE_FIELDS} }
+              completedAt { ${FUZZY_DATE_FIELDS} }
+              media { id idMal title { romaji } coverImage { extraLarge } isAdult }
+            }
+          }
+        }
+      }`,
+      { userId, chunk },
+      token
+    );
+    // Custom lists mostly repeat entries of the status lists, but an entry hidden from the status
+    // lists is only in its custom lists, so every list is read and each anime kept once
+    for (const list of data.MediaListCollection.lists) entries.push(...list.entries);
+    more = data.MediaListCollection.hasNextChunk;
+  }
+  return onePerAnime(entries);
 }
 
 export function getAiredEpisodes(media: AniListMedia): number | null {

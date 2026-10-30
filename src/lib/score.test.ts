@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { formatMeanScore, formatScore, parseScore, scoreChoices, toScore100 } from '#lib/score.js';
+import {
+  formatMeanScore,
+  formatScore,
+  parseScore,
+  scoreChoices,
+  toMalScore,
+  toScore100,
+} from '#lib/score.js';
 
 describe('parseScore', () => {
   it.each([
@@ -97,5 +104,20 @@ describe('toScore100', () => {
 describe('formatMeanScore', () => {
   it('shows a percentage, as AniList does', () => {
     expect(formatMeanScore(78)).toBe('78%');
+  });
+});
+
+describe('toMalScore', () => {
+  it.each([
+    [85, 'POINT_100', 9],
+    [8.4, 'POINT_10_DECIMAL', 8],
+    [7, 'POINT_10', 7],
+    [4, 'POINT_5', 8],
+    [3, 'POINT_3', 9],
+    // A score too low to round to 1 still counts, as 0 would clear it
+    [3, 'POINT_100', 1],
+    [0, 'POINT_100', 0],
+  ] as const)('gives %s in %s as %s out of 10', (score, format, expected) => {
+    expect(toMalScore(score, format)).toBe(expected);
   });
 });

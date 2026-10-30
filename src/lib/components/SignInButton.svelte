@@ -14,6 +14,8 @@
     compact?: boolean;
     /** Neutral rather than blue, beside another sign-in button */
     secondary?: boolean;
+    /** Signs in alongside an account on the other service, to link the two */
+    linking?: boolean;
   };
 
   let {
@@ -22,13 +24,16 @@
     class: className = '',
     compact = false,
     secondary = false,
+    linking = false,
   }: Props = $props();
 
-  const label = $derived(`Sign in with ${DOMAIN_NAMES[service]}`);
+  const label = $derived(
+    linking ? `Link your ${DOMAIN_NAMES[service]} account` : `Sign in with ${DOMAIN_NAMES[service]}`
+  );
 </script>
 
 {#snippet content()}
-  <span>{compact ? 'Sign in' : label}</span>
+  <span>{compact ? (linking ? 'Link' : 'Sign in') : label}</span>
   {#if !compact}
     <span class="arrow" aria-hidden="true">
       <svg
