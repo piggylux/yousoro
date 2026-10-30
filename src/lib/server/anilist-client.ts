@@ -25,6 +25,7 @@ const MAX_CACHE_ENTRIES = 100;
 
 const MEDIA_FIELDS = `
   id
+  idMal
   title { romaji english }
   synonyms
   status
@@ -38,6 +39,8 @@ const MEDIA_FIELDS = `
 
 export type AniListMedia = {
   id: number;
+  /** The same anime's id on MyAnimeList, when AniList knows it */
+  idMal: number | null;
   title: { romaji: string; english: string | null };
   /** Other names the anime goes by, in any language; AniList may send null instead of a list */
   synonyms: string[] | null;
@@ -238,6 +241,41 @@ function onePerAnime<T extends { media: { id: number }; updatedAt?: number }>(en
     if (!kept || (entry.updatedAt ?? 0) > (kept.updatedAt ?? 0)) byAnime.set(entry.media.id, entry);
   }
   return [...byAnime.values()];
+}
+
+/**
+ * AniList's details of anime by their MyAnimeList ids, keyed by those ids, in one public request
+ * per 50 of them. MyAnimeList doesn't say which episodes have aired or when the next one will, so
+ * MyAnimeList lists take that from AniList. An anime AniList doesn't know is left out
+ */
+export async function getMediaByMalIds(
+  malIds: number[],
+  priority?: AniListPriority
+): Promise<Map<number, AniListMedia>> {
+  const ids = [...new Set(malIds)].sort((a, b) => a - b);
+  const chunks = Array.from({ length: Math.ceil(ids.length / 50) }, (_, i) =>
+    ids.slice(i * 50, i * 50 + 50)
+  );
+  const pages = await Promise.all(
+    chunks.map((chunk) =>
+      query<{ Page: { media: AniListMedia[] } }>(
+        `query ($ids: [Int]) {
+          Page(perPage: 50) {
+            media(idMal_in: $ids, type: ANIME) { ${MEDIA_FIELDS} }
+          }
+        }`,
+        { ids: chunk },
+        undefined,
+        { priority }
+      )
+    )
+  );
+  const byMalId = new Map<number, AniListMedia>();
+  for (const media of pages.flatMap((page) => page.Page.media)) {
+    // AniList occasionally has two entries for one MyAnimeList anime; the first one stands
+    if (media.idMal !== null && !byMalId.has(media.idMal)) byMalId.set(media.idMal, media);
+  }
+  return byMalId;
 }
 
 /**

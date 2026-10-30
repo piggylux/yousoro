@@ -20,6 +20,7 @@ import type { Anime } from '#lib/types/anime.js';
 function anime(overrides: Partial<Anime>): Anime {
   return {
     id: 1,
+    malId: null,
     title: 'Anime',
     englishTitle: null,
     otherTitles: [],

@@ -1,38 +1,34 @@
 <script lang="ts">
   import { page } from '$app/state';
 
-  import { getAuthorizeUrl, PENDING_SIGN_IN_KEY } from '#lib/anilist-auth.js';
+  import { startAniListSignIn } from '#lib/anilist-auth.js';
+  import { malSignInPath } from '#lib/myanimelist-auth.js';
+  import { DOMAIN_NAMES, type Domain } from '#lib/types/domain.js';
 
   type Props = {
+    /** The service to sign in with */
+    service?: Domain;
     /** Where to come back to after signing in */
     redirectTo?: string;
     class?: string;
     compact?: boolean;
+    /** Neutral rather than blue, beside another sign-in button */
+    secondary?: boolean;
   };
 
-  let { redirectTo = page.url.pathname, class: className = '', compact = false }: Props = $props();
+  let {
+    service = 'anilist',
+    redirectTo = page.url.pathname,
+    class: className = '',
+    compact = false,
+    secondary = false,
+  }: Props = $props();
 
-  function signIn() {
-    const state = crypto.randomUUID();
-    try {
-      sessionStorage.setItem(PENDING_SIGN_IN_KEY, JSON.stringify({ state, redirectTo }));
-    } catch {
-      // Without sessionStorage the callback can't confirm this browser started the sign-in
-      alert('Signing in needs browser storage, which is blocked in this window.');
-      return;
-    }
-    location.assign(getAuthorizeUrl(state));
-  }
+  const label = $derived(`Sign in with ${DOMAIN_NAMES[service]}`);
 </script>
 
-<button
-  type="button"
-  class="sign-in {className}"
-  class:compact
-  aria-label={compact ? 'Sign in with AniList' : undefined}
-  onclick={signIn}
->
-  <span>{compact ? 'Sign in' : 'Sign in with AniList'}</span>
+{#snippet content()}
+  <span>{compact ? 'Sign in' : label}</span>
   {#if !compact}
     <span class="arrow" aria-hidden="true">
       <svg
@@ -49,7 +45,32 @@
       </svg>
     </span>
   {/if}
-</button>
+{/snippet}
+
+{#if service === 'anilist'}
+  <button
+    type="button"
+    class="sign-in {className}"
+    class:compact
+    class:secondary
+    aria-label={compact ? label : undefined}
+    onclick={() => startAniListSignIn(redirectTo)}
+  >
+    {@render content()}
+  </button>
+{:else}
+  <!-- The server starts this sign-in, so the link leaves the app rather than navigating within it -->
+  <a
+    class="sign-in {className}"
+    class:compact
+    class:secondary
+    aria-label={compact ? label : undefined}
+    href={malSignInPath(redirectTo)}
+    data-sveltekit-reload
+  >
+    {@render content()}
+  </a>
+{/if}
 
 <style>
   .sign-in {
@@ -66,6 +87,7 @@
     color: var(--action-content);
     font-size: 0.875rem;
     font-weight: 600;
+    text-decoration: none;
     cursor: pointer;
     transition: background-color 150ms ease;
   }
@@ -84,12 +106,16 @@
   .compact {
     flex-shrink: 0;
     padding: 8px 14px;
+    white-space: nowrap;
+  }
+  .compact,
+  .secondary {
     border-color: var(--border-subtle);
     background: var(--surface);
     color: var(--text-heading);
-    white-space: nowrap;
   }
-  .compact:hover {
+  .compact:hover,
+  .secondary:hover {
     background: var(--surface-muted);
   }
   @media (prefers-reduced-motion: reduce) {

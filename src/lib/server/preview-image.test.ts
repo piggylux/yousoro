@@ -22,6 +22,7 @@ import type { ScoredAnime, TasteMatch, TasteProfile } from '#lib/types/match.js'
 function anime(overrides: Partial<Anime>): Anime {
   return {
     id: 1,
+    malId: null,
     title: 'Anime',
     englishTitle: null,
     otherTitles: [],

@@ -1,6 +1,11 @@
 <script lang="ts">
   import SignInButton from '#lib/components/SignInButton.svelte';
   import YouSvg from '#lib/images/minimalist_you.svg';
+
+  import type { PageProps } from './$types';
+
+  let { data }: PageProps = $props();
+  const services = $derived(data.malEnabled ? 'AniList or MyAnimeList' : 'AniList');
 </script>
 
 <div class="home">
@@ -9,12 +14,17 @@
       <p class="eyebrow">An AniList companion</p>
       <h1 id="welcome-title">Keep up with<br />what you watch.</h1>
       <p class="description">
-        See what’s aired, keep your AniList progress up to date, and find the shows you’re watching
+        See what’s aired, keep your {services} progress up to date, and find the shows you’re watching
         with friends.
       </p>
       <div class="start">
-        <SignInButton redirectTo="/home" />
-        <p class="sign-in-hint">Sign in with your existing AniList account.</p>
+        <div class="sign-in-buttons">
+          <SignInButton redirectTo="/home" />
+          {#if data.malEnabled}
+            <SignInButton service="myanimelist" redirectTo="/home" secondary />
+          {/if}
+        </div>
+        <p class="sign-in-hint">Sign in with your existing {services} account.</p>
       </div>
     </div>
 
@@ -55,7 +65,7 @@
         </svg>
       </span>
       <h2>Pick up where you left off</h2>
-      <p>Find unwatched episodes and save your progress to AniList.</p>
+      <p>Find unwatched episodes and save your progress to {services}.</p>
     </article>
     <article>
       <span class="feature-icon" aria-hidden="true">
@@ -124,6 +134,12 @@
 
   .start {
     margin-top: 28px;
+  }
+
+  .sign-in-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
   }
 
   .sign-in-hint {
@@ -231,6 +247,10 @@
 
     .start {
       margin-top: 24px;
+    }
+
+    .sign-in-buttons {
+      justify-content: center;
     }
 
     .illustration {

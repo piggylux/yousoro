@@ -2,7 +2,10 @@
 export type AiringStatus = 'FINISHED' | 'RELEASING' | 'NOT_YET_RELEASED' | 'CANCELLED' | 'HIATUS';
 
 export type Anime = {
+  /** AniList's id, which every list uses, whichever service it's on */
   id: number;
+  /** The same anime's id on MyAnimeList, when known */
+  malId: number | null;
   title: string;
   /** The English title, when AniList has one */
   englishTitle: string | null;

@@ -212,6 +212,7 @@ it('preserves confirmed progress when a save uses the final upstream slot', asyn
   const unavailable = await readPage(event(true));
   expect(unavailable).toMatchObject({ unavailable: true });
   const fallback = await client.load({
+    params: { domain: 'anilist', username: 'Fixture' },
     data: unavailable,
     parent: async () => ({ preferences: DEFAULT_PREFERENCES, user: null }),
   } as Parameters<typeof client.load>[0]);
@@ -234,6 +235,7 @@ it('preserves confirmed progress when a save uses the final upstream slot', asyn
     'COMPLETED'
   );
   const completed = await client.load({
+    params: { domain: 'anilist', username: 'Fixture' },
     data: unavailable,
     parent: async () => ({ preferences: DEFAULT_PREFERENCES, user: null }),
   } as Parameters<typeof client.load>[0]);

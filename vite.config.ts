@@ -25,9 +25,10 @@ export default defineConfig({
           'script-src': ['self'],
           // Svelte writes inline styles for transitions and the progress bar widths
           'style-src': ['self', 'unsafe-inline'],
-          // Anime covers and avatars come from AniList's CDN
-          'img-src': ['self', 'data:', 'https://s4.anilist.co'],
-          // The browser only talks to this site; AniList's API is called from the server
+          // Anime covers and avatars come from AniList's CDN; MyAnimeList avatars from its own
+          'img-src': ['self', 'data:', 'https://s4.anilist.co', 'https://cdn.myanimelist.net'],
+          // The browser only talks to this site; AniList's and MyAnimeList's APIs are called from
+          // the server
           'connect-src': ['self'],
           'form-action': ['self'],
           'base-uri': ['self'],

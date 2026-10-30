@@ -7,7 +7,6 @@ import {
 } from '#lib/server/anilist-client.js';
 import { renderSitePreview, renderWrappedPreview } from '#lib/server/preview-image.js';
 import { takeClientLimit } from '#lib/server/rate-limit.js';
-import { isDomain } from '#lib/types/domain.js';
 import { parseWrappedYear } from '#lib/wrapped.js';
 
 import type { RequestHandler } from './$types';
@@ -17,7 +16,7 @@ import type { RequestHandler } from './$types';
  * list's preview, from the same year the page reads
  */
 export const GET: RequestHandler = async ({ params, getClientAddress }) => {
-  if (!isDomain(params.domain)) error(404, `Unknown domain: ${params.domain}`);
+  if (params.domain !== 'anilist') error(404, `Unknown domain: ${params.domain}`);
   const year = parseWrappedYear(params.year);
   if (year === null) error(404, `There's no year in anime for ${params.year}`);
   const fallback = (cacheControl: string) => renderSitePreview(cacheControl, 'jpeg');

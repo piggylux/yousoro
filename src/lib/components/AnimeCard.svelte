@@ -47,7 +47,10 @@
     friendsWatching?: FriendWatching[] | null;
     onShowFriends?: () => void;
     anime: Anime;
-    animeLinkFn: (animeId: number) => string;
+    /** Where the anime's own page is, on the list's service */
+    animeLinkFn: (anime: Anime) => string;
+    /** The service the list is on */
+    service?: string;
     /** Whether the signed-in user can update this anime's progress */
     canEdit?: boolean;
     /** Use the condensed layout for the small card setting. */
@@ -67,7 +70,7 @@
     downloadLanguage?: DownloadLanguage;
     /** The viewer's setting: subbed, dubbed or dual-audio releases for that search */
     downloadVersion?: DownloadVersion;
-    /** How the list owner scores anime on AniList, which `anime.userScore` is in */
+    /** How the list owner scores anime on the list's service, which `anime.userScore` is in */
     scoreFormat?: ScoreFormat;
     /** Where the card is in the list, counting from 0 */
     position?: number;
@@ -84,6 +87,7 @@
     onShowFriends,
     anime,
     animeLinkFn,
+    service = 'AniList',
     canEdit = false,
     compact = false,
     onCaughtUp,
@@ -1042,6 +1046,11 @@
           {#if canEdit && (watchState === 'to-watch' || watchState === 'next-episode-unscheduled')}
             <form method="POST" action="?/updateEntry" use:enhance={submitEntry}>
               <input type="hidden" name="mediaId" value={anime.id} />
+              {#if anime.malId !== null}<input
+                  type="hidden"
+                  name="malId"
+                  value={anime.malId}
+                />{/if}
               <input type="hidden" name="progress" value={anime.currentEpisode + 1} />
               <button
                 class="quick-watch"
@@ -1086,8 +1095,8 @@
           title's own text is the link; the space around a short title turns the card back over
         -->
         <p class="back-title">
-          <a href={animeLinkFn(anime.id)} target="_blank" title={anime.title}>
-            {anime.title}<span class="tw:sr-only">, on AniList, opens in a new tab</span>
+          <a href={animeLinkFn(anime)} target="_blank" title={anime.title}>
+            {anime.title}<span class="tw:sr-only">, on {service}, opens in a new tab</span>
           </a>
         </p>
 
@@ -1186,6 +1195,11 @@
                 use:enhance={submitEntry}
               >
                 <input type="hidden" name="mediaId" value={anime.id} />
+                {#if anime.malId !== null}<input
+                    type="hidden"
+                    name="malId"
+                    value={anime.malId}
+                  />{/if}
                 <input type="hidden" name="scoreFormat" value={scoreFormat} />
                 <button
                   type="button"

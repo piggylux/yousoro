@@ -37,11 +37,16 @@
   import { togetherPath } from '#lib/together.js';
   import type { Anime } from '#lib/types/anime.js';
   import type { AnimePageData } from '#lib/types/api.js';
+  import { DOMAIN_NAMES, listPath } from '#lib/types/domain.js';
   import type { FriendWatching, FriendWatchingResult } from '#lib/types/friend-watching.js';
   import { countColumns, getVisibleRange, type VisibleRange } from '#lib/virtual-grid.js';
   import { wrappedPath, wrappedYear } from '#lib/wrapped.js';
 
   let { data }: { data: AnimePageData } = $props();
+  const service = $derived(DOMAIN_NAMES[data.domain]);
+  // Friends, taste matches, groups and years in anime are made of AniList accounts
+  const onAniList = $derived(data.domain === 'anilist');
+  const friendsViewer = $derived(onAniList ? page.data.user : null);
   const calendarView = $derived(page.url.searchParams.get('view') === 'calendar');
   // The year the list links to a summary of
   const recapYear = wrappedYear(new Date());
@@ -49,7 +54,7 @@
   // The view being looked at, as anyone would see it: without the viewer's filters or search
   const share = $derived.by(() => {
     const view = calendarView ? 'calendar' : 'list';
-    const path = `/user/anilist/${encodeURIComponent(data.username)}`;
+    const path = listPath(data.domain, data.username);
     return {
       url: `${page.url.origin}${path}${calendarView ? '?view=calendar' : ''}`,
       title: `${data.canEdit ? 'My' : `${data.username}'s`} anime ${view} on Yousoro`,
@@ -68,11 +73,11 @@
     blurCover?: boolean;
     viewer?: { name: string; progress: number };
   } | null>(null);
-  const friendsViewerId = $derived(page.data.user?.id ?? null);
+  const friendsViewerId = $derived(friendsViewer?.id ?? null);
   const friendsPageKey = $derived(`${friendsViewerId}:${data.username}`);
   $effect(() => {
-    if (data.canEdit && page.data.user)
-      seedOwnAnime(page.data.user.id, data.watchingList, data.preferences.showMature);
+    if (data.canEdit && friendsViewer)
+      seedOwnAnime(friendsViewer.id, data.watchingList, data.preferences.showMature);
   });
   $effect(() => {
     void friendsPageKey;
@@ -81,7 +86,7 @@
   });
 
   function confirmSaved(saved: Anime, status: string) {
-    if (data.canEdit && page.data.user) recordOwnWatchingEntry(page.data.user, saved, status);
+    if (data.canEdit && friendsViewer) recordOwnWatchingEntry(friendsViewer, saved, status);
     data = recordSavedEntry(data, saved, status);
   }
 
@@ -288,7 +293,11 @@
     });
   }
 
-  const animeLinkFn = (animeId: number) => `https://anilist.co/anime/${animeId}/`;
+  // MyAnimeList lists link to MyAnimeList, when AniList knows the anime's id there
+  const animeLinkFn = (anime: Anime) =>
+    !onAniList && anime.malId !== null
+      ? `https://myanimelist.net/anime/${anime.malId}`
+      : `https://anilist.co/anime/${anime.id}/`;
 
   // The "Yousoro!" celebration currently playing; a new one restarts the animation
   let celebration = $state<{ kind: 'caught-up' | 'completed'; title: string; key: number } | null>(
@@ -350,7 +359,7 @@
     reloadWhenVisible = plan === 'when-visible';
     if (plan === 'later') busyTimer = setTimeout(reload, BUSY_RETRY_MS);
     if (plan === 'now') {
-      expireRememberedList(data.username);
+      expireRememberedList(data.username, data.domain);
       void invalidateAll();
     }
   }
@@ -402,19 +411,21 @@
           <ShareButton url={share.url} title={share.title} subject={share.subject} />
         </div>
         <span class="profile-links">
-          <a href={`/user/anilist/${encodeURIComponent(data.username)}/friends`}>Friends</a>
-          · <a href={matchPath(data.username)}>Taste match</a>
-          · <a href={togetherPath(data.username)}>Watch together</a>
-          ·
-          <a href={wrappedPath(data.username, recapYear)}>{recapYear} in anime</a>
-          {#if data.canEdit}
-            · <a href={`/user/anilist/${encodeURIComponent(data.username)}/badge`}>Profile badge</a>
+          {#if onAniList}
+            <a href={`${listPath(data.domain, data.username)}/friends`}>Friends</a>
+            · <a href={matchPath(data.username)}>Taste match</a>
+            · <a href={togetherPath(data.username)}>Watch together</a>
+            ·
+            <a href={wrappedPath(data.username, recapYear)}>{recapYear} in anime</a>
+            {#if data.canEdit}
+              · <a href={`${listPath(data.domain, data.username)}/badge`}>Profile badge</a>
+            {/if}
+            ·
           {/if}
-          ·
           <a href={calendarView ? page.url.pathname : `${page.url.pathname}?view=calendar`}
             >{calendarView ? 'Anime list' : 'Calendar'}</a
           >
-          · <a href={data.userProfileLink} target="_blank">AniList profile ↗</a>
+          · <a href={data.userProfileLink} target="_blank">{service} profile ↗</a>
         </span>
       </div>
     </div>
@@ -424,6 +435,7 @@
         animeList={data.watchingList}
         username={data.username}
         isOwnList={data.canEdit}
+        {service}
       />{/if}
   </div>
 
@@ -492,10 +504,10 @@
       </div>
     {/if}
 
-    {#if page.data.user}
+    {#if friendsViewer}
       <FriendsWatchingLoader
         contextKey={data.username}
-        viewerId={page.data.user.id}
+        viewerId={friendsViewer.id}
         mediaIds={data.watchingList.map((anime) => anime.id)}
         onresult={(result) => (friendMatches = result)}
       />
@@ -519,7 +531,7 @@
           out:fade={{ duration: listIds.has(anime.id) ? 0 : duration / 2 }}
         >
           <AnimeCard
-            friendsWatching={page.data.user
+            friendsWatching={friendsViewer
               ? visibleFriendMatches
                 ? (visibleFriendMatches[anime.id] ?? [])
                 : null
@@ -532,12 +544,13 @@
                 friends: visibleFriendMatches?.[anime.id] ?? [],
                 // On their own list, the viewer's progress is the card's
                 viewer:
-                  data.canEdit && page.data.user
-                    ? { name: page.data.user.name, progress: anime.currentEpisode }
+                  data.canEdit && friendsViewer
+                    ? { name: friendsViewer.name, progress: anime.currentEpisode }
                     : undefined,
               })}
             {anime}
             {animeLinkFn}
+            {service}
             canEdit={data.canEdit}
             compact={data.preferences.cardSize === 'small'}
             onCaughtUp={celebrate}
@@ -553,6 +566,17 @@
         </div>
       {/each}
     </div>
+    {#if data.unmatched?.length}
+      <p class="unmatched">
+        {data.unmatched.length === 1
+          ? "One anime on this list isn't shown, as AniList doesn't have it yet:"
+          : `${data.unmatched.length} anime on this list aren't shown, as AniList doesn't have them yet:`}
+        {#each data.unmatched as anime, i (anime.malId)}{i ? ', ' : ''}<a
+            href={`https://myanimelist.net/anime/${anime.malId}`}
+            target="_blank">{anime.title}</a
+          >{/each}
+      </p>
+    {/if}
   {/if}
 </section>
 
@@ -589,6 +613,7 @@
     <ScorePrompt
       anime={scoring}
       format={data.scoreFormat}
+      {service}
       blurMature={data.preferences.blurMature}
       onClose={askNextScore}
     />
@@ -646,6 +671,20 @@
     .moved-note {
       animation: none;
     }
+  }
+
+  /* Below the cards, where it doesn't push the list down */
+  .unmatched {
+    max-width: 48rem;
+    margin: 24px auto 0;
+    color: var(--text-accent);
+    font-size: 0.85rem;
+    text-align: center;
+    overflow-wrap: anywhere;
+  }
+
+  .unmatched a {
+    text-decoration: underline;
   }
 
   .empty-results {

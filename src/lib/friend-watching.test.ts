@@ -18,6 +18,7 @@ const me = { ...user, progress: 3, rewatching: false, isViewer: true };
 function savedAnime(progress: number): Anime {
   return {
     id: 1,
+    malId: null,
     title: 'Anime',
     englishTitle: null,
     otherTitles: [],

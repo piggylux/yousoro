@@ -1,18 +1,32 @@
 <script lang="ts">
   import { page } from '$app/state';
 
+  import { startAniListSignIn } from '#lib/anilist-auth.js';
   import FriendAvatar from '#lib/components/FriendAvatar.svelte';
   import SettingsDrawer from '#lib/components/SettingsDrawer.svelte';
   import SignInButton from '#lib/components/SignInButton.svelte';
+  import { malSignInPath } from '#lib/myanimelist-auth.js';
+  import { DOMAIN_NAMES, isDomain, listPath as pathOfList } from '#lib/types/domain.js';
   import type { Preferences } from '#lib/types/preferences.js';
   import type { SessionUser } from '#lib/types/session-user.js';
 
   type Props = {
+    /** The AniList account */
     user: SessionUser | null;
+    /** The MyAnimeList account */
+    malUser: SessionUser | null;
+    /** Whether this site offers MyAnimeList sign-in */
+    malEnabled: boolean;
     preferences: Preferences;
   };
 
-  let { user, preferences }: Props = $props();
+  let { user, malUser, malEnabled, preferences }: Props = $props();
+
+  // Every account signed in, AniList's first
+  const accounts = $derived([
+    ...(user ? [{ domain: 'anilist' as const, user }] : []),
+    ...(malUser ? [{ domain: 'myanimelist' as const, user: malUser }] : []),
+  ]);
 
   let settingsOpen = $state(false);
   const logoutFormId = $props.id();
@@ -31,10 +45,15 @@
 
   // Come back to the current page after signing in or out
   const redirectTo = $derived(page.url.pathname + page.url.search);
-  const navUsername = $derived(user?.name ?? page.params.username);
-  const listPath = $derived(
-    navUsername ? `/user/anilist/${encodeURIComponent(navUsername)}` : null
-  );
+  // The links lead to the signed-in user's own list, or else to the list being looked at
+  const navList = $derived.by(() => {
+    if (accounts[0]) return { domain: accounts[0].domain, name: accounts[0].user.name };
+    const { domain, username } = page.params;
+    return domain && username && isDomain(domain) ? { domain, name: username } : null;
+  });
+  const listPath = $derived(navList ? pathOfList(navList.domain, navList.name) : null);
+  // Friends are the people someone follows on AniList
+  const hasFriends = $derived(navList?.domain === 'anilist');
   const calendarView = $derived(page.url.searchParams.get('view') === 'calendar');
   const activeNav = $derived(
     listPath && page.url.pathname === listPath
@@ -49,6 +68,7 @@
     void page.url.pathname;
     void page.url.search;
     void user?.id;
+    void malUser?.id;
     if (account) account.open = false;
   });
 </script>
@@ -106,6 +126,7 @@
           class="primary-links"
           class:has-selection={activeNav >= 0}
           style:--active-tab={Math.max(0, activeNav)}
+          style:--tabs={hasFriends ? 3 : 2}
         >
           <a href={listPath} aria-current={activeNav === 0 ? 'page' : undefined}>
             <svg
@@ -116,7 +137,7 @@
               aria-hidden="true"
               ><rect x="3" y="4" width="18" height="16" rx="3" /><path d="m10 9 5 3-5 3Z" /></svg
             >
-            {user ? 'My anime' : 'Anime list'}
+            {accounts.length ? 'My anime' : 'Anime list'}
           </a>
           <a href={`${listPath}?view=calendar`} aria-current={activeNav === 1 ? 'page' : undefined}>
             <svg
@@ -132,20 +153,23 @@
             >
             Calendar
           </a>
-          <a href={`${listPath}/friends`} aria-current={activeNav === 2 ? 'page' : undefined}>
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.8"
-              stroke-linecap="round"
-              aria-hidden="true"
-              ><circle cx="9" cy="8" r="3" /><path
-                d="M3 21v-2a6 6 0 0 1 12 0v2m1-16a3 3 0 0 1 0 6m3 10v-2a6 6 0 0 0-2-4"
-              /></svg
+          {#if hasFriends}<a
+              href={`${listPath}/friends`}
+              aria-current={activeNav === 2 ? 'page' : undefined}
             >
-            Friends
-          </a>
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                aria-hidden="true"
+                ><circle cx="9" cy="8" r="3" /><path
+                  d="M3 21v-2a6 6 0 0 1 12 0v2m1-16a3 3 0 0 1 0 6m3 10v-2a6 6 0 0 0-2-4"
+                /></svg
+              >
+              Friends
+            </a>{/if}
         </div>
       {/if}
       <div class="tw:navbar-end">
@@ -197,10 +221,13 @@
           </svg>
         </a>
 
-        {#if user}
+        {#if accounts[0]}
           <details class="account" bind:this={account}>
-            <summary class="account-trigger" aria-label={`Signed in as ${user.name}`}>
-              <FriendAvatar {...user} size={30} />
+            <summary
+              class="account-trigger"
+              aria-label={`Signed in as ${[...new Set(accounts.map((signedIn) => signedIn.user.name))].join(' and ')}`}
+            >
+              <FriendAvatar {...accounts[0].user} size={30} />
               <svg
                 class="account-chevron"
                 viewBox="0 0 16 16"
@@ -211,12 +238,20 @@
               >
             </summary>
             <ul class="account-menu">
-              <li class="account-name"><span>AniList account</span><strong>{user.name}</strong></li>
-              <li><a href={`/user/anilist/${encodeURIComponent(user.name)}`}>My list</a></li>
-              <li>
-                <a href={`/user/anilist/${encodeURIComponent(user.name)}/friends`}>My friends</a>
-              </li>
-              <li>
+              {#each accounts as { domain, user: signedIn } (domain)}
+                <li class="account-name">
+                  <span>{DOMAIN_NAMES[domain]} account</span><strong>{signedIn.name}</strong>
+                </li>
+                <li>
+                  <a href={pathOfList(domain, signedIn.name)}
+                    >{accounts.length > 1 ? `My ${DOMAIN_NAMES[domain]} list` : 'My list'}</a
+                  >
+                </li>
+                {#if domain === 'anilist'}
+                  <li><a href={`${pathOfList(domain, signedIn.name)}/friends`}>My friends</a></li>
+                {/if}
+              {/each}
+              <li class="sign-out">
                 <button type="submit" form={logoutFormId}>Sign out</button>
               </li>
             </ul>
@@ -225,8 +260,34 @@
             <input type="hidden" name="redirectTo" value={redirectTo} />
           </form>
         {:else if page.url.pathname !== '/home'}
-          <!-- The home page has its own, larger sign-in button -->
-          <SignInButton compact {redirectTo} />
+          <!-- The home page has its own, larger sign-in buttons -->
+          {#if malEnabled}
+            <details class="account" bind:this={account}>
+              <summary class="account-trigger sign-in-trigger">
+                Sign in
+                <svg
+                  class="account-chevron"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg
+                >
+              </summary>
+              <ul class="account-menu">
+                <li>
+                  <button type="button" onclick={() => startAniListSignIn(redirectTo)}
+                    >With AniList</button
+                  >
+                </li>
+                <li>
+                  <a href={malSignInPath(redirectTo)} data-sveltekit-reload>With MyAnimeList</a>
+                </li>
+              </ul>
+            </details>
+          {:else}
+            <SignInButton compact {redirectTo} />
+          {/if}
         {/if}
       </div>
     </div>
@@ -376,6 +437,10 @@
     margin-bottom: 4px;
     border-bottom: 1px solid var(--border-subtle);
   }
+  .account-menu li + .account-name {
+    margin-top: 4px;
+    border-top: 1px solid var(--border-subtle);
+  }
   .account-name span {
     display: block;
     font-size: 0.65rem;
@@ -412,13 +477,20 @@
     outline: 3px solid var(--you-blue);
     outline-offset: 3px;
   }
-  .account-menu li:last-child {
+  .sign-out {
     border-top: 1px solid var(--border-subtle);
     margin-top: 4px;
     padding-top: 4px;
   }
-  .account-menu button {
+  .sign-out button {
     color: var(--text-accent);
+  }
+  .sign-in-trigger {
+    padding: 8px 10px 8px 14px;
+    color: var(--text-heading);
+    font-size: 0.875rem;
+    font-weight: 600;
+    white-space: nowrap;
   }
   .primary-links {
     position: relative;
@@ -426,7 +498,7 @@
     grid-column: 2;
     grid-row: 1;
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(var(--tabs), minmax(0, 1fr));
     justify-content: center;
     gap: 4px;
   }
@@ -434,7 +506,7 @@
     content: '';
     position: absolute;
     inset: 0 auto 0 0;
-    width: calc((100% - 8px) / 3);
+    width: calc((100% - (var(--tabs) - 1) * 4px) / var(--tabs));
     border-radius: var(--radius-control);
     background: var(--you-blue-pale);
     transform: translateX(calc(var(--active-tab) * (100% + 4px)));

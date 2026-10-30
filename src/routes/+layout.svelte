@@ -2,7 +2,7 @@
   import BackToTop from '#lib/components/BackToTop.svelte';
   import Seo from '#lib/components/Seo.svelte';
   import { setFriendsViewer } from '#lib/friend-watching.js';
-  import { setListContext } from '#lib/list-data.js';
+  import { setListContext, viewerKey } from '#lib/list-data.js';
 
   import type { LayoutProps } from './$types';
   import Header from './Header.svelte';
@@ -14,7 +14,7 @@
 
   $effect(() => {
     setFriendsViewer(data.user?.id ?? null);
-    setListContext(data.user?.id ?? null, data.preferences.showMature);
+    setListContext(viewerKey(data.user, data.malUser), data.preferences.showMature);
   });
 
   $effect(() => {
@@ -28,7 +28,12 @@
 <a class="skip-link" href="#main-content">Skip to content</a>
 
 <div class="app">
-  <Header user={data.user} preferences={data.preferences} />
+  <Header
+    user={data.user}
+    malUser={data.malUser}
+    malEnabled={data.malEnabled}
+    preferences={data.preferences}
+  />
 
   <!-- Focusable from script only, so "Back to top" can move focus here -->
   <main id="main-content" tabindex="-1">

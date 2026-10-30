@@ -15,4 +15,14 @@ export const variables = defineEnvVars({
     description:
       'ID of the AniList API client used for signing in. Its redirect URL must be <origin>/auth/anilist/callback',
   },
+  // MyAnimeList is optional: without its client, its sign-in and lists are switched off
+  MAL_CLIENT_ID: {
+    schema: (value) => value || undefined,
+    description:
+      'ID of the MyAnimeList API client, of the "web" type. Its redirect URL must be <origin>/auth/myanimelist/callback',
+  },
+  MAL_CLIENT_SECRET: {
+    schema: (value) => value || undefined,
+    description: 'Secret of the MyAnimeList API client, which exchanges sign-in codes for tokens',
+  },
 });

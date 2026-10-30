@@ -17,6 +17,7 @@ vi.mock('$app/env', () => ({ browser: true }));
 
 const anime: Anime = {
   id: 1,
+  malId: null,
   title: 'Fixture',
   englishTitle: null,
   otherTitles: [],
@@ -70,6 +71,7 @@ describe('browser list reuse', () => {
         new Response('Rate limited', { status: 429, headers: { 'Retry-After': '120' } })
       );
     const result = await load({
+      params: { domain: 'anilist', username: 'Fixture' },
       data: { deferred: true, username: 'Fixture' },
       parent,
       fetch,
@@ -93,6 +95,7 @@ describe('browser list reuse', () => {
           })
       );
       const pending = load({
+        params: { domain: 'anilist', username: 'Fixture' },
         data: { deferred: true, username: 'Fixture' },
         parent,
         fetch,
@@ -152,6 +155,7 @@ describe('browser list reuse', () => {
         })
     );
     const pending = load({
+      params: { domain: 'anilist', username: 'Fixture' },
       data: { deferred: true, username: 'Fixture' },
       parent,
       fetch,
@@ -175,6 +179,7 @@ describe('browser list reuse', () => {
     vi.useFakeTimers();
     const fetch = vi.fn();
     const result = await load({
+      params: { domain: 'anilist', username: 'Fixture' },
       data: { deferred: true, username: 'Fixture' },
       parent,
       fetch,
@@ -222,6 +227,7 @@ describe('browser list reuse', () => {
     expireRememberedList('Fixture');
     const fetch = vi.fn().mockResolvedValueOnce(Response.json(original));
     const event = {
+      params: { domain: 'anilist', username: 'Fixture' },
       data: { deferred: true, username: 'Fixture' },
       parent,
       fetch,
@@ -246,6 +252,22 @@ describe('browser list reuse', () => {
   });
 });
 
+describe('lists on different services', () => {
+  it('never mistakes a MyAnimeList list for an AniList one of the same name', () => {
+    const anilist = getRememberedList('Fixture')!;
+    rememberList({ ...anilist, domain: 'myanimelist', watchingList: [anime] });
+
+    expect(getRememberedList('Fixture')).toBeNull();
+    expect(getRememberedList('Fixture', 'myanimelist')?.domain).toBe('myanimelist');
+    expect(getFreshList('Fixture', true, 'myanimelist')?.watchingList).toHaveLength(1);
+    expect(getFreshList('Fixture')?.watchingList).toHaveLength(2);
+
+    expireRememberedList('Fixture', 'myanimelist');
+    expect(getFreshList('Fixture', true, 'myanimelist')).toBeNull();
+    expect(getFreshList('Fixture')).not.toBeNull();
+  });
+});
+
 describe('unavailable list fallback', () => {
   it.each([
     [false, [1]],
@@ -254,6 +276,7 @@ describe('unavailable list fallback', () => {
     'applies the current show-mature choice %s to the cached list',
     async (showMature, ids) => {
       const result = await load({
+        params: { domain: 'anilist', username: 'Fixture' },
         data: { unavailable: true, username: 'Fixture', hiddenSections: [] },
         parent: async () => ({ preferences: { ...DEFAULT_PREFERENCES, showMature }, user: null }),
       } as unknown as Parameters<typeof load>[0]);

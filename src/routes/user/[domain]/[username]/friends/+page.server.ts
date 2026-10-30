@@ -6,7 +6,6 @@ import {
   getFollowing,
 } from '#lib/server/anilist-client.js';
 import { takeClientLimit } from '#lib/server/rate-limit.js';
-import { isDomain } from '#lib/types/domain.js';
 
 /** @type {import('./$types').PageServerLoad} */
 export async function load({
@@ -19,7 +18,7 @@ export async function load({
   cookies: Cookies;
   getClientAddress: () => string;
 }) {
-  if (!isDomain(params.domain)) {
+  if (params.domain !== 'anilist') {
     error(404, `Unknown domain: ${params.domain}`);
   }
 
