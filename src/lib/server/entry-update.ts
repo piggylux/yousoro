@@ -1,7 +1,15 @@
 import { isScoreFormat, parseScore, type ScoreFormat } from '#lib/score.js';
 import { DOMAIN_NAMES, type Domain } from '#lib/types/domain.js';
 
-export type EntryChanges = { progress?: number; score?: number };
+export type EntryChanges = {
+  progress?: number;
+  score?: number;
+  /**
+   * Moved to "Watching" from the plan list, and nothing else. A copy to a linked account then sets
+   * the status alone: that list may be further along, and its episode count and dates stay
+   */
+  start?: true;
+};
 
 /** MyAnimeList scores are always whole numbers out of 10, whatever a form says */
 const FIXED_SCORE_FORMATS: Partial<Record<Domain, ScoreFormat>> = { myanimelist: 'POINT_10' };
@@ -62,4 +70,20 @@ export function parseEntryUpdate(
     return { message: 'Nothing to update' };
   }
   return update;
+}
+
+/**
+ * Which anime a "Start watching" form asks to move to the list owner's "Watching" list: by its
+ * AniList id on an AniList list, and by its MyAnimeList id on a MyAnimeList list, whose planned
+ * anime aren't looked up on AniList. The other id comes too when the page knows it, to copy the
+ * change to a linked account. Returns a message for the user when an id is missing
+ */
+export function parseStartWatching(
+  form: FormData,
+  domain: Domain
+): { mediaId?: number; malId?: number } | { message: string } {
+  const mediaId = positiveInteger(form.get('mediaId'));
+  const malId = positiveInteger(form.get('malId'));
+  if ((domain === 'anilist' ? mediaId : malId) === null) return { message: 'Unknown anime' };
+  return { ...(mediaId === null ? {} : { mediaId }), ...(malId === null ? {} : { malId }) };
 }

@@ -238,6 +238,103 @@ export async function getWatchingEntries(
   };
 }
 
+/*
+ * Only what a planned anime's row shows: plan lists run to over a thousand anime, all read in one
+ * request, so alternative titles and airing details are left out. The cover is the smallest size,
+ * as rows show it as a thumbnail
+ */
+const PLANNED_FIELDS = `
+  id
+  idMal
+  title { romaji english }
+  status
+  episodes
+  coverImage { medium }
+  isAdult
+  meanScore
+`;
+
+export type AniListPlannedEntry = {
+  /** Unix time in seconds of the last change to the entry, or 0 when AniList doesn't know */
+  updatedAt: number;
+  media: {
+    id: number;
+    idMal: number | null;
+    title: { romaji: string; english: string | null };
+    status: AiringStatus;
+    episodes: number | null;
+    coverImage: { medium: string | null } | null;
+    isAdult: boolean;
+    meanScore: number | null;
+  };
+};
+
+type PlanningList = { userId: number; userName: string; entries: AniListPlannedEntry[] };
+
+/*
+ * Planning lists change rarely and can be large, so anonymous reads are kept a while, trimmed and
+ * apart from the public cache, as taste profiles are
+ */
+const planningCache = new Map<string, { list: PlanningList; expiresAt: number }>();
+const PLANNING_TTL_MS = 5 * 60 * 1000;
+const MAX_PLANNING_LISTS = 20;
+
+/**
+ * A user's "Planning" list, in one request. With a token, as the signed-in viewer, which shows them
+ * their own private entries and lists they're allowed to see; anonymous reads are kept for five
+ * minutes. A whole plan list can wait, so it gives way to watching lists and saves when AniList is
+ * busy
+ */
+export async function getPlanningEntries(userName: string, token?: string): Promise<PlanningList> {
+  // AniList ignores case in names, so every spelling shares one read
+  const key = userName.toLowerCase();
+  if (!token) {
+    const cached = planningCache.get(key);
+    if (cached && cached.expiresAt > Date.now()) return cached.list;
+  }
+
+  const data = await query<{
+    MediaListCollection: {
+      user: { id: number; name: string };
+      lists: { isCustomList: boolean; entries: AniListPlannedEntry[] }[];
+    };
+  }>(
+    `query ($userName: String) {
+      MediaListCollection(userName: $userName, type: ANIME, status_in: [PLANNING]) {
+        user { id name }
+        lists {
+          isCustomList
+          entries {
+            updatedAt
+            media { ${PLANNED_FIELDS} }
+          }
+        }
+      }
+    }`,
+    // One spelling, so simultaneous reads of the list share one request
+    { userName: key },
+    token,
+    { cacheTtlMs: 0, priority: 'optional' }
+  );
+
+  const { user, lists } = data.MediaListCollection;
+  const list: PlanningList = {
+    userId: user.id,
+    userName: user.name,
+    // Custom lists repeat entries that already appear in the status list
+    entries: onePerAnime(
+      lists.filter((list) => !list.isCustomList).flatMap((list) => list.entries)
+    ),
+  };
+  if (!token) {
+    planningCache.delete(key);
+    if (planningCache.size >= MAX_PLANNING_LISTS)
+      planningCache.delete(planningCache.keys().next().value!);
+    planningCache.set(key, { list, expiresAt: Date.now() + PLANNING_TTL_MS });
+  }
+  return list;
+}
+
 /**
  * AniList can hold two entries for one anime, as when another site imports a list twice at once.
  * The one updated last stands for it, in the place of the first; without update times, the first

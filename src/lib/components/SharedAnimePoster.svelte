@@ -7,6 +7,7 @@
     compact = false,
     decorative = false,
     detail,
+    href,
   }: {
     anime: SharedAnime & { progress?: number; rewatching?: boolean };
     blurMature?: boolean;
@@ -21,6 +22,8 @@
      * anime's `progress` is on when left out
      */
     detail?: { badge: string; label: string };
+    /** The anime's own page, which opens in a new tab: on AniList unless given */
+    href?: string;
   } = $props();
   let failed = $state(false);
   $effect(() => {
@@ -44,7 +47,7 @@
   this={decorative ? 'span' : 'a'}
   class="poster"
   class:compact
-  href={decorative ? undefined : `https://anilist.co/anime/${anime.id}`}
+  href={decorative ? undefined : (href ?? `https://anilist.co/anime/${anime.id}`)}
   target={decorative ? undefined : '_blank'}
   rel={decorative ? undefined : 'noopener noreferrer'}
   title={decorative

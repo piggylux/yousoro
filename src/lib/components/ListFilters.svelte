@@ -4,16 +4,19 @@
   import { LIST_SECTION_LABELS, LIST_SECTIONS, type ListSection } from '#lib/anime.js';
 
   type Props = {
-    /** How many anime are in each section of the whole list */
-    counts: Record<ListSection, number>;
+    /**
+     * How many anime are in each section of the whole list; without them, as on a plan list, which
+     * has no sections, only the search shows
+     */
+    counts?: Record<ListSection, number>;
     /** The sections the viewer hides */
-    hidden: ListSection[];
-    onToggle: (section: ListSection) => void;
+    hidden?: ListSection[];
+    onToggle?: (section: ListSection) => void;
     /** Words to look for in the anime's titles */
     search: string;
   };
 
-  let { counts, hidden, onToggle, search = $bindable() }: Props = $props();
+  let { counts, hidden = [], onToggle, search = $bindable() }: Props = $props();
 
   let searchInput = $state<HTMLInputElement>();
 
@@ -27,7 +30,7 @@
 
   // Empty sections have nothing to filter, unless they're hidden, so they can be shown again
   const sections = $derived(
-    LIST_SECTIONS.filter((section) => counts[section] > 0 || hidden.includes(section))
+    counts ? LIST_SECTIONS.filter((section) => counts[section] > 0 || hidden.includes(section)) : []
   );
 </script>
 
@@ -54,16 +57,18 @@
   />
 
   <!-- Each chip shows or hides one section of the list; a pressed chip's section is shown -->
-  <div class="list-filters" role="group" aria-label="Sections to show">
-    {#each sections as section (section)}
-      {@const shown = !hidden.includes(section)}
-      <button type="button" class="chip" aria-pressed={shown} onclick={() => onToggle(section)}>
-        <span class="check" aria-hidden="true">{shown ? '✓' : ''}</span>
-        {LIST_SECTION_LABELS[section]}
-        <span class="count">{counts[section].toLocaleString()}</span>
-      </button>
-    {/each}
-  </div>
+  {#if counts}
+    <div class="list-filters" role="group" aria-label="Sections to show">
+      {#each sections as section (section)}
+        {@const shown = !hidden.includes(section)}
+        <button type="button" class="chip" aria-pressed={shown} onclick={() => onToggle?.(section)}>
+          <span class="check" aria-hidden="true">{shown ? '✓' : ''}</span>
+          {LIST_SECTION_LABELS[section]}
+          <span class="count">{counts[section].toLocaleString()}</span>
+        </button>
+      {/each}
+    </div>
+  {/if}
 </div>
 
 <style>

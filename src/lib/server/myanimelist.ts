@@ -1,9 +1,14 @@
 import { getMediaByMalIds } from '#lib/server/anilist-client.js';
 import { toAnime, withRecentAirings } from '#lib/server/anilist.js';
-import { getWatchingEntries } from '#lib/server/myanimelist-client.js';
+import {
+  getPlanToWatchEntries,
+  getWatchingEntries,
+  type MalAiringStatus,
+  type MalEntry,
+} from '#lib/server/myanimelist-client.js';
 import type { RequestPriority } from '#lib/server/rate-limit.js';
-import type { Anime } from '#lib/types/anime.js';
-import type { Api, UnmatchedAnime, UserAnimeList } from '#lib/types/api.js';
+import type { AiringStatus, Anime } from '#lib/types/anime.js';
+import type { Api, PlannedList, UnmatchedAnime, UserAnimeList } from '#lib/types/api.js';
 import type { SessionUser } from '#lib/types/session-user.js';
 
 /**
@@ -61,4 +66,41 @@ export class MyAnimeListApi implements Api {
       unmatched,
     };
   }
+
+  /**
+   * Unlike watching lists, plan-to-watch lists are shown as MyAnimeList has them, without asking
+   * AniList about each anime: they're often hundreds long, and AniList answers for 50 at a time
+   */
+  async getPlannedAnime(username: string): Promise<PlannedList> {
+    const entries = await getPlanToWatchEntries(username, this.signedIn?.token);
+    const owner = this.signedIn?.owner;
+    return {
+      userId: owner?.id ?? null,
+      username: owner?.name ?? username,
+      planned: entries.map(toPlannedAnime),
+    };
+  }
+}
+
+const AIRING_STATUSES: Record<MalAiringStatus, AiringStatus> = {
+  finished_airing: 'FINISHED',
+  currently_airing: 'RELEASING',
+  not_yet_aired: 'NOT_YET_RELEASED',
+};
+
+function toPlannedAnime({ node, list_status }: MalEntry): PlannedList['planned'][number] {
+  return {
+    id: null,
+    malId: node.id,
+    title: node.title,
+    englishTitle: node.alternative_titles?.en || null,
+    coverUrl: node.main_picture?.medium ?? null,
+    isAdult: node.nsfw === 'black',
+    // An anime MyAnimeList doesn't give a status for has most likely aired already
+    status: (node.status && AIRING_STATUSES[node.status]) ?? 'FINISHED',
+    episodes: node.num_episodes || null,
+    // Out of 10 with two decimals on MyAnimeList, out of 100 like AniList's here
+    meanScore: node.mean ? Math.round(node.mean * 10) : null,
+    addedAt: Date.parse(list_status.updated_at) || null,
+  };
 }

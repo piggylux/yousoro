@@ -86,8 +86,15 @@ function replaceViewer(people: FriendWatching[], id: number, person: FriendWatch
   return person ? [person, ...others] : others;
 }
 
-/** Patch only the signed-in user's confirmed entry, without refreshing anyone else's data. */
-export function recordOwnWatchingEntry(user: SessionUser, saved: Anime, status: string) {
+/**
+ * Patch only the signed-in user's confirmed entry, without refreshing anyone else's data. Only
+ * what's shown of it is needed, so an anime just started from the plan list can be given too
+ */
+export function recordOwnWatchingEntry(
+  user: SessionUser,
+  saved: Pick<Anime, 'id' | 'title' | 'isAdult' | 'thumbnailUrl' | 'currentEpisode' | 'rewatching'>,
+  status: string
+) {
   if (viewer !== user.id) return;
   const watching = !status || status === 'CURRENT' || status === 'REPEATING';
   const person: FriendWatching | null = watching

@@ -1,6 +1,6 @@
 import type { ListSection } from '#lib/anime.js';
 import type { ScoreFormat } from '#lib/score.js';
-import type { Anime } from '#lib/types/anime.js';
+import type { Anime, PlannedAnime } from '#lib/types/anime.js';
 import type { Domain } from '#lib/types/domain.js';
 import type { Preferences } from '#lib/types/preferences.js';
 
@@ -32,8 +32,35 @@ export type UnmatchedAnime = {
   isAdult: boolean;
 };
 
+/** Someone's "Planning" or "Plan to Watch" list */
+export type PlannedList = {
+  /** The service's id for the list owner, when the service provides it */
+  userId: number | null;
+  /** The username as the service spells it, which may differ in case from the one requested */
+  username: string;
+  /**
+   * With when the user last changed each entry, usually as they planned it, as Unix time in ms. The
+   * page only needs the order that gives, so it isn't sent
+   */
+  planned: (PlannedAnime & { addedAt: number | null })[];
+};
+
+export type PlanningPageData = {
+  domain: Domain;
+  username: string;
+  /** Whether the signed-in user owns this list and can start watching its anime */
+  canEdit: boolean;
+  /** The planned anime that are out, most recently planned first */
+  planned: PlannedAnime[];
+  /** How many more haven't aired yet: nobody can start those, so they're only counted */
+  upcoming: number;
+  /** The list on its service */
+  userProfileLink: string;
+};
+
 export interface Api {
   getUserAnimeList: (username: string) => Promise<UserAnimeList>;
+  getPlannedAnime: (username: string) => Promise<PlannedList>;
 }
 
 export type AnimePageData = {

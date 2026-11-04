@@ -32,13 +32,25 @@ export type MalListStatusData = {
   finish_date?: string;
 };
 
+/** Whether an anime has aired, as MyAnimeList says it */
+export type MalAiringStatus = 'finished_airing' | 'currently_airing' | 'not_yet_aired';
+
 export type MalEntry = {
-  /** `nsfw` is "white", "gray", or "black" for adult anime */
+  /**
+   * `nsfw` is "white", "gray", or "black" for adult anime. The fields after it are only there when
+   * asked for, as plan-to-watch lists do
+   */
   node: {
     id: number;
     title: string;
     nsfw?: string;
     main_picture?: { medium: string; large: string };
+    /** 0 while it isn't known */
+    num_episodes?: number;
+    status?: MalAiringStatus;
+    /** The average score, out of 10, when enough people have scored it */
+    mean?: number;
+    alternative_titles?: { en?: string };
   };
   list_status: MalListStatusData;
 };
@@ -65,6 +77,8 @@ type RequestOptions = {
   method?: string;
   body?: URLSearchParams;
   priority?: RequestPriority;
+  /** `cacheMs: 0` shares a public read while it's under way without keeping its answer here */
+  cacheMs?: number;
 };
 
 /**
@@ -76,7 +90,7 @@ type RequestOptions = {
 async function request<T>(url: string, options: RequestOptions = {}): Promise<T> {
   const { token, method = 'GET' } = options;
   const readKey = method === 'GET' ? fingerprint(JSON.stringify([url, token ?? null])) : null;
-  const cacheKey = readKey && !token ? readKey : null;
+  const cacheKey = readKey && !token && options.cacheMs !== 0 ? readKey : null;
   if (cacheKey) {
     const cached = publicCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) return cached.data as T;
@@ -91,7 +105,10 @@ async function request<T>(url: string, options: RequestOptions = {}): Promise<T>
         if (publicCache.size >= MAX_CACHE_ENTRIES) {
           publicCache.delete(publicCache.keys().next().value!);
         }
-        publicCache.set(cacheKey, { data, expiresAt: Date.now() + PUBLIC_CACHE_MS });
+        publicCache.set(cacheKey, {
+          data,
+          expiresAt: Date.now() + (options.cacheMs ?? PUBLIC_CACHE_MS),
+        });
       }
       return data;
     })
@@ -141,11 +158,15 @@ async function send<T>(
 }
 
 /** Every page of a list, up to 10 of them: 10,000 entries */
-async function readPages(url: string, token?: string): Promise<MalEntry[]> {
+async function readPages(
+  url: string,
+  token?: string,
+  options: Pick<RequestOptions, 'cacheMs' | 'priority'> = {}
+): Promise<MalEntry[]> {
   const entries: MalEntry[] = [];
   let next: string | undefined = url;
   for (let page = 0; next && page < 10; page++) {
-    const body: MalPage = await request<MalPage>(next, { token });
+    const body: MalPage = await request<MalPage>(next, { token, ...options });
     entries.push(...body.data);
     next = body.paging?.next;
   }
@@ -174,6 +195,43 @@ export async function getWatchingEntries(userName: string, token?: string): Prom
     }
   }
   return [...entries.values()];
+}
+
+/*
+ * Plan-to-watch lists change rarely and can be large, so anonymous reads are kept a while, apart
+ * from the public cache, as AniList's planning lists are
+ */
+const planningCache = new Map<string, { entries: MalEntry[]; expiresAt: number }>();
+const PLANNING_TTL_MS = 5 * 60 * 1000;
+const MAX_PLANNING_LISTS = 20;
+
+/**
+ * A user's "Plan to Watch" list, with what its posters show, so the anime needn't be looked up on
+ * AniList: their own with their token, or anyone's public list by name. Anonymous reads are kept
+ * for five minutes. Like AniList's, it gives way to watching lists and saves when the budget runs low
+ */
+export async function getPlanToWatchEntries(userName: string, token?: string): Promise<MalEntry[]> {
+  // MyAnimeList names ignore case
+  const key = userName.toLowerCase();
+  if (!token) {
+    const cached = planningCache.get(key);
+    if (cached && cached.expiresAt > Date.now()) return cached.entries;
+  }
+  // One spelling, so simultaneous reads of the list share one request
+  const path = `${API_URL}/users/${token ? '@me' : encodeURIComponent(key)}/animelist`;
+  const fields = 'list_status,nsfw,num_episodes,status,mean,alternative_titles';
+  const entries = await readPages(
+    `${path}?status=plan_to_watch&limit=1000&fields=${fields}&nsfw=true`,
+    token,
+    { cacheMs: 0, priority: 'optional' }
+  );
+  if (!token) {
+    planningCache.delete(key);
+    if (planningCache.size >= MAX_PLANNING_LISTS)
+      planningCache.delete(planningCache.keys().next().value!);
+    planningCache.set(key, { entries, expiresAt: Date.now() + PLANNING_TTL_MS });
+  }
+  return entries;
 }
 
 /** Every anime on the token owner's list, whatever its status */
@@ -265,6 +323,34 @@ export async function copyEntry(
     body,
     priority,
   });
+}
+
+/**
+ * Moves an anime on the token owner's list to "Watching", adding it when it isn't there, in one
+ * request. The episode count, score and dates stay as they are
+ */
+export async function startWatching(
+  token: string,
+  malId: number
+): Promise<{
+  progress: number;
+  score: number;
+  status: string;
+  startedAt: string | null;
+  completedAt: string | null;
+}> {
+  const saved = await request<MalListStatusData>(`${API_URL}/anime/${malId}/my_list_status`, {
+    token,
+    method: 'PATCH',
+    body: new URLSearchParams({ status: 'watching' }),
+  });
+  return {
+    progress: saved.num_episodes_watched,
+    score: saved.score,
+    status: toAniListStatus(saved),
+    startedAt: saved.start_date ?? null,
+    completedAt: saved.finish_date ?? null,
+  };
 }
 
 /**

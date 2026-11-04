@@ -9,6 +9,7 @@ import {
   getAnimeYear,
   getFollowing,
   getLatestAirings,
+  getPlanningEntries,
   getSeries,
   getTasteProfile,
   getViewer,
@@ -633,5 +634,92 @@ describe('years in anime', () => {
   it('never asks AniList for a name that cannot be one', async () => {
     await expect(getAnimeYear('two words', 2026)).rejects.toThrow(AniListNotFoundError);
     expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe('planning lists', () => {
+  const entry = (id: number, updatedAt = 0) => ({
+    updatedAt,
+    media: {
+      id,
+      idMal: id + 1000,
+      title: { romaji: `Anime ${id}`, english: null },
+      status: 'FINISHED',
+      episodes: 12,
+      coverImage: { medium: `https://s4.anilist.co/${id}.jpg` },
+      isAdult: false,
+      meanScore: 70,
+    },
+  });
+  const collection = (name: string) =>
+    Response.json({
+      data: {
+        MediaListCollection: {
+          user: { id: 7, name },
+          lists: [
+            // Listed twice, as after a double import: the later edit stands
+            { isCustomList: false, entries: [entry(1), entry(2, 10), entry(2, 20)] },
+            // Custom lists repeat entries from the status lists
+            { isCustomList: true, entries: [entry(1)] },
+          ],
+        },
+      },
+    });
+
+  it('reads a planning list in one request, with only what its posters show', async () => {
+    vi.mocked(fetch).mockResolvedValue(collection('Planner'));
+
+    const list = await getPlanningEntries('Planner');
+
+    expect(list.userId).toBe(7);
+    expect(list.entries.map(({ media, updatedAt }) => [media.id, updatedAt])).toEqual([
+      [1, 0],
+      [2, 20],
+    ]);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    // A whole plan list can wait: it gives way to watching lists and saves
+    expect(takeAniListRequest).toHaveBeenCalledWith('optional');
+    const { query } = JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string);
+    expect(query).toContain('status_in: [PLANNING]');
+    // Rows show the cover as a thumbnail, so the smallest one is enough
+    expect(query).toContain('coverImage { medium }');
+    for (const field of [
+      'synonyms',
+      'nextAiringEpisode',
+      'startDate',
+      'endDate',
+      'extraLarge',
+      'avatar',
+    ])
+      expect(query).not.toContain(field);
+  });
+
+  it('keeps an anonymous read for five minutes, for every spelling of the name', async () => {
+    vi.mocked(fetch).mockImplementation(async () => collection('Kept'));
+    const now = Date.now();
+    vi.spyOn(Date, 'now').mockReturnValue(now);
+    await Promise.all([getPlanningEntries('Kept'), getPlanningEntries('KEPT')]);
+    vi.spyOn(Date, 'now').mockReturnValue(now + 4 * 60 * 1000);
+    await getPlanningEntries('kept');
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    vi.spyOn(Date, 'now').mockReturnValue(now + 5 * 60 * 1000);
+    await getPlanningEntries('kept');
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("reads with the viewer's token every time, and never keeps what it shows them", async () => {
+    vi.mocked(fetch).mockImplementation(async () => collection('Private'));
+    await getPlanningEntries('Private', 'viewer-token');
+    await getPlanningEntries('Private', 'viewer-token');
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(fetch).mock.calls[0][1]!.headers).toMatchObject({
+      Authorization: 'Bearer viewer-token',
+    });
+
+    // An anonymous read afterwards doesn't get the viewer's view of the list
+    await getPlanningEntries('Private');
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(vi.mocked(fetch).mock.calls[2][1]!.headers).not.toHaveProperty('Authorization');
   });
 });

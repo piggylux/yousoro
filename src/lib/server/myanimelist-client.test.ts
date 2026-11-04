@@ -2,12 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   copyEntry,
+  getPlanToWatchEntries,
   getWatchingEntries,
   MalForbiddenError,
   MalNotFoundError,
   MalRateLimitError,
   MalTokenError,
   saveEntry,
+  startWatching,
   type MalEntry,
 } from '#lib/server/myanimelist-client.js';
 import { pauseMal, takeMalRequest } from '#lib/server/rate-limit.js';
@@ -37,6 +39,8 @@ function entry(id: number, status: string, isRewatching = false): MalEntry {
 }
 
 beforeEach(() => {
+  // Undoes Date.now spies, even those of a test that failed before undoing its own
+  vi.restoreAllMocks();
   vi.clearAllMocks();
   cacheNamespace.value++;
   vi.mocked(takeMalRequest).mockResolvedValue({ allowed: true, retryAfter: 60 });
@@ -328,5 +332,67 @@ describe('copyEntry', () => {
       is_rewatching: 'false',
       num_times_rewatched: '3',
     });
+  });
+});
+
+describe('getPlanToWatchEntries', () => {
+  it('reads a public list in one request, with what its posters show, and keeps it five minutes', async () => {
+    vi.mocked(fetch).mockImplementation(async () =>
+      Response.json({ data: [entry(1, 'plan_to_watch')] })
+    );
+    const now = Date.now();
+    vi.spyOn(Date, 'now').mockReturnValue(now);
+
+    await Promise.all([getPlanToWatchEntries('Planner'), getPlanToWatchEntries('PLANNER')]);
+    vi.mocked(Date.now).mockReturnValue(now + 4 * 60 * 1000);
+    expect(await getPlanToWatchEntries('planner')).toEqual([entry(1, 'plan_to_watch')]);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const url = new URL(String(vi.mocked(fetch).mock.calls[0][0]));
+    expect(url.pathname).toBe('/v2/users/planner/animelist');
+    expect(url.searchParams.get('status')).toBe('plan_to_watch');
+    expect(url.searchParams.get('limit')).toBe('1000');
+    expect(url.searchParams.get('fields')?.split(',')).toEqual(
+      expect.arrayContaining(['list_status', 'num_episodes', 'status', 'mean'])
+    );
+
+    vi.mocked(Date.now).mockReturnValue(now + 5 * 60 * 1000);
+    await getPlanToWatchEntries('planner');
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(takeMalRequest).toHaveBeenCalledWith('optional');
+  });
+
+  it("reads the owner's list with their token every time, and never keeps it", async () => {
+    vi.mocked(fetch).mockImplementation(async () => Response.json({ data: [] }));
+    await getPlanToWatchEntries('Owner', 'token');
+    await getPlanToWatchEntries('Owner', 'token');
+    expect(fetch).toHaveBeenCalledTimes(2);
+    const [url, init] = vi.mocked(fetch).mock.calls[0];
+    expect(String(url)).toMatch(`${API}/users/@me/animelist?status=plan_to_watch`);
+    expect(init?.headers).toMatchObject({ Authorization: 'Bearer token' });
+
+    // An anonymous read afterwards doesn't get the owner's view of the list
+    await getPlanToWatchEntries('Owner');
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('startWatching', () => {
+  it('moves an anime to "Watching" in one request, leaving the rest of the entry alone', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      Response.json({ ...entry(1, 'watching').list_status, num_episodes_watched: 0, score: 0 })
+    );
+
+    expect(await startWatching('token', 52991)).toEqual({
+      progress: 0,
+      score: 0,
+      status: 'CURRENT',
+      startedAt: null,
+      completedAt: null,
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const [url, init] = vi.mocked(fetch).mock.calls[0];
+    expect(String(url)).toBe(`${API}/anime/52991/my_list_status`);
+    expect(init?.method).toBe('PATCH');
+    expect(String(init?.body)).toBe('status=watching');
   });
 });

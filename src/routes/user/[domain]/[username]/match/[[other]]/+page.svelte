@@ -1,6 +1,7 @@
 <script lang="ts">
   import { page } from '$app/state';
 
+  import AnimeRow from '#lib/components/AnimeRow.svelte';
   import AutoReadRetry from '#lib/components/AutoReadRetry.svelte';
   import FriendAvatar from '#lib/components/FriendAvatar.svelte';
   import ShareButton from '#lib/components/ShareButton.svelte';
@@ -151,23 +152,13 @@
   <ul class="anime-rows">
     {#each entries as { anime, a: scoreA, b: scoreB } (anime.id)}
       <li>
-        <a
-          class="anime-row"
+        <AnimeRow
+          {anime}
           href={`https://anilist.co/anime/${anime.id}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label={`${anime.title}: ${who(a.name)} ${describeScore(scoreA, a.scoreFormat)}, ${who(b.name)} ${describeScore(scoreB, b.scoreFormat)}, opens in a new tab`}
+          label={`${anime.title}: ${who(a.name)} ${describeScore(scoreA, a.scoreFormat)}, ${who(b.name)} ${describeScore(scoreB, b.scoreFormat)}, opens in a new tab`}
+          blurMature={data.preferences.blurMature}
         >
-          <span class="row-cover">
-            <SharedAnimePoster
-              {anime}
-              compact
-              decorative
-              blurMature={data.preferences.blurMature}
-            />
-          </span>
-          <span class="row-text">
-            <span class="row-title">{anime.title}</span>
+          {#snippet details()}
             <span class="row-scores">
               <span
                 >{Who(a.name)}
@@ -178,8 +169,8 @@
                 <strong>{formatScore(scoreB, b.scoreFormat)}</strong></span
               >
             </span>
-          </span>
-        </a>
+          {/snippet}
+        </AnimeRow>
       </li>
     {/each}
   </ul>
@@ -617,47 +608,9 @@
     gap: 10px;
   }
 
-  .anime-row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    height: 100%;
-    padding: 8px;
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-control);
-    background: var(--surface);
-    transition:
-      background-color 150ms ease,
-      border-color 150ms ease;
-  }
-
-  .anime-row:hover {
-    border-color: var(--you-blue);
-    background: var(--you-blue-pale);
-  }
-
-  .row-cover {
-    flex: none;
-    width: 44px;
-  }
-
-  .row-text {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    min-width: 0;
-  }
-
-  .row-title {
-    color: var(--text-heading);
-    font-size: 0.875rem;
-    font-weight: 600;
-    line-height: 1.3;
-    overflow-wrap: anywhere;
-  }
-
   .row-scores {
     display: flex;
+    margin-top: 2px;
     flex-wrap: wrap;
     gap: 2px 14px;
     color: var(--text-accent);
@@ -741,12 +694,6 @@
 
     .compare-row button {
       flex: 1 1 100%;
-    }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .anime-row {
-      transition: none;
     }
   }
 </style>

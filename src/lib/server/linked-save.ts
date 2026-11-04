@@ -4,6 +4,7 @@ import { toMalScore } from '#lib/score.js';
 import {
   AniListRateLimitError,
   AniListTokenError,
+  getMediaByMalIds,
   saveEntry as saveAniListEntry,
 } from '#lib/server/anilist-client.js';
 import type { EntryUpdate } from '#lib/server/entry-update.js';
@@ -11,6 +12,7 @@ import { withMalToken } from '#lib/server/myanimelist-auth.js';
 import {
   copyEntry,
   MalNotFoundError,
+  startWatching,
   MalRateLimitError,
   MalTokenError,
 } from '#lib/server/myanimelist-client.js';
@@ -23,13 +25,14 @@ import { DOMAIN_NAMES, type Domain } from '#lib/types/domain.js';
  * the episode count, status and dates as the save left them, and the score when it changed. A date
  * the save left unset doesn't clear the other's. These are the
  * entry as it now is rather than a change to it, so a copy that failed is made up by the next one.
- * The save itself has already succeeded, so this never throws: a failure only comes back as a
- * message for the user
+ * A start from the plan list only copies the status. A save from a MyAnimeList page that didn't know the anime's AniList id looks it up first. The
+ * save itself has already succeeded, so this never throws: a failure only comes back as a message
+ * for the user
  */
 export async function copyToLinkedAccount(
   event: { cookies: Cookies; locals: App.Locals },
   from: Domain,
-  { mediaId, malId, changes, scoreFormat }: EntryUpdate,
+  { mediaId, malId, changes, scoreFormat }: Omit<EntryUpdate, 'mediaId'> & { mediaId?: number },
   saved: {
     progress: number;
     score: number;
@@ -54,24 +57,36 @@ export async function copyToLinkedAccount(
         changes.score !== undefined && scoreFormat
           ? toMalScore(saved.score, scoreFormat)
           : undefined;
-      await withMalToken(event, (token) =>
-        copyEntry(token, malId, {
-          progress: saved.progress,
-          status: saved.status,
-          score,
-          startedAt: saved.startedAt,
-          completedAt: saved.completedAt,
-        })
+      await withMalToken<unknown>(event, (token) =>
+        changes.start
+          ? startWatching(token, malId)
+          : copyEntry(token, malId, {
+              progress: saved.progress,
+              status: saved.status,
+              score,
+              startedAt: saved.startedAt,
+              completedAt: saved.completedAt,
+            })
       );
     } else {
-      await saveAniListEntry(aniListSession!.token, mediaId, {
-        progress: saved.progress,
-        status: saved.status,
-        startedAt: saved.startedAt,
-        completedAt: saved.completedAt,
-        // A MyAnimeList score out of 10 is exact out of 100, in whatever format AniList shows it
-        ...(changes.score !== undefined && { scoreRaw: saved.score * 10 }),
-      });
+      const id =
+        mediaId ??
+        (malId === undefined ? undefined : (await getMediaByMalIds([malId])).get(malId)?.id);
+      if (id === undefined) return failed("this anime isn't on AniList.", false);
+      await saveAniListEntry(
+        aniListSession!.token,
+        id,
+        changes.start
+          ? { status: 'CURRENT' }
+          : {
+              progress: saved.progress,
+              status: saved.status,
+              startedAt: saved.startedAt,
+              completedAt: saved.completedAt,
+              // A MyAnimeList score out of 10 is exact out of 100, in whatever format AniList shows it
+              ...(changes.score !== undefined && { scoreRaw: saved.score * 10 }),
+            }
+      );
     }
     return null;
   } catch (err) {

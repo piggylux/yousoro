@@ -1,19 +1,26 @@
 import type { Cookies } from '@sveltejs/kit';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { AniListRateLimitError, saveEntry } from '#lib/server/anilist-client.js';
+import {
+  AniListRateLimitError,
+  getMediaByMalIds,
+  saveEntry,
+  type AniListMedia,
+} from '#lib/server/anilist-client.js';
 import type { EntryUpdate } from '#lib/server/entry-update.js';
 import { copyToLinkedAccount } from '#lib/server/linked-save.js';
-import { copyEntry, MalTokenError } from '#lib/server/myanimelist-client.js';
+import { copyEntry, MalTokenError, startWatching } from '#lib/server/myanimelist-client.js';
 import type { MalSession, Session } from '#lib/server/session.js';
 
 vi.mock('#lib/server/anilist-client.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('#lib/server/anilist-client.js')>()),
   saveEntry: vi.fn(),
+  getMediaByMalIds: vi.fn(),
 }));
 vi.mock('#lib/server/myanimelist-client.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('#lib/server/myanimelist-client.js')>()),
   copyEntry: vi.fn(),
+  startWatching: vi.fn(),
 }));
 vi.mock('#lib/server/myanimelist-auth.js', () => ({
   withMalToken: (event: { locals: App.Locals }, use: (token: string) => Promise<unknown>) =>
@@ -112,6 +119,48 @@ describe('copyToLinkedAccount', () => {
       completedAt: undefined,
       scoreRaw: 80,
     });
+  });
+
+  it('looks up the AniList id of an anime started from a MyAnimeList plan list, only then', async () => {
+    const { event } = signedIn(aniList, mal);
+    vi.mocked(getMediaByMalIds).mockResolvedValue(
+      new Map([[52991, { id: 154587 } as AniListMedia]])
+    );
+    const start = { malId: 52991, changes: { start: true as const } };
+
+    expect(await copyToLinkedAccount(event, 'myanimelist', start, saved(0, 0))).toBeNull();
+    expect(getMediaByMalIds).toHaveBeenCalledWith([52991]);
+    // Only the status: AniList's episode count and dates may be further along, and stay
+    expect(saveEntry).toHaveBeenCalledWith('anilist.token.jwt', 154587, { status: 'CURRENT' });
+
+    // A save that knows the id, as from a watching list, isn't looked up
+    vi.mocked(getMediaByMalIds).mockClear();
+    await copyToLinkedAccount(event, 'myanimelist', progress, saved(1, 0));
+    expect(getMediaByMalIds).not.toHaveBeenCalled();
+  });
+
+  it("says when the anime isn't on AniList", async () => {
+    const { event } = signedIn(aniList, mal);
+    vi.mocked(getMediaByMalIds).mockResolvedValue(new Map());
+
+    expect(
+      await copyToLinkedAccount(
+        event,
+        'myanimelist',
+        { malId: 1, changes: { start: true } },
+        saved(0, 0)
+      )
+    ).toEqual({ message: "Saved on MyAnimeList, but this anime isn't on AniList.", retry: false });
+    expect(saveEntry).not.toHaveBeenCalled();
+  });
+
+  it('copies a start to MyAnimeList as the status alone, leaving its episode count be', async () => {
+    const { event } = signedIn(aniList, mal);
+
+    const start = { mediaId: 7, malId: 52991, changes: { start: true as const } };
+    expect(await copyToLinkedAccount(event, 'anilist', start, saved(0, 0))).toBeNull();
+    expect(startWatching).toHaveBeenCalledWith('mal-token', 52991);
+    expect(copyEntry).not.toHaveBeenCalled();
   });
 
   it("says when the anime isn't on MyAnimeList", async () => {

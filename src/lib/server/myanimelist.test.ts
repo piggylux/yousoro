@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getLatestAirings, getMediaByMalIds } from '#lib/server/anilist-client.js';
-import { getWatchingEntries, type MalEntry } from '#lib/server/myanimelist-client.js';
+import {
+  getPlanToWatchEntries,
+  getWatchingEntries,
+  type MalEntry,
+} from '#lib/server/myanimelist-client.js';
 import { MyAnimeListApi } from '#lib/server/myanimelist.js';
 
 vi.mock('#lib/server/anilist-client.js', async (importOriginal) => ({
@@ -9,7 +13,10 @@ vi.mock('#lib/server/anilist-client.js', async (importOriginal) => ({
   getMediaByMalIds: vi.fn(),
   getLatestAirings: vi.fn(),
 }));
-vi.mock('#lib/server/myanimelist-client.js', () => ({ getWatchingEntries: vi.fn() }));
+vi.mock('#lib/server/myanimelist-client.js', () => ({
+  getWatchingEntries: vi.fn(),
+  getPlanToWatchEntries: vi.fn(),
+}));
 
 function entry(id: number, progress: number, rewatching = false): MalEntry {
   return {
@@ -114,5 +121,78 @@ describe('MyAnimeListApi', () => {
 
     expect(getLatestAirings).toHaveBeenCalledWith([154587], expect.any(Number));
     expect(list.animeList[0].recentEpisodeAiredAt).toBe(1_900_000_000_000);
+  });
+});
+
+describe('MyAnimeListApi plan lists', () => {
+  const planned = (id: number, node: Partial<MalEntry['node']>): MalEntry => ({
+    node: { id, title: `MAL title ${id}`, ...node },
+    list_status: {
+      status: 'plan_to_watch',
+      score: 0,
+      num_episodes_watched: 0,
+      is_rewatching: false,
+      updated_at: '2026-10-30T10:00:00+00:00',
+    },
+  });
+
+  it('shows anime as MyAnimeList has them, without asking AniList about any', async () => {
+    vi.mocked(getPlanToWatchEntries).mockResolvedValue([
+      planned(1, {
+        main_picture: { medium: 'https://cdn.myanimelist.net/1m.jpg', large: 'l.jpg' },
+        num_episodes: 24,
+        status: 'currently_airing',
+        mean: 8.76,
+        alternative_titles: { en: 'English title' },
+      }),
+      planned(2, {
+        nsfw: 'black',
+        num_episodes: 0,
+        status: 'not_yet_aired',
+        alternative_titles: { en: '' },
+      }),
+      planned(3, {}),
+    ]);
+
+    const list = await new MyAnimeListApi().getPlannedAnime('Fixture');
+
+    expect(getMediaByMalIds).not.toHaveBeenCalled();
+    expect(getPlanToWatchEntries).toHaveBeenCalledWith('Fixture', undefined);
+    expect(list).toEqual({
+      userId: null,
+      username: 'Fixture',
+      planned: [
+        {
+          id: null,
+          malId: 1,
+          title: 'MAL title 1',
+          englishTitle: 'English title',
+          coverUrl: 'https://cdn.myanimelist.net/1m.jpg',
+          isAdult: false,
+          status: 'RELEASING',
+          episodes: 24,
+          meanScore: 88,
+          addedAt: Date.parse('2026-10-30T10:00:00+00:00'),
+        },
+        expect.objectContaining({
+          malId: 2,
+          englishTitle: null,
+          isAdult: true,
+          status: 'NOT_YET_RELEASED',
+          episodes: null,
+        }),
+        expect.objectContaining({ malId: 3, coverUrl: null, status: 'FINISHED', meanScore: null }),
+      ],
+    });
+  });
+
+  it("reads the owner's list with their token and names them as its owner", async () => {
+    vi.mocked(getPlanToWatchEntries).mockResolvedValue([]);
+    const owner = { id: 12, name: 'Fixture', avatarUrl: null };
+
+    const list = await new MyAnimeListApi({ token: 'token', owner }).getPlannedAnime('fixture');
+
+    expect(getPlanToWatchEntries).toHaveBeenCalledWith('fixture', 'token');
+    expect(list).toMatchObject({ userId: 12, username: 'Fixture' });
   });
 });

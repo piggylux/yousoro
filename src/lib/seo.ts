@@ -135,9 +135,9 @@ export function getPageSeo(url: SeoUrl, status = 200, resolvedUsername?: string)
       };
     }
   } else {
-    // Friends are AniList's only
-    const match = path.match(/^\/user\/(?:(anilist)|myanimelist)\/([^/]+)(\/friends)?$/);
-    if (match && (match[1] || !match[3])) {
+    // Friends are AniList's only; plan lists are on both services
+    const match = path.match(/^\/user\/(?:(anilist)|myanimelist)\/([^/]+)(\/friends|\/planning)?$/);
+    if (match && (match[1] || match[3] !== '/friends')) {
       const domain: Domain = match[1] ? 'anilist' : 'myanimelist';
       let username: string;
       try {
@@ -147,9 +147,12 @@ export function getPageSeo(url: SeoUrl, status = 200, resolvedUsername?: string)
       }
       // AniList returns its canonical spelling even when the requested name uses another case.
       username = resolvedUsername || username;
-      if (match[3]) {
+      if (match[3] === '/friends') {
         title = `${username}'s friends | ${SITE_NAME}`;
         description = `The people ${username} follows on AniList.`;
+      } else if (match[3]) {
+        title = `${username}'s Planning List | ${SITE_NAME}`;
+        description = `The anime ${username} plans to watch on ${DOMAIN_NAMES[domain]}.`;
       } else {
         const calendar = url.searchParams.get('view') === 'calendar';
         title = `${username}'s ${calendar ? 'Anime Episode Calendar' : 'Anime Watching List'} | ${SITE_NAME}`;

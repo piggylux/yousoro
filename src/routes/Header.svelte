@@ -61,15 +61,20 @@
   // Friends are the people someone follows on AniList
   const hasFriends = $derived(navList?.domain === 'anilist');
   const calendarView = $derived(page.url.searchParams.get('view') === 'calendar');
-  const activeNav = $derived(
-    listPath && page.url.pathname === listPath
-      ? calendarView
-        ? 1
-        : 0
-      : listPath && page.url.pathname === `${listPath}/friends`
-        ? 2
-        : -1
-  );
+  // The tab of the page being looked at, in the order they're shown; -1 for none of them
+  const activeNav = $derived.by(() => {
+    if (!listPath) return -1;
+    switch (page.url.pathname) {
+      case listPath:
+        return calendarView ? 1 : 0;
+      case `${listPath}/planning`:
+        return 2;
+      case `${listPath}/friends`:
+        return 3;
+      default:
+        return -1;
+    }
+  });
   $effect(() => {
     void page.url.pathname;
     void page.url.search;
@@ -132,7 +137,7 @@
           class="primary-links"
           class:has-selection={activeNav >= 0}
           style:--active-tab={Math.max(0, activeNav)}
-          style:--tabs={hasFriends ? 3 : 2}
+          style:--tabs={hasFriends ? 4 : 3}
         >
           <a href={listPath} aria-current={activeNav === 0 ? 'page' : undefined}>
             <svg
@@ -159,9 +164,22 @@
             >
             Calendar
           </a>
+          <a href={`${listPath}/planning`} aria-current={activeNav === 2 ? 'page' : undefined}>
+            <!-- A bookmark: anime kept for later -->
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linejoin="round"
+              aria-hidden="true"
+              ><path d="M7 3h10a2 2 0 0 1 2 2v16l-7-4.5L5 21V5a2 2 0 0 1 2-2Z" /></svg
+            >
+            Planning
+          </a>
           {#if hasFriends}<a
               href={`${listPath}/friends`}
-              aria-current={activeNav === 2 ? 'page' : undefined}
+              aria-current={activeNav === 3 ? 'page' : undefined}
             >
               <svg
                 viewBox="0 0 24 24"
@@ -605,13 +623,16 @@
       margin-left: 0;
     }
   }
-  @container navigation (max-width: 360px) {
+  /* Four tabs don't fit side by side on a phone, so each label goes under its icon */
+  @container navigation (max-width: 480px) {
     .primary-links a {
       flex-direction: column;
       gap: 4px;
       padding: 7px 4px;
       font-size: 0.75rem;
     }
+  }
+  @container navigation (max-width: 360px) {
     .tw\:navbar-end {
       gap: 0;
     }

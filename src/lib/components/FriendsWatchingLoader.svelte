@@ -111,7 +111,11 @@
 
 <div class="friends-status" aria-live="polite">
   {#if lookup.status === 'loading'}
-    <span>Loading friends watching…</span>
+    <!--
+      Said but not shown: a line here would push the list down as the page loads, then pull it back
+      up once the lookup ends. Friends then appear on the covers, which moves nothing
+    -->
+    <span class="tw:sr-only">Loading friends watching…</span>
   {:else if lookup.status === 'unavailable'}
     <span>{lookup.message}</span>
     <button
