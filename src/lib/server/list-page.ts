@@ -19,10 +19,45 @@ import {
 import { MyAnimeListApi } from '#lib/server/myanimelist.js';
 import { takeClientLimit } from '#lib/server/rate-limit.js';
 import { clearMalSession, clearSession } from '#lib/server/session.js';
-import type { UserAnimeList } from '#lib/types/api.js';
+import type { PlanningPageData, UserAnimeList } from '#lib/types/api.js';
 import { DOMAIN_NAMES, isDomain, type Domain } from '#lib/types/domain.js';
 
 type ListEvent = { locals: App.Locals; cookies: Cookies };
+
+/** The list's service; any other is turned away, and so is MyAnimeList without this site's client */
+function listDomain(domain: string): Domain {
+  if (!isDomain(domain) || (domain === 'myanimelist' && !MAL_ENABLED)) {
+    error(404, `Unknown domain: ${domain}`);
+  }
+  return domain;
+}
+
+/**
+ * Throws what a failed read means for the viewer: the list not existing or not being shared, or,
+ * when `busyIsError`, the service being busy. Returns how many seconds to wait when it was busy,
+ * and null for any other error, which the caller handles
+ */
+function checkReadError(
+  err: unknown,
+  domain: Domain,
+  username: string,
+  locals: App.Locals,
+  busyIsError: boolean
+): number | null {
+  const rateLimited = err instanceof AniListRateLimitError || err instanceof MalRateLimitError;
+  if (rateLimited) {
+    locals.retryAfter = Math.max(locals.retryAfter ?? 0, err.retryAfter);
+    if (busyIsError)
+      error(429, { message: err.message, retryAt: Date.now() + err.retryAfter * 1000 });
+  }
+  if (err instanceof AniListNotFoundError || err instanceof MalNotFoundError) {
+    error(404, `There's no ${DOMAIN_NAMES[domain]} user named ${username}`);
+  }
+  if (err instanceof MalForbiddenError) {
+    error(403, `MyAnimeList didn't share ${username}'s list. It may be private.`);
+  }
+  return rateLimited ? err.retryAfter : null;
+}
 
 export async function loadAnimePage({
   params,
@@ -39,11 +74,7 @@ export async function loadAnimePage({
   getClientAddress: () => string;
   url?: URL;
 }) {
-  // MyAnimeList lists need this site's MyAnimeList client
-  if (!isDomain(params.domain) || (params.domain === 'myanimelist' && !MAL_ENABLED)) {
-    error(404, `Unknown domain: ${params.domain}`);
-  }
-  const domain = params.domain;
+  const domain = listDomain(params.domain);
   // Read on every load, so the list is rendered already filtered
   const hiddenSections = parseHiddenSections(cookies.get(HIDDEN_SECTIONS_COOKIE));
 
@@ -58,18 +89,7 @@ export async function loadAnimePage({
       url?.searchParams.get('view') !== 'calendar'
     );
   } catch (err) {
-    const rateLimited = err instanceof AniListRateLimitError || err instanceof MalRateLimitError;
-    if (rateLimited) {
-      locals.retryAfter = Math.max(locals.retryAfter ?? 0, err.retryAfter);
-      if (!isDataRequest)
-        error(429, { message: err.message, retryAt: Date.now() + err.retryAfter * 1000 });
-    }
-    if (err instanceof AniListNotFoundError || err instanceof MalNotFoundError) {
-      error(404, `There's no ${DOMAIN_NAMES[domain]} user named ${params.username}`);
-    }
-    if (err instanceof MalForbiddenError) {
-      error(403, `MyAnimeList didn't share ${params.username}'s list. It may be private.`);
-    }
+    const retryAfter = checkReadError(err, domain, params.username, locals, !isDataRequest);
     // In the browser, the page may already show this list, reloading it by itself or after a
     // save. It keeps showing it then (see +page.ts), rather than an error the viewer didn't ask for
     if (!isDataRequest) throw err;
@@ -78,7 +98,7 @@ export async function loadAnimePage({
       unavailable: true as const,
       username: params.username,
       hiddenSections,
-      retryAt: rateLimited ? Date.now() + err.retryAfter * 1000 : 0,
+      retryAt: retryAfter === null ? 0 : Date.now() + retryAfter * 1000,
     };
   }
   const { userId, username, avatarUrl, scoreFormat, animeList } = userAnimeList;
@@ -106,40 +126,102 @@ export async function loadAnimePage({
   };
 }
 
+/**
+ * The anime someone plans to watch that are out, for the planning page, most recently planned
+ * first. Those that haven't aired yet can't be started, so they're only counted, and not sent.
+ * Unlike the watching list, it's always read whole and at once, and there's no earlier copy to
+ * fall back on, so a busy service is an error
+ */
+export async function loadPlanningPage({
+  params,
+  locals,
+  cookies,
+  getClientAddress,
+}: {
+  params: { username: string; domain: string };
+  locals: App.Locals;
+  cookies: Cookies;
+  getClientAddress: () => string;
+}): Promise<PlanningPageData> {
+  const domain = listDomain(params.domain);
+  const { username } = params;
+  let list;
+  try {
+    const limit = await takeClientLimit(getClientAddress(), 'read');
+    if (!limit.allowed) throw new AniListRateLimitError(limit.retryAfter);
+    list = await readList(domain, username, { locals, cookies }, (api) =>
+      api.getPlannedAnime(username)
+    );
+  } catch (err) {
+    checkReadError(err, domain, username, locals, true);
+    throw err;
+  }
+  const viewer = domain === 'anilist' ? locals.session : locals.malSession;
+  const name = encodeURIComponent(list.username);
+  const planned = withoutHiddenMature(list.planned, locals.preferences.showMature);
+  const outNow = planned
+    .filter((anime) => anime.status !== 'NOT_YET_RELEASED')
+    .sort((a, b) => (b.addedAt ?? 0) - (a.addedAt ?? 0))
+    // Only the order is shown of when each was planned
+    .map(({ addedAt: _addedAt, ...anime }) => anime);
+  return {
+    domain,
+    username: list.username,
+    canEdit: list.userId !== null && viewer?.user.id === list.userId,
+    planned: outNow,
+    upcoming: planned.length - outNow.length,
+    userProfileLink:
+      domain === 'anilist'
+        ? `https://anilist.co/user/${name}/animelist/Planning`
+        : `https://myanimelist.net/animelist/${name}?status=6`,
+  };
+}
+
 function getUserAnimeList(
   domain: Domain,
   username: string,
   event: ListEvent,
   enrichAirings: boolean
 ): Promise<UserAnimeList> {
-  return domain === 'anilist'
-    ? getAniListList(username, event, enrichAirings)
-    : getMalList(username, event, enrichAirings);
+  return readList(domain, username, event, (api) => api.getUserAnimeList(username, enrichAirings));
 }
 
-async function getAniListList(
+/** Reads one of someone's lists, as the signed-in viewer when that shows them more */
+function readList<T>(
+  domain: Domain,
   username: string,
+  event: ListEvent,
+  read: (api: AniListApi | MyAnimeListApi) => Promise<T>
+): Promise<T> {
+  return domain === 'anilist' ? readAniList(event, read) : readMal(username, event, read);
+}
+
+async function readAniList<T>(
   { locals, cookies }: ListEvent,
-  enrichAirings: boolean
-) {
+  read: (api: AniListApi) => Promise<T>
+): Promise<T> {
   try {
-    return await new AniListApi(locals.session?.token).getUserAnimeList(username, enrichAirings);
+    return await read(new AniListApi(locals.session?.token));
   } catch (err) {
     if (!(err instanceof AniListTokenError) || !locals.session) throw err;
     // The signed-in user's token expired: sign them out and read the public list instead
     clearSession(cookies);
     locals.session = null;
-    return await new AniListApi().getUserAnimeList(username, enrichAirings);
+    return await read(new AniListApi());
   }
 }
 
-async function getMalList(username: string, event: ListEvent, enrichAirings: boolean) {
+async function readMal<T>(
+  username: string,
+  event: ListEvent,
+  read: (api: MyAnimeListApi) => Promise<T>
+): Promise<T> {
   const session = event.locals.malSession;
   // Their own list is read with their token, which shows it to them even when it's private
   if (session && session.user.name.toLowerCase() === username.toLowerCase()) {
     try {
       return await withMalToken(event, (token) =>
-        new MyAnimeListApi({ token, owner: session.user }).getUserAnimeList(username, enrichAirings)
+        read(new MyAnimeListApi({ token, owner: session.user }))
       );
     } catch (err) {
       if (!(err instanceof MalTokenError)) throw err;
@@ -149,5 +231,5 @@ async function getMalList(username: string, event: ListEvent, enrichAirings: boo
     }
   }
   if (!isUserName(username)) throw new MalNotFoundError(`Not a MyAnimeList name: ${username}`);
-  return await new MyAnimeListApi().getUserAnimeList(username, enrichAirings);
+  return await read(new MyAnimeListApi());
 }

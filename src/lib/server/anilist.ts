@@ -2,12 +2,14 @@ import { NEW_EPISODE_MS } from '#lib/anime.js';
 import {
   getAiredEpisodes,
   getLatestAirings,
+  getPlanningEntries,
   getWatchingEntries,
   type AniListMedia,
+  type AniListPlannedEntry,
 } from '#lib/server/anilist-client.js';
 import type { RequestPriority } from '#lib/server/rate-limit.js';
 import type { Anime } from '#lib/types/anime.js';
-import type { Api, UserAnimeList } from '#lib/types/api.js';
+import type { Api, PlannedList, UserAnimeList } from '#lib/types/api.js';
 
 export class AniListApi implements Api {
   /** The signed-in user's token, so their own private entries are visible to them */
@@ -41,6 +43,26 @@ export class AniListApi implements Api {
       animeList: enrichAirings ? await withRecentAirings(animeList) : animeList,
     };
   }
+
+  async getPlannedAnime(username: string): Promise<PlannedList> {
+    const { userId, userName, entries } = await getPlanningEntries(username, this.token);
+    return { userId, username: userName, planned: entries.map(toPlannedAnime) };
+  }
+}
+
+function toPlannedAnime({ media, updatedAt }: AniListPlannedEntry): PlannedList['planned'][number] {
+  return {
+    id: media.id,
+    malId: media.idMal ?? null,
+    title: media.title.romaji,
+    englishTitle: media.title.english,
+    coverUrl: media.coverImage?.medium ?? null,
+    isAdult: media.isAdult,
+    status: media.status,
+    episodes: media.episodes ?? null,
+    meanScore: media.meanScore,
+    addedAt: updatedAt ? updatedAt * 1000 : null,
+  };
 }
 
 /**

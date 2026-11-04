@@ -38,3 +38,25 @@ export type Anime = {
   endDate: Date;
   numberEpisodes: number;
 };
+
+/**
+ * An anime on someone's "Planning" list (AniList) or "Plan to Watch" list (MyAnimeList). Only what
+ * a poster and its details need: these lists run to hundreds of anime, all read at once
+ */
+export type PlannedAnime = {
+  /**
+   * AniList's id; null on a MyAnimeList list, as matching a whole plan list to AniList would cost
+   * a request per 50 anime
+   */
+  id: number | null;
+  malId: number | null;
+  title: string;
+  englishTitle: string | null;
+  coverUrl: string | null;
+  isAdult: boolean;
+  status: AiringStatus;
+  /** How many episodes it has or will have; null until that's known */
+  episodes: number | null;
+  /** The average of all users' scores, out of 100; null until enough have scored it */
+  meanScore: number | null;
+};

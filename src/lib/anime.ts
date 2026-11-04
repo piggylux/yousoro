@@ -183,8 +183,12 @@ export type SearchIndex = {
   squashed: string;
 };
 
-export function searchIndex(anime: Anime): SearchIndex {
-  const words = foldText([anime.title, anime.englishTitle ?? '', ...anime.otherTitles].join(' '));
+export function searchIndex(
+  anime: Pick<Anime, 'title' | 'englishTitle'> & { otherTitles?: string[] }
+): SearchIndex {
+  const words = foldText(
+    [anime.title, anime.englishTitle ?? '', ...(anime.otherTitles ?? [])].join(' ')
+  );
   return { words, squashed: words.replaceAll(' ', '') };
 }
 

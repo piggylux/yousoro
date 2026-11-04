@@ -1,18 +1,14 @@
-import { error, fail, type RequestEvent } from '@sveltejs/kit';
+import { error, fail } from '@sveltejs/kit';
 
-import { AniListTokenError, AniListRateLimitError, saveEntry } from '#lib/server/anilist-client.js';
+import { saveEntry } from '#lib/server/anilist-client.js';
 import { parseEntryUpdate } from '#lib/server/entry-update.js';
 import { copyToLinkedAccount } from '#lib/server/linked-save.js';
 import { loadAnimePage } from '#lib/server/list-page.js';
 import { withMalToken } from '#lib/server/myanimelist-auth.js';
-import {
-  MalRateLimitError,
-  MalTokenError,
-  saveEntry as saveMalEntry,
-} from '#lib/server/myanimelist-client.js';
+import { saveEntry as saveMalEntry } from '#lib/server/myanimelist-client.js';
+import { updateOwnList } from '#lib/server/own-list.js';
 import { takeClientLimit } from '#lib/server/rate-limit.js';
-import { clearMalSession, clearSession } from '#lib/server/session.js';
-import { DOMAIN_NAMES, isDomain, type Domain } from '#lib/types/domain.js';
+import { isDomain } from '#lib/types/domain.js';
 
 import type { Actions } from './$types';
 
@@ -22,36 +18,6 @@ export const load: import('./$types').PageServerLoad = async (event) => {
   if (event.isDataRequest) return { deferred: true as const, username: event.params.username };
   return loadAnimePage(event);
 };
-
-/**
- * Runs an update on the signed-in user's own list on the page's service, whatever list the page
- * shows, and turns what can go wrong into a message for the card
- */
-async function updateOwnList<T>(
-  { locals, cookies }: Pick<RequestEvent, 'locals' | 'cookies'>,
-  domain: Domain,
-  update: () => Promise<T>
-) {
-  const service = DOMAIN_NAMES[domain];
-  if (!(domain === 'anilist' ? locals.session : locals.malSession)) {
-    return fail(401, { message: `Sign in with ${service} to update your list` });
-  }
-  try {
-    return await update();
-  } catch (err) {
-    if (err instanceof AniListRateLimitError || err instanceof MalRateLimitError) {
-      locals.retryAfter = Math.max(locals.retryAfter ?? 0, err.retryAfter);
-      return fail(429, { message: err.message });
-    }
-    console.error(err);
-    if (err instanceof AniListTokenError || err instanceof MalTokenError) {
-      if (domain === 'anilist') clearSession(cookies);
-      else clearMalSession(cookies);
-      return fail(401, { message: `Your ${service} sign-in expired, please sign in again` });
-    }
-    return fail(502, { message: `${service} rejected the update, please try again` });
-  }
-}
 
 export const actions: Actions = {
   /**

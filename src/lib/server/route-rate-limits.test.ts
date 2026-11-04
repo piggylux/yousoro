@@ -7,6 +7,8 @@ vi.mock('$app/env', () => ({ browser: true, building: false }));
 
 let page: typeof import('../../routes/user/[domain]/[username]/+page.server.js');
 let friends: typeof import('../../routes/user/[domain]/[username]/friends/+page.server.js');
+let planning: typeof import('../../routes/user/[domain]/[username]/planning/+page.server.js');
+let readPlanning: (typeof import('./list-page.js'))['loadPlanningPage'];
 let limits: typeof import('./rate-limit.js');
 let readPage: (typeof import('./list-page.js'))['loadAnimePage'];
 let address: string;
@@ -17,7 +19,8 @@ beforeEach(async () => {
   vi.resetModules();
   address = `fixture-${++fixtureNumber}`;
   page = await import('../../routes/user/[domain]/[username]/+page.server.js');
-  ({ loadAnimePage: readPage } = await import('./list-page.js'));
+  ({ loadAnimePage: readPage, loadPlanningPage: readPlanning } = await import('./list-page.js'));
+  planning = await import('../../routes/user/[domain]/[username]/planning/+page.server.js');
   friends = await import('../../routes/user/[domain]/[username]/friends/+page.server.js');
   limits = await import('./rate-limit.js');
   vi.stubGlobal(
@@ -61,6 +64,24 @@ function event(isDataRequest = false) {
 }
 
 describe('route rate limits', () => {
+  it('charges a planning read one read unit and a start one write, as their own pages do', async () => {
+    await limits.takeClientLimit(address, 'read', 59);
+    expect(await readPlanning(event())).toMatchObject({ canEdit: true, planned: [] });
+    await expect(readPlanning(event())).rejects.toMatchObject({ status: 429 });
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    await limits.takeClientLimit(address, 'write', 20);
+    const request = event();
+    const startWatching = planning.actions.startWatching!;
+    expect(
+      await startWatching(request as unknown as Parameters<typeof startWatching>[0])
+    ).toMatchObject({
+      status: 429,
+    });
+    expect(request.locals.retryAfter).toBeGreaterThan(0);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   it('defers navigation reads without spending an upstream or client-read slot', async () => {
     await limits.takeClientLimit(address, 'read', 60);
     expect(await page.load(event(true) as Parameters<typeof page.load>[0])).toEqual({

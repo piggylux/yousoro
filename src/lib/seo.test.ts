@@ -46,6 +46,19 @@ describe('search metadata', () => {
     );
   });
 
+  it('names a planning list on either service, and keeps it out of search results', () => {
+    for (const [domain, service] of [
+      ['anilist', 'AniList'],
+      ['myanimelist', 'MyAnimeList'],
+    ]) {
+      const seo = getPageSeo(new URL(`${SITE_ORIGIN}/user/${domain}/ShowFan/planning`));
+      expect(seo.title).toBe("ShowFan's Planning List | Yousoro");
+      expect(seo.description).toBe(`The anime ShowFan plans to watch on ${service}.`);
+      expect(seo.canonical).toBeUndefined();
+      expect(seo.noindex).toBe(true);
+    }
+  });
+
   it('uses AniList’s resolved username so alternate case and URL encodings share one canonical', () => {
     for (const path of [
       '/user/anilist/showfan',
