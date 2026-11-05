@@ -352,7 +352,15 @@ describe('getPlanToWatchEntries', () => {
     expect(url.searchParams.get('status')).toBe('plan_to_watch');
     expect(url.searchParams.get('limit')).toBe('1000');
     expect(url.searchParams.get('fields')?.split(',')).toEqual(
-      expect.arrayContaining(['list_status', 'num_episodes', 'status', 'mean'])
+      expect.arrayContaining([
+        'list_status',
+        'num_episodes',
+        'status',
+        'mean',
+        // The genre filter and the year each row shows
+        'genres',
+        'start_season',
+      ])
     );
 
     vi.mocked(Date.now).mockReturnValue(now + 5 * 60 * 1000);

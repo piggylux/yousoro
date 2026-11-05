@@ -84,10 +84,18 @@ function planned(
     isAdult = false,
     status = 'FINISHED',
     updatedAt = 1_700_000_000,
+    // A higher id airs later by default, so a lower-numbered prequel is the earlier part;
+    // a null year stands for AniList sending no start date at all
+    year = 2000 + id,
+    prequels = [],
+    sequels = [],
   }: Partial<{
     isAdult: boolean;
     status: AiringStatus;
     updatedAt: number;
+    year: number | null;
+    prequels: number[];
+    sequels: number[];
   }> = {}
 ) {
   return {
@@ -101,9 +109,36 @@ function planned(
       coverImage: { medium: `https://s4.anilist.co/${id}.jpg` },
       isAdult,
       meanScore: 80,
+      genres: ['Drama'],
+      startDate: year === null ? null : { year, month: 4, day: 1 },
+      relations: {
+        edges: [
+          ...prequels.map((other) => ({ relationType: 'PREQUEL', node: related(other) })),
+          ...sequels.map((other) => ({ relationType: 'SEQUEL', node: related(other) })),
+        ],
+      },
     },
   };
 }
+
+/** An anime another links to, with what AniList sends of it: an aired anime by default */
+function related(
+  id: number,
+  changes: Partial<{ status: AiringStatus; isAdult: boolean; title: { romaji: string } }> = {}
+) {
+  return {
+    id,
+    type: 'ANIME' as const,
+    status: 'FINISHED' as AiringStatus,
+    isAdult: false,
+    title: { romaji: `Anime ${id}` },
+    ...changes,
+  };
+}
+
+/** What each anime on the page says it is still waiting on, by AniList id */
+const prequelsById = (data: { planned: { id: number; prequels: number[] }[] }) =>
+  Object.fromEntries(data.planned.map(({ id, prequels }) => [id, prequels]));
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -137,6 +172,10 @@ describe('planning list', () => {
           status: 'FINISHED',
           episodes: 12,
           meanScore: 80,
+          year: 2001,
+          genres: ['Drama'],
+          prequels: [],
+          sequels: [],
         },
       ],
       upcoming: 0,
@@ -190,9 +229,108 @@ describe('planning list', () => {
     expect(getMediaByMalIds).not.toHaveBeenCalled();
     expect(data).toMatchObject({
       canEdit: true,
-      planned: [{ id: null, malId: 5114 }],
+      planned: [{ id: null, malId: 5114, prequels: [] }],
       userProfileLink: 'https://myanimelist.net/animelist/Fixture?status=6',
     });
+  });
+
+  it('says which earlier parts a sequel is still waiting on, by airing order', async () => {
+    vi.mocked(getPlanningEntries).mockResolvedValue({
+      userId: 12,
+      userName: 'Fixture',
+      entries: [
+        planned(1, { sequels: [2] }),
+        // Anime 3 is a prequel AniList knows by story, made after what it precedes, as Fate/Zero was
+        planned(2, { prequels: [1, 3] }),
+        planned(3, { year: 2011, sequels: [2] }),
+        // A prequel that was never planned, so there is nothing on this page to start first
+        planned(4, { prequels: [99] }),
+      ],
+    });
+
+    const data = await read(event('anilist', { session: aniList }));
+
+    expect(prequelsById(data)).toEqual({ 1: [], 2: [1], 3: [], 4: [] });
+  });
+
+  it('leaves out an earlier part nobody can start from this page', async () => {
+    vi.mocked(getPlanningEntries).mockResolvedValue({
+      userId: 12,
+      userName: 'Fixture',
+      entries: [
+        planned(1, { isAdult: true, sequels: [2] }),
+        planned(2, { prequels: [1] }),
+        planned(3, { status: 'NOT_YET_RELEASED', sequels: [4] }),
+        planned(4, { prequels: [3] }),
+      ],
+    });
+
+    const data = await read(event('anilist', { session: aniList }));
+
+    expect(prequelsById(data)).toEqual({ 2: [], 4: [] });
+  });
+
+  it('leaves an anime ungrouped when AniList is missing the dates or the relations', async () => {
+    vi.mocked(getPlanningEntries).mockResolvedValue({
+      userId: 12,
+      userName: 'Fixture',
+      entries: [
+        planned(1, { sequels: [2] }),
+        // Undated, so there is no telling whether it comes before the anime that continues it
+        planned(2, { year: null, sequels: [3] }),
+        planned(3, { prequels: [2] }),
+        // Undated itself, so nothing can be shown to come before it
+        planned(4, { year: null, prequels: [1] }),
+        // AniList sent no relations at all, which must cost the grouping rather than the page
+        { ...planned(5), media: { ...planned(5).media, relations: null } },
+      ],
+    });
+
+    const data = await read(event('anilist', { session: aniList }));
+
+    expect(prequelsById(data)).toEqual({ 1: [], 2: [], 3: [], 4: [], 5: [] });
+  });
+
+  it('says what follows an anime that the page leaves out, from the same single read', async () => {
+    const first = planned(1);
+    vi.mocked(getPlanningEntries).mockResolvedValue({
+      userId: 12,
+      userName: 'Fixture',
+      entries: [
+        {
+          ...first,
+          media: {
+            ...first.media,
+            relations: {
+              edges: [
+                // Listed itself, as a part of the series
+                { relationType: 'SEQUEL', node: related(2) },
+                // Planned, but only counted until it airs
+                { relationType: 'SEQUEL', node: related(3, { status: 'NOT_YET_RELEASED' }) },
+                {
+                  relationType: 'SEQUEL',
+                  node: related(50, { status: 'RELEASING', title: { romaji: 'Never planned' } }),
+                },
+                // Hidden by the viewer's mature setting
+                { relationType: 'SEQUEL', node: related(51, { isAdult: true }) },
+                // AniList can link one twice
+                { relationType: 'SEQUEL', node: related(50) },
+              ],
+            },
+          },
+        },
+        planned(2, { prequels: [1] }),
+        planned(3, { status: 'NOT_YET_RELEASED', prequels: [1] }),
+      ],
+    });
+
+    const data = await read(event('anilist', { session: aniList }));
+
+    expect(data.planned.find((anime: { id: number }) => anime.id === 1)?.sequels).toEqual([
+      { id: 3, title: 'Anime 3', status: 'NOT_YET_RELEASED', planned: true },
+      { id: 50, title: 'Never planned', status: 'RELEASING', planned: false },
+    ]);
+    expect(getPlanningEntries).toHaveBeenCalledTimes(1);
   });
 
   it("says when there's no such user", async () => {

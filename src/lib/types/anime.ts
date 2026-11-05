@@ -59,4 +59,30 @@ export type PlannedAnime = {
   episodes: number | null;
   /** The average of all users' scores, out of 100; null until enough have scored it */
   meanScore: number | null;
+  /** The year it started airing; null when that's unknown */
+  year: number | null;
+  /** As the list's service names them, which differ between AniList and MyAnimeList */
+  genres: string[];
+  /**
+   * The anime this one continues that are on the same list and started airing before it, by
+   * AniList's id: the page puts it after them in their series, and offers to start it once they
+   * are. Airing order rather than story order, as a prequel made later, such as Fate/Zero, is
+   * watched after what it precedes. Always empty on a MyAnimeList list, which has no AniList ids
+   */
+  prequels: number[];
+  /**
+   * The anime that continue this one but aren't listed on the page, so it can say what comes
+   * after it: not planned, or not aired yet. Always empty on a MyAnimeList list, like `prequels`
+   */
+  sequels: PlannedSequel[];
+};
+
+/** A sequel of a planned anime that isn't listed: only what the plan list's single read gives */
+export type PlannedSequel = {
+  /** AniList's id */
+  id: number;
+  title: string;
+  status: AiringStatus;
+  /** On the plan list, only not aired yet, so it's counted rather than listed */
+  planned: boolean;
 };

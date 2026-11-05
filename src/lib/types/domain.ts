@@ -15,3 +15,13 @@ export const DOMAIN_NAMES: Record<Domain, string> = {
 export function listPath(domain: Domain, username: string): string {
   return `/user/${domain}/${encodeURIComponent(username)}`;
 }
+
+/** An anime's page on the list's own service: MyAnimeList's when the list is there and knows it */
+export function animePageUrl(
+  domain: Domain,
+  { id, malId }: { id: number | null; malId: number | null }
+): string {
+  return domain === 'myanimelist' && malId !== null
+    ? `https://myanimelist.net/anime/${malId}`
+    : `https://anilist.co/anime/${id}`;
+}

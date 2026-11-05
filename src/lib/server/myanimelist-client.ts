@@ -51,6 +51,9 @@ export type MalEntry = {
     /** The average score, out of 10, when enough people have scored it */
     mean?: number;
     alternative_titles?: { en?: string };
+    /** Genres, themes and demographics together, as MyAnimeList sends them */
+    genres?: { id: number; name: string }[];
+    start_season?: { year: number; season: string };
   };
   list_status: MalListStatusData;
 };
@@ -219,7 +222,7 @@ export async function getPlanToWatchEntries(userName: string, token?: string): P
   }
   // One spelling, so simultaneous reads of the list share one request
   const path = `${API_URL}/users/${token ? '@me' : encodeURIComponent(key)}/animelist`;
-  const fields = 'list_status,nsfw,num_episodes,status,mean,alternative_titles';
+  const fields = 'list_status,nsfw,num_episodes,status,mean,alternative_titles,genres,start_season';
   const entries = await readPages(
     `${path}?status=plan_to_watch&limit=1000&fields=${fields}&nsfw=true`,
     token,

@@ -1,13 +1,21 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  countAnime,
   describePlanned,
   distinctEnglishTitle,
   getRememberedPlanned,
+  groupSeries,
   markStarted,
+  pickAnother,
+  PLAN_FILTERS,
+  type PlannedSeries,
   rememberPlanned,
+  seriesGenres,
+  seriesSteps,
+  sortSeries,
 } from '#lib/planning.js';
-import type { PlannedAnime } from '#lib/types/anime.js';
+import type { PlannedAnime, PlannedSequel } from '#lib/types/anime.js';
 import type { PlanningPageData } from '#lib/types/api.js';
 
 function planned(id: number, changes: Partial<PlannedAnime> = {}): PlannedAnime {
@@ -21,9 +29,16 @@ function planned(id: number, changes: Partial<PlannedAnime> = {}): PlannedAnime 
     status: 'FINISHED',
     episodes: 12,
     meanScore: null,
+    year: 2000 + id,
+    genres: [],
+    prequels: [],
+    sequels: [],
     ...changes,
   };
 }
+
+/** Each series by the AniList ids of its parts, in the order to watch them */
+const ids = (series: PlannedSeries[]) => series.map(({ parts }) => parts.map(({ id }) => id));
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -50,8 +65,168 @@ describe('describePlanned', () => {
     [{ status: 'RELEASING', episodes: null }, 'Airing'],
     [{ status: 'HIATUS' }, 'On hiatus'],
     [{ status: 'CANCELLED' }, 'Cancelled'],
+    [{ status: 'NOT_YET_RELEASED', episodes: null }, 'Not aired yet'],
   ] as [Partial<PlannedAnime>, string][])('describes %o as "%s"', (changes, text) => {
     expect(describePlanned(planned(1, changes))).toBe(text);
+  });
+});
+
+describe('groupSeries', () => {
+  it('keeps an anime that continues nothing on the list as a series of its own', () => {
+    expect(ids(groupSeries([planned(3), planned(1), planned(2)]))).toEqual([[3], [1], [2]]);
+  });
+
+  it('puts each series where its first part is, with the later parts after it', () => {
+    // Planned most recently first: the third season, then something else, then the first two
+    const list = [
+      planned(3, { prequels: [2] }),
+      planned(9),
+      planned(1),
+      planned(2, { prequels: [1] }),
+    ];
+
+    expect(ids(groupSeries(list))).toEqual([[9], [1, 2, 3]]);
+  });
+
+  it('follows on from every prequel, and otherwise goes in airing order', () => {
+    // A movie and a second season both follow the first; a finale follows both
+    const list = [
+      planned(4, { prequels: [2, 3] }),
+      planned(3, { prequels: [1], year: 2003 }),
+      planned(2, { prequels: [1], year: 2002 }),
+      planned(1),
+    ];
+
+    expect(ids(groupSeries(list))).toEqual([[1, 2, 3, 4]]);
+  });
+
+  it('joins two first parts that lead to the same sequel', () => {
+    const list = [planned(3, { prequels: [1, 2] }), planned(2), planned(1)];
+
+    expect(ids(groupSeries(list))).toEqual([[1, 2, 3]]);
+  });
+
+  it('keeps every anime on a MyAnimeList list, which has no ids to join them on', () => {
+    const list = [planned(1, { id: null, malId: 1 }), planned(2, { id: null, malId: 2 })];
+
+    expect(groupSeries(list).map(({ parts }) => parts.map(({ malId }) => malId))).toEqual([
+      [1],
+      [2],
+    ]);
+  });
+});
+
+describe('seriesSteps', () => {
+  const sequel = (id: number, changes: Partial<PlannedSequel> = {}): PlannedSequel => ({
+    id,
+    title: `Anime ${id}`,
+    status: 'FINISHED',
+    planned: false,
+    ...changes,
+  });
+  /** Each step by its AniList id, a sequel the page doesn't list marked with a star */
+  const steps = (list: PlannedAnime[]) =>
+    groupSeries(list).map((series) =>
+      seriesSteps(series).map(({ kind, anime }) => (kind === 'sequel' ? `${anime.id}*` : anime.id))
+    );
+
+  it('says what follows an anime planned on its own', () => {
+    const list = [planned(1, { sequels: [sequel(2), sequel(3, { planned: true })] }), planned(9)];
+
+    expect(steps(list)).toEqual([['2*', '3*'], []]);
+  });
+
+  it('puts each sequel after the part it continues, among the parts on the list', () => {
+    // The first season leads to a movie nobody planned; the second to a third, also not planned
+    const list = [
+      planned(2, { prequels: [1], sequels: [sequel(30)] }),
+      planned(1, { sequels: [sequel(10)] }),
+    ];
+
+    expect(steps(list)).toEqual([['10*', 2, '30*']]);
+  });
+
+  it('shows a sequel two parts lead to once, after the later of them', () => {
+    const list = [
+      planned(1, { sequels: [sequel(5)] }),
+      planned(2, { prequels: [1], sequels: [sequel(5)] }),
+    ];
+
+    expect(steps(list)).toEqual([[2, '5*']]);
+  });
+});
+
+describe('sortSeries', () => {
+  const series = groupSeries([
+    planned(1, { title: 'Mushishi', meanScore: 87, episodes: 26 }),
+    planned(2, { title: 'Hyouka', meanScore: null, episodes: null }),
+    planned(3, { title: 'Aria', meanScore: 82, episodes: 13 }),
+    planned(4, { title: 'Monster 2', meanScore: 87, episodes: 1 }),
+    planned(5, { title: 'Monster 10', meanScore: 70, episodes: 74, prequels: [4] }),
+  ]);
+
+  it('keeps the order they were planned in', () => {
+    expect(ids(sortSeries(series, 'planned'))).toEqual([[1], [2], [3], [4, 5]]);
+  });
+
+  it('puts the best rated first, by the part to start, and unrated ones last', () => {
+    expect(ids(sortSeries(series, 'score'))).toEqual([[1], [4, 5], [3], [2]]);
+  });
+
+  it('puts the shortest first, and ones of unknown length last', () => {
+    expect(ids(sortSeries(series, 'length'))).toEqual([[4, 5], [3], [1], [2]]);
+  });
+
+  it('sorts titles as people read them, numbers by their value', () => {
+    expect(ids(sortSeries(series, 'title'))).toEqual([[3], [2], [4, 5], [1]]);
+  });
+});
+
+describe('PLAN_FILTERS', () => {
+  it('finds anime that are airing', () => {
+    expect(PLAN_FILTERS.airing.matches(planned(1, { status: 'RELEASING' }))).toBe(true);
+    expect(PLAN_FILTERS.airing.matches(planned(1, { status: 'HIATUS' }))).toBe(false);
+  });
+
+  it('finds anime of a cour or less, but not ones of unknown length', () => {
+    expect(PLAN_FILTERS.short.matches(planned(1, { episodes: 1 }))).toBe(true);
+    expect(PLAN_FILTERS.short.matches(planned(1, { episodes: 13 }))).toBe(true);
+    expect(PLAN_FILTERS.short.matches(planned(1, { episodes: 24 }))).toBe(false);
+    expect(PLAN_FILTERS.short.matches(planned(1, { episodes: null }))).toBe(false);
+  });
+});
+
+describe('countAnime', () => {
+  it('counts every planned anime of the series, not the series', () => {
+    const series = groupSeries([planned(1), planned(2, { prequels: [1] }), planned(3)]);
+
+    expect(series).toHaveLength(2);
+    expect(countAnime(series)).toBe(3);
+  });
+});
+
+describe('seriesGenres', () => {
+  it('counts the anime each genre shows, by the part each series starts with, A to Z', () => {
+    const series = groupSeries([
+      planned(1, { genres: ['Drama', 'Action'] }),
+      planned(2, { genres: ['Comedy'], prequels: [1] }),
+      planned(3, { genres: ['Action'] }),
+    ]);
+
+    // Anime 2 continues anime 1, so choosing either genre of anime 1 shows both
+    expect(seriesGenres(series)).toEqual([
+      { genre: 'Action', count: 3 },
+      { genre: 'Drama', count: 2 },
+    ]);
+  });
+});
+
+describe('pickAnother', () => {
+  it('picks at random, but not the last pick again while there are others', () => {
+    expect(pickAnother(['a', 'b', 'c'], null, () => 0.99)).toBe('c');
+    expect(pickAnother(['a', 'b', 'c'], 'a', () => 0)).toBe('b');
+    expect(pickAnother(['a'], 'a', () => 0)).toBe('a');
+    expect(pickAnother([], null)).toBeNull();
   });
 });
 

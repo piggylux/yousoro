@@ -12,6 +12,7 @@
     getListSection,
     inShownSections,
     LIST_SECTION_LABELS,
+    LIST_SECTIONS,
     type ListSection,
     matchesSearch,
     searchIndex,
@@ -38,7 +39,7 @@
   import { togetherPath } from '#lib/together.js';
   import type { Anime } from '#lib/types/anime.js';
   import type { AnimePageData, LinkedFailure } from '#lib/types/api.js';
-  import { DOMAIN_NAMES, listPath } from '#lib/types/domain.js';
+  import { animePageUrl, DOMAIN_NAMES, listPath } from '#lib/types/domain.js';
   import type { FriendWatching, FriendWatchingResult } from '#lib/types/friend-watching.js';
   import { countColumns, getVisibleRange, type VisibleRange } from '#lib/virtual-grid.js';
   import { wrappedPath, wrappedYear } from '#lib/wrapped.js';
@@ -102,6 +103,17 @@
    */
   let hiddenSections = $derived(data.hiddenSections);
   const sectionCounts = $derived(countBySection(data.watchingList));
+  // Each chip shows or hides one section. Empty ones have nothing to filter, unless they're hidden
+  const sectionChips = $derived(
+    LIST_SECTIONS.filter(
+      (section) => sectionCounts[section] > 0 || hiddenSections.includes(section)
+    ).map((section) => ({
+      key: section,
+      label: LIST_SECTION_LABELS[section],
+      count: sectionCounts[section],
+      pressed: !hiddenSections.includes(section),
+    }))
+  );
   /*
    * The search narrows the shown sections further; it's not remembered, unlike the filters. The
    * titles are folded once per list, so each keystroke only compares them
@@ -337,10 +349,7 @@
   }
 
   // MyAnimeList lists link to MyAnimeList, when AniList knows the anime's id there
-  const animeLinkFn = (anime: Anime) =>
-    !onAniList && anime.malId !== null
-      ? `https://myanimelist.net/anime/${anime.malId}`
-      : `https://anilist.co/anime/${anime.id}/`;
+  const animeLinkFn = (anime: Anime) => animePageUrl(data.domain, anime);
 
   // The "Yousoro!" celebration currently playing; a new one restarts the animation
   let celebration = $state<{ kind: 'caught-up' | 'completed'; title: string; key: number } | null>(
@@ -492,9 +501,9 @@
     {#if data.watchingList.length}
       <ListFilters
         bind:this={filters}
-        counts={sectionCounts}
-        hidden={hiddenSections}
-        onToggle={toggleSection}
+        chips={sectionChips}
+        chipsLabel="Sections to show"
+        onToggle={(key) => toggleSection(key as ListSection)}
         bind:search
       />
     {/if}

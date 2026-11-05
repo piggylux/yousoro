@@ -1,6 +1,6 @@
 import type { ListSection } from '#lib/anime.js';
 import type { ScoreFormat } from '#lib/score.js';
-import type { Anime, PlannedAnime } from '#lib/types/anime.js';
+import type { Anime, PlannedAnime, PlannedSequel } from '#lib/types/anime.js';
 import type { Domain } from '#lib/types/domain.js';
 import type { Preferences } from '#lib/types/preferences.js';
 
@@ -39,10 +39,23 @@ export type PlannedList = {
   /** The username as the service spells it, which may differ in case from the one requested */
   username: string;
   /**
-   * With when the user last changed each entry, usually as they planned it, as Unix time in ms. The
-   * page only needs the order that gives, so it isn't sent
+   * With when the user last changed each entry, usually as they planned it, as Unix time in ms,
+   * when it started airing, every anime it continues and every anime that continues it. None of
+   * the four is sent as it stands: they order the list and become its `prequels` and `sequels`,
+   * which only the page can work out, once the list holds just the anime it shows
    */
-  planned: (PlannedAnime & { addedAt: number | null })[];
+  planned: (Omit<PlannedAnime, 'prequels' | 'sequels'> & {
+    addedAt: number | null;
+    /** The day it started airing, as a sortable YYYYMMDD number; null when that's unknown */
+    startedOn: number | null;
+    /** Every anime it continues, by AniList's id, before they're narrowed to this list */
+    prequelIds: number[];
+    /**
+     * Every anime that continues it, before those the page lists are left out, and mature ones
+     * when the viewer hides them
+     */
+    allSequels: (Omit<PlannedSequel, 'planned'> & { isAdult: boolean })[];
+  })[];
 };
 
 export type PlanningPageData = {

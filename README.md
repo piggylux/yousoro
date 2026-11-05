@@ -11,7 +11,9 @@ shows you're actively watching come first. Once you've watched an episode, mark 
 - **Sign in with AniList or MyAnimeList**: use your existing account to get started.
 - **See what to watch**: check your unwatched episodes at a glance, with active shows first.
 - **Track your progress**: mark episodes as watched in one click and save updates to your list.
-- **Pick what's next**: browse your planning list and start watching any of it in one click.
+- **Pick what's next**: sort and filter your planning list by genre, length or score, with each
+  series under the part to watch first and its sequels shown even when they aren't planned yet. Or
+  let Yousoro pick one. Start watching in one click.
 - **Keep both lists in step**: link your AniList and MyAnimeList accounts in the settings, and every
   episode and score you save goes to both.
 - **Plan your next watch**: see next-episode countdowns and browse four weeks of airing dates in

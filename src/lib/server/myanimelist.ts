@@ -101,6 +101,12 @@ function toPlannedAnime({ node, list_status }: MalEntry): PlannedList['planned']
     episodes: node.num_episodes || null,
     // Out of 10 with two decimals on MyAnimeList, out of 100 like AniList's here
     meanScore: node.mean ? Math.round(node.mean * 10) : null,
+    year: node.start_season?.year ?? null,
+    genres: node.genres?.map(({ name }) => name) ?? [],
     addedAt: Date.parse(list_status.updated_at) || null,
+    // Without AniList ids there is nothing to match prequels or sequels on
+    startedOn: null,
+    prequelIds: [],
+    allSequels: [],
   };
 }

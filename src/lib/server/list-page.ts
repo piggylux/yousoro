@@ -159,11 +159,41 @@ export async function loadPlanningPage({
   const viewer = domain === 'anilist' ? locals.session : locals.malSession;
   const name = encodeURIComponent(list.username);
   const planned = withoutHiddenMature(list.planned, locals.preferences.showMature);
-  const outNow = planned
+  const out = planned
     .filter((anime) => anime.status !== 'NOT_YET_RELEASED')
-    .sort((a, b) => (b.addedAt ?? 0) - (a.addedAt ?? 0))
-    // Only the order is shown of when each was planned
-    .map(({ addedAt: _addedAt, ...anime }) => anime);
+    .sort((a, b) => (b.addedAt ?? 0) - (a.addedAt ?? 0));
+  /*
+   * Prequels are narrowed to this list once it holds only the anime the page shows: one hidden by
+   * the viewer's mature setting, or not aired yet, can't be started, so it never holds up a sequel.
+   * They are compared by airing order rather than story order, as AniList counts a prequel made
+   * later, such as Fate/Zero, as the prequel of what it precedes, and that one is watched first
+   */
+  const airedOn = new Map(
+    out.flatMap((anime) =>
+      anime.id === null || anime.startedOn === null ? [] : [[anime.id, anime.startedOn] as const]
+    )
+  );
+  /*
+   * A sequel the page lists itself is a part of its own, so only the others are said to follow:
+   * ones not planned, and planned ones not aired yet. Mature ones follow the viewer's setting
+   */
+  const listed = new Set(out.map(({ id }) => id));
+  const plannedIds = new Set(planned.map(({ id }) => id));
+  const { showMature } = locals.preferences;
+  // Of when each was planned and started, only the order and the prequels it gives are shown
+  const outNow = out.map(({ addedAt: _addedAt, startedOn, prequelIds, allSequels, ...anime }) => ({
+    ...anime,
+    prequels:
+      startedOn === null
+        ? []
+        : prequelIds.filter((id) => (airedOn.get(id) ?? Infinity) < startedOn),
+    sequels: allSequels
+      .filter(({ id, isAdult }) => !listed.has(id) && (showMature || !isAdult))
+      .map(({ isAdult: _isAdult, ...sequel }) => ({
+        ...sequel,
+        planned: plannedIds.has(sequel.id),
+      })),
+  }));
   return {
     domain,
     username: list.username,

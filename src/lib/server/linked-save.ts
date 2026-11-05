@@ -23,11 +23,11 @@ import { DOMAIN_NAMES, type Domain } from '#lib/types/domain.js';
 /**
  * Copies a save on one service to the user's account on the other, when they're signed in to both:
  * the episode count, status and dates as the save left them, and the score when it changed. A date
- * the save left unset doesn't clear the other's. These are the
- * entry as it now is rather than a change to it, so a copy that failed is made up by the next one.
- * A start from the plan list only copies the status. A save from a MyAnimeList page that didn't know the anime's AniList id looks it up first. The
- * save itself has already succeeded, so this never throws: a failure only comes back as a message
- * for the user
+ * the save left unset doesn't clear the other's. These are the entry as it now is rather than a
+ * change to it, so a copy that failed is made up by the next one. A start from the plan list only
+ * copies the status. A save from a MyAnimeList page that didn't know the anime's AniList id looks
+ * it up first. The save itself has already succeeded, so this never throws: a failure only comes
+ * back as a message for the user
  */
 export async function copyToLinkedAccount(
   event: { cookies: Cookies; locals: App.Locals },
