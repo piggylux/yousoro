@@ -1,5 +1,5 @@
 import { searchWords } from '#lib/anime.js';
-import type { PlannedAnime } from '#lib/types/anime.js';
+import type { PlannedAnime, PlannedSequel } from '#lib/types/anime.js';
 import type { PlanningPageData } from '#lib/types/api.js';
 import type { Domain } from '#lib/types/domain.js';
 
@@ -21,8 +21,10 @@ const episodes = (count: number) =>
   `${count.toLocaleString('en')} episode${count === 1 ? '' : 's'}`;
 
 /** Where an anime is in its run, under its poster: "12 episodes", "Airing · 24 episodes" */
-export function describePlanned(anime: PlannedAnime): string {
+export function describePlanned(anime: Pick<PlannedAnime, 'status' | 'episodes'>): string {
   switch (anime.status) {
+    case 'NOT_YET_RELEASED':
+      return 'Not aired yet';
     case 'RELEASING':
       return anime.episodes ? `Airing · ${episodes(anime.episodes)}` : 'Airing';
     case 'HIATUS':
@@ -32,6 +34,155 @@ export function describePlanned(anime: PlannedAnime): string {
     default:
       return anime.episodes ? episodes(anime.episodes) : 'Finished';
   }
+}
+
+/**
+ * A series on a plan list: the parts of it on the list, in the order to watch them. The first part
+ * leads it, and it's sorted and filtered by that one, as it's the part to start
+ */
+export type PlannedSeries = { parts: [PlannedAnime, ...PlannedAnime[]] };
+
+/**
+ * The plan list as series, each where its first part is on the list. Parts are joined by the
+ * prequels each waits on, so a series only holds the parts on this list; an anime that continues
+ * nothing on it is a series of its own. Parts come after what they continue, and otherwise in
+ * airing order, as a movie and a second season that both follow the first
+ */
+export function groupSeries(planned: PlannedAnime[]): PlannedSeries[] {
+  const position = new Map<number, number>();
+  planned.forEach((anime, index) => {
+    if (anime.id !== null) position.set(anime.id, index);
+  });
+  const prequelsOf = planned.map((anime) => anime.prequels.flatMap((id) => position.get(id) ?? []));
+
+  // Each anime's series, by the position of one of its parts
+  const series = planned.map((_, index) => index);
+  const seriesOf = (index: number): number =>
+    series[index] === index ? index : (series[index] = seriesOf(series[index]));
+  prequelsOf.forEach((prequels, index) => {
+    for (const prequel of prequels) series[seriesOf(index)] = seriesOf(prequel);
+  });
+  const members = new Map<number, number[]>();
+  planned.forEach((_, index) => {
+    const parts = members.get(seriesOf(index));
+    if (parts) parts.push(index);
+    else members.set(seriesOf(index), [index]);
+  });
+
+  const airsBefore = (a: number, b: number) =>
+    (planned[a].year ?? Infinity) - (planned[b].year ?? Infinity) || a - b;
+  const grouped = [...members.values()].map((indexes) => {
+    if (indexes.length === 1) return indexes;
+    // The next part is the earliest-airing one whose prequels on the list are all placed
+    const placed = new Set<number>();
+    const order: number[] = [];
+    while (order.length < indexes.length) {
+      const ready = indexes.filter(
+        (index) => !placed.has(index) && prequelsOf[index].every((prequel) => placed.has(prequel))
+      );
+      // Prequels always aired earlier, so they can't loop; were they to, the rest go in airing order
+      const next = (ready.length ? ready : indexes.filter((index) => !placed.has(index))).sort(
+        airsBefore
+      )[0];
+      placed.add(next);
+      order.push(next);
+    }
+    return order;
+  });
+  return grouped
+    .sort((a, b) => a[0] - b[0])
+    .map((order) => ({
+      parts: order.map((index) => planned[index]) as PlannedSeries['parts'],
+    }));
+}
+
+/** What comes after a series' first part: a later part on the list, or a sequel that isn't */
+export type SeriesStep =
+  | { kind: 'part'; anime: PlannedAnime }
+  | { kind: 'sequel'; anime: PlannedSequel };
+
+/**
+ * What comes after a series' first part, in the order to watch it: its later parts, each followed
+ * by the sequels of it the page doesn't list. A sequel of two parts goes after the later one
+ */
+export function seriesSteps({ parts }: PlannedSeries): SeriesStep[] {
+  const follows = new Map<number, { after: number; sequel: PlannedSequel }>();
+  parts.forEach((anime, after) => {
+    for (const sequel of anime.sequels) {
+      follows.delete(sequel.id);
+      follows.set(sequel.id, { after, sequel });
+    }
+  });
+  const sequelsAfter = parts.map(() => [] as SeriesStep[]);
+  for (const { after, sequel } of follows.values()) {
+    sequelsAfter[after].push({ kind: 'sequel', anime: sequel });
+  }
+  return parts.flatMap((anime, index): SeriesStep[] => [
+    ...(index ? [{ kind: 'part' as const, anime }] : []),
+    ...sequelsAfter[index],
+  ]);
+}
+
+export const PLAN_SORTS = {
+  planned: 'Recently planned',
+  score: 'Top rated',
+  length: 'Shortest first',
+  title: 'Title A–Z',
+} as const;
+export type PlanSort = keyof typeof PLAN_SORTS;
+
+// Unknown scores and lengths go after the known ones, whichever way those are sorted
+const byKnown = (a: number | null, b: number | null, descending = false) =>
+  a === null || b === null ? Number(a === null) - Number(b === null) : descending ? b - a : a - b;
+const titles = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
+
+/** The series in the chosen order; ties keep the order they were planned in */
+export function sortSeries(series: PlannedSeries[], sort: PlanSort): PlannedSeries[] {
+  if (sort === 'planned') return series;
+  const compare = {
+    score: (a: PlannedAnime, b: PlannedAnime) => byKnown(a.meanScore, b.meanScore, true),
+    length: (a: PlannedAnime, b: PlannedAnime) => byKnown(a.episodes, b.episodes),
+    title: (a: PlannedAnime, b: PlannedAnime) => titles.compare(a.title, b.title),
+  }[sort];
+  return series.toSorted((a, b) => compare(a.parts[0], b.parts[0]));
+}
+
+/** A single cour or less: what can be watched over a season, or a weekend */
+export const SHORT_EPISODES = 13;
+
+// Labelled by its length rather than "Short", which anime fans read as the format of minute-long episodes
+export const PLAN_FILTERS = {
+  airing: { label: 'Airing', matches: (anime: PlannedAnime) => anime.status === 'RELEASING' },
+  short: {
+    label: `≤ ${SHORT_EPISODES} episodes`,
+    matches: (anime: PlannedAnime) => anime.episodes !== null && anime.episodes <= SHORT_EPISODES,
+  },
+};
+export type PlanFilter = keyof typeof PLAN_FILTERS;
+
+/** How many planned anime the series hold, as the header counts them: every part on the list */
+export function countAnime(series: PlannedSeries[]): number {
+  return series.reduce((total, { parts }) => total + parts.length, 0);
+}
+
+/**
+ * The genres the series lead with, A to Z, with how many planned anime choosing each shows: a
+ * series is filtered by its first part, and brings its later parts with it
+ */
+export function seriesGenres(series: PlannedSeries[]): { genre: string; count: number }[] {
+  const counts = new Map<string, number>();
+  for (const { parts } of series) {
+    for (const genre of parts[0].genres) counts.set(genre, (counts.get(genre) ?? 0) + parts.length);
+  }
+  return [...counts]
+    .map(([genre, count]) => ({ genre, count }))
+    .sort((a, b) => titles.compare(a.genre, b.genre));
+}
+
+/** One of the choices at random, other than the last one picked while there are others */
+export function pickAnother<T>(choices: T[], last: T | null, random = Math.random): T | null {
+  const others = choices.length > 1 ? choices.filter((choice) => choice !== last) : choices;
+  return others.length ? others[Math.floor(random() * others.length)] : null;
 }
 
 /*

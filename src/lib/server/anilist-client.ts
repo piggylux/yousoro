@@ -238,10 +238,18 @@ export async function getWatchingEntries(
   };
 }
 
+/** A date AniList keeps in parts, any of which may be unknown */
+type FuzzyDate = { year: number | null; month: number | null; day: number | null };
+
+const FUZZY_DATE_FIELDS = 'year month day';
+
 /*
  * Only what a planned anime's row shows: plan lists run to over a thousand anime, all read in one
  * request, so alternative titles and airing details are left out. The cover is the smallest size,
- * as rows show it as a thumbnail
+ * as rows show it as a thumbnail. AniList sends every relation of an anime, as it can't be asked
+ * for sequels alone, so a relation only carries what a sequel that isn't planned shows: its title,
+ * whether it's out and whether it's adult. That still adds about two fifths to the answer, which
+ * grows with the list: from 705 KB to about 1 MB for one of 1,325 anime
  */
 const PLANNED_FIELDS = `
   id
@@ -252,6 +260,9 @@ const PLANNED_FIELDS = `
   coverImage { medium }
   isAdult
   meanScore
+  genres
+  startDate { ${FUZZY_DATE_FIELDS} }
+  relations { edges { relationType node { id type status isAdult title { romaji } } } }
 `;
 
 export type AniListPlannedEntry = {
@@ -266,8 +277,33 @@ export type AniListPlannedEntry = {
     coverImage: { medium: string | null } | null;
     isAdult: boolean;
     meanScore: number | null;
+    /** Null where AniList sends none, which its schema allows */
+    genres: string[] | null;
+    /** Null for an anime AniList has no date for at all, as its schema allows */
+    startDate: FuzzyDate | null;
+    /**
+     * What AniList links the anime to: its prequels, and its sequels that are anime. Everything
+     * else it sends is left out before the list is kept. Null where AniList sends no connection,
+     * which its schema allows and one entry must not fail a whole list on
+     */
+    relations: { edges: PlannedRelation[] } | null;
   };
 };
+
+type PlannedRelation = {
+  relationType: string;
+  node: {
+    id: number;
+    type: 'ANIME' | 'MANGA' | null;
+    status: AiringStatus | null;
+    isAdult: boolean | null;
+    title: { romaji: string } | null;
+  };
+};
+
+// Of an anime's relations, only its prequels and the anime that continue it are read
+const isRead = ({ relationType, node }: PlannedRelation) =>
+  relationType === 'PREQUEL' || (relationType === 'SEQUEL' && node.type === 'ANIME');
 
 type PlanningList = { userId: number; userName: string; entries: AniListPlannedEntry[] };
 
@@ -324,7 +360,13 @@ export async function getPlanningEntries(userName: string, token?: string): Prom
     // Custom lists repeat entries that already appear in the status list
     entries: onePerAnime(
       lists.filter((list) => !list.isCustomList).flatMap((list) => list.entries)
-    ),
+    ).map(({ updatedAt, media }) => ({
+      updatedAt,
+      media: {
+        ...media,
+        relations: media.relations && { edges: media.relations.edges.filter(isRead) },
+      },
+    })),
   };
   if (!token) {
     planningCache.delete(key);
@@ -1099,11 +1141,6 @@ export async function getViewer(token: string): Promise<AniListUser> {
 
   return toUser(data.Viewer);
 }
-
-/** A date AniList keeps in parts, any of which may be unknown */
-type FuzzyDate = { year: number | null; month: number | null; day: number | null };
-
-const FUZZY_DATE_FIELDS = 'year month day';
 
 /** An AniList date as text: YYYY-MM-DD, or YYYY-MM or YYYY as far as it's known; null without a year */
 export function fromFuzzyDate(date: FuzzyDate | null | undefined): string | null {

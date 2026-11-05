@@ -144,6 +144,11 @@ describe('MyAnimeListApi plan lists', () => {
         status: 'currently_airing',
         mean: 8.76,
         alternative_titles: { en: 'English title' },
+        genres: [
+          { id: 1, name: 'Action' },
+          { id: 38, name: 'Military' },
+        ],
+        start_season: { year: 2026, season: 'fall' },
       }),
       planned(2, {
         nsfw: 'black',
@@ -172,7 +177,12 @@ describe('MyAnimeListApi plan lists', () => {
           status: 'RELEASING',
           episodes: 24,
           meanScore: 88,
+          year: 2026,
+          genres: ['Action', 'Military'],
           addedAt: Date.parse('2026-10-30T10:00:00+00:00'),
+          startedOn: null,
+          prequelIds: [],
+          allSequels: [],
         },
         expect.objectContaining({
           malId: 2,
@@ -181,7 +191,14 @@ describe('MyAnimeListApi plan lists', () => {
           status: 'NOT_YET_RELEASED',
           episodes: null,
         }),
-        expect.objectContaining({ malId: 3, coverUrl: null, status: 'FINISHED', meanScore: null }),
+        expect.objectContaining({
+          malId: 3,
+          coverUrl: null,
+          status: 'FINISHED',
+          meanScore: null,
+          year: null,
+          genres: [],
+        }),
       ],
     });
   });

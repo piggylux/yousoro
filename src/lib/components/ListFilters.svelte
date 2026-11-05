@@ -1,22 +1,22 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, type Snippet } from 'svelte';
 
-  import { LIST_SECTION_LABELS, LIST_SECTIONS, type ListSection } from '#lib/anime.js';
+  /** A toggle beside the search, with how many anime it covers on the whole list */
+  type FilterChip = { key: string; label: string; count: number; pressed: boolean };
 
   type Props = {
-    /**
-     * How many anime are in each section of the whole list; without them, as on a plan list, which
-     * has no sections, only the search shows
-     */
-    counts?: Record<ListSection, number>;
-    /** The sections the viewer hides */
-    hidden?: ListSection[];
-    onToggle?: (section: ListSection) => void;
+    /** The toggles, in order; without them only the search shows */
+    chips?: FilterChip[];
+    /** What the toggles do together, for screen readers */
+    chipsLabel?: string;
+    onToggle?: (key: string) => void;
     /** Words to look for in the anime's titles */
     search: string;
+    /** More controls after the toggles, as a plan list's genre and order */
+    children?: Snippet;
   };
 
-  let { counts, hidden = [], onToggle, search = $bindable() }: Props = $props();
+  let { chips = [], chipsLabel, onToggle, search = $bindable(), children }: Props = $props();
 
   let searchInput = $state<HTMLInputElement>();
 
@@ -27,11 +27,6 @@
   onMount(() => {
     if (searchInput && searchInput.value !== search) search = searchInput.value;
   });
-
-  // Empty sections have nothing to filter, unless they're hidden, so they can be shown again
-  const sections = $derived(
-    counts ? LIST_SECTIONS.filter((section) => counts[section] > 0 || hidden.includes(section)) : []
-  );
 </script>
 
 <div class="list-toolbar">
@@ -56,17 +51,25 @@
     }}
   />
 
-  <!-- Each chip shows or hides one section of the list; a pressed chip's section is shown -->
-  {#if counts}
-    <div class="list-filters" role="group" aria-label="Sections to show">
-      {#each sections as section (section)}
-        {@const shown = !hidden.includes(section)}
-        <button type="button" class="chip" aria-pressed={shown} onclick={() => onToggle?.(section)}>
-          <span class="check" aria-hidden="true">{shown ? '✓' : ''}</span>
-          {LIST_SECTION_LABELS[section]}
-          <span class="count">{counts[section].toLocaleString()}</span>
-        </button>
-      {/each}
+  {#if chips.length || children}
+    <div class="list-filters">
+      {#if chips.length}
+        <div class="chips" role="group" aria-label={chipsLabel}>
+          {#each chips as chip (chip.key)}
+            <button
+              type="button"
+              class="chip"
+              aria-pressed={chip.pressed}
+              onclick={() => onToggle?.(chip.key)}
+            >
+              <span class="check" aria-hidden="true">{chip.pressed ? '✓' : ''}</span>
+              {chip.label}
+              <span class="count">{chip.count.toLocaleString()}</span>
+            </button>
+          {/each}
+        </div>
+      {/if}
+      {@render children?.()}
     </div>
   {/if}
 </div>
@@ -84,9 +87,11 @@
     border-top: 1px solid var(--border-subtle);
   }
 
-  .list-filters {
+  .list-filters,
+  .chips {
     display: flex;
     flex-wrap: wrap;
+    align-items: center;
     justify-content: flex-start;
     gap: 8px;
   }
@@ -99,6 +104,16 @@
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-control);
     background: var(--surface);
+    color: var(--text-heading);
+    font-size: 0.85rem;
+  }
+
+  /* A menu among the controls, as a plan list's genre and order, matches the search and chips */
+  .list-filters :global(select) {
+    width: auto;
+    max-width: 100%;
+    height: 40px;
+    border-radius: var(--radius-control);
     color: var(--text-heading);
     font-size: 0.85rem;
   }
@@ -186,7 +201,8 @@
 
   @media (pointer: coarse) {
     .search,
-    .chip {
+    .chip,
+    .list-filters :global(select) {
       min-height: 44px;
     }
   }

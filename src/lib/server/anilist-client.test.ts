@@ -683,15 +683,55 @@ describe('planning lists', () => {
     expect(query).toContain('status_in: [PLANNING]');
     // Rows show the cover as a thumbnail, so the smallest one is enough
     expect(query).toContain('coverImage { medium }');
-    for (const field of [
-      'synonyms',
-      'nextAiringEpisode',
-      'startDate',
-      'endDate',
-      'extraLarge',
-      'avatar',
-    ])
+    // Genres fill the genre filter. The page orders prequels by airing date, and shows the year.
+    // Every relation comes with what a sequel that isn't planned shows, as AniList can't send
+    // sequels alone: no cover, dates or episodes
+    expect(query).toMatch(/\bgenres\b/);
+    expect(query).toContain('startDate { year month day }');
+    expect(query).toContain(
+      'relations { edges { relationType node { id type status isAdult title { romaji } } } }'
+    );
+    for (const field of ['synonyms', 'nextAiringEpisode', 'endDate', 'extraLarge', 'avatar'])
       expect(query).not.toContain(field);
+  });
+
+  it('keeps only the prequels and the anime sequels of what AniList relates', async () => {
+    const node = (id: number, type = 'ANIME') => ({
+      id,
+      type,
+      status: 'FINISHED',
+      isAdult: false,
+      title: { romaji: `Anime ${id}` },
+    });
+    const related = {
+      ...entry(1),
+      media: {
+        ...entry(1).media,
+        relations: {
+          edges: [
+            { relationType: 'PREQUEL', node: node(2) },
+            { relationType: 'SEQUEL', node: node(3) },
+            { relationType: 'SEQUEL', node: node(4, 'MANGA') },
+            { relationType: 'ADAPTATION', node: node(5, 'MANGA') },
+            { relationType: 'SIDE_STORY', node: node(6) },
+          ],
+        },
+      },
+    };
+    vi.mocked(fetch).mockResolvedValue(
+      Response.json({
+        data: {
+          MediaListCollection: {
+            user: { id: 7, name: 'Related' },
+            lists: [{ isCustomList: false, entries: [related] }],
+          },
+        },
+      })
+    );
+
+    const list = await getPlanningEntries('Related');
+
+    expect(list.entries[0].media.relations?.edges.map(({ node }) => node.id)).toEqual([2, 3]);
   });
 
   it('keeps an anonymous read for five minutes, for every spelling of the name', async () => {

@@ -61,8 +61,39 @@ function toPlannedAnime({ media, updatedAt }: AniListPlannedEntry): PlannedList[
     status: media.status,
     episodes: media.episodes ?? null,
     meanScore: media.meanScore,
+    year: media.startDate?.year ?? null,
+    genres: media.genres ?? [],
     addedAt: updatedAt ? updatedAt * 1000 : null,
+    startedOn: startedOn(media.startDate),
+    prequelIds: (media.relations?.edges ?? [])
+      .filter(({ relationType }) => relationType === 'PREQUEL')
+      .map(({ node }) => node.id),
+    // Only sequels that are anime are kept, so every one is; one AniList links twice is shown once
+    allSequels: (media.relations?.edges ?? [])
+      .filter(
+        ({ relationType, node }, index, edges) =>
+          relationType === 'SEQUEL' &&
+          edges.findIndex(
+            (other) => other.relationType === 'SEQUEL' && other.node.id === node.id
+          ) === index
+      )
+      .map(({ node }) => ({
+        id: node.id,
+        title: node.title?.romaji ?? '',
+        isAdult: node.isAdult ?? false,
+        // A sequel AniList gives no status for is most likely out already, as on MyAnimeList
+        status: node.status ?? 'FINISHED',
+      })),
   };
+}
+
+/**
+ * An AniList start date as one number to compare, YYYYMMDD, with an unknown month or day as the
+ * start of what is known. Null without a year, as there's then nothing to order it by
+ */
+function startedOn(date: AniListPlannedEntry['media']['startDate']) {
+  if (!date?.year) return null;
+  return date.year * 10000 + (date.month ?? 0) * 100 + (date.day ?? 0);
 }
 
 /**
