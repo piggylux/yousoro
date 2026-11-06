@@ -3,9 +3,11 @@
 
   import { startAniListSignIn } from '#lib/anilist-auth.js';
   import FriendAvatar from '#lib/components/FriendAvatar.svelte';
+  import Menu from '#lib/components/Menu.svelte';
   import SettingsDrawer from '#lib/components/SettingsDrawer.svelte';
   import SignInButton from '#lib/components/SignInButton.svelte';
   import { malSignInPath } from '#lib/myanimelist-auth.js';
+  import { accountMenuLinks, headerList, signedInAccounts } from '#lib/profile-links.js';
   import { SYNC_ENABLED } from '#lib/sync.js';
   import { DOMAIN_NAMES, isDomain, listPath as pathOfList } from '#lib/types/domain.js';
   import type { Preferences } from '#lib/types/preferences.js';
@@ -23,20 +25,10 @@
 
   let { user, malUser, malEnabled, preferences }: Props = $props();
 
-  // Every account signed in, the main list's first
-  const accounts = $derived(
-    [
-      ...(user ? [{ domain: 'anilist' as const, user }] : []),
-      ...(malUser ? [{ domain: 'myanimelist' as const, user: malUser }] : []),
-    ].sort(
-      (a, b) =>
-        Number(b.domain === preferences.mainList) - Number(a.domain === preferences.mainList)
-    )
-  );
+  const accounts = $derived(signedInAccounts(user, malUser, preferences.mainList));
 
   let settingsOpen = $state(false);
   const logoutFormId = $props.id();
-  let account = $state<HTMLDetailsElement>();
 
   // The gear opens the settings drawer, except on the settings page, which already shows them. A
   // click meant for a new tab still opens the page there
@@ -53,9 +45,11 @@
   const redirectTo = $derived(page.url.pathname + page.url.search);
   // The links lead to the signed-in user's own list, or else to the list being looked at
   const navList = $derived.by(() => {
-    if (accounts[0]) return { domain: accounts[0].domain, name: accounts[0].user.name };
     const { domain, username } = page.params;
-    return domain && username && isDomain(domain) ? { domain, name: username } : null;
+    return headerList(
+      accounts,
+      domain && username && isDomain(domain) ? { domain, name: username } : null
+    );
   });
   const listPath = $derived(navList ? pathOfList(navList.domain, navList.name) : null);
   // Friends are the people someone follows on AniList
@@ -75,31 +69,7 @@
         return -1;
     }
   });
-  $effect(() => {
-    void page.url.pathname;
-    void page.url.search;
-    void user?.id;
-    void malUser?.id;
-    if (account) account.open = false;
-  });
 </script>
-
-<svelte:window
-  onclick={(event) => {
-    if (account && event.target instanceof Node && !account.contains(event.target))
-      account.open = false;
-  }}
-  onfocusin={(event) => {
-    if (account && event.target instanceof Node && !account.contains(event.target))
-      account.open = false;
-  }}
-  onkeydown={(event) => {
-    if (event.key === 'Escape' && account?.open) {
-      account.open = false;
-      account.querySelector('summary')?.focus();
-    }
-  }}
-/>
 
 <header>
   <nav aria-label="Main navigation" class:has-links={listPath !== null}>
@@ -246,52 +216,16 @@
         </a>
 
         {#if accounts[0]}
-          <details class="account" bind:this={account}>
-            <summary
-              class="account-trigger"
-              aria-label={`Signed in as ${[...new Set(accounts.map((signedIn) => signedIn.user.name))].join(' and ')}`}
-            >
-              <FriendAvatar {...accounts[0].user} size={30} />
-              <svg
-                class="account-chevron"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.6"
-                aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg
+          <Menu align="end">
+            {#snippet trigger({ open, props })}
+              <button
+                type="button"
+                class="account-trigger"
+                class:open
+                {...props}
+                aria-label={`Signed in as ${[...new Set(accounts.map((signedIn) => signedIn.user.name))].join(' and ')}`}
               >
-            </summary>
-            <ul class="account-menu">
-              {#each accounts as { domain, user: signedIn } (domain)}
-                <li class="account-name">
-                  <span>{DOMAIN_NAMES[domain]} account</span><strong>{signedIn.name}</strong>
-                </li>
-                <li>
-                  <a href={pathOfList(domain, signedIn.name)}
-                    >{accounts.length > 1 ? `My ${DOMAIN_NAMES[domain]} list` : 'My list'}</a
-                  >
-                </li>
-                {#if domain === 'anilist'}
-                  <li><a href={`${pathOfList(domain, signedIn.name)}/friends`}>My friends</a></li>
-                {/if}
-              {/each}
-              {#if SYNC_ENABLED && accounts.length > 1}
-                <li><a href="/sync">Sync lists</a></li>
-              {/if}
-              <li class="sign-out">
-                <button type="submit" form={logoutFormId}>Sign out</button>
-              </li>
-            </ul>
-          </details>
-          <form id={logoutFormId} method="POST" action="/auth/logout">
-            <input type="hidden" name="redirectTo" value={redirectTo} />
-          </form>
-        {:else if page.url.pathname !== '/home'}
-          <!-- The home page has its own, larger sign-in buttons -->
-          {#if malEnabled}
-            <details class="account" bind:this={account}>
-              <summary class="account-trigger sign-in-trigger">
-                Sign in
+                <FriendAvatar {...accounts[0].user} size={30} />
                 <svg
                   class="account-chevron"
                   viewBox="0 0 16 16"
@@ -300,18 +234,52 @@
                   stroke-width="1.6"
                   aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg
                 >
-              </summary>
-              <ul class="account-menu">
-                <li>
-                  <button type="button" onclick={() => startAniListSignIn(redirectTo)}
-                    >With AniList</button
+              </button>
+            {/snippet}
+            {#each accounts as { domain, user: signedIn } (domain)}
+              <li class="account-name">
+                <span>{DOMAIN_NAMES[domain]} account</span><strong>{signedIn.name}</strong>
+              </li>
+              {#each accountMenuLinks({ domain, name: signedIn.name }, navList) as link (link.href)}
+                <li><a href={link.href}>{link.label}</a></li>
+              {/each}
+            {/each}
+            {#if SYNC_ENABLED && accounts.length > 1}
+              <li class="sync"><a href="/sync">Sync lists</a></li>
+            {/if}
+            <li class="sign-out">
+              <button type="submit" form={logoutFormId}>Sign out</button>
+            </li>
+          </Menu>
+          <form id={logoutFormId} method="POST" action="/auth/logout">
+            <input type="hidden" name="redirectTo" value={redirectTo} />
+          </form>
+        {:else if page.url.pathname !== '/home'}
+          <!-- The home page has its own, larger sign-in buttons -->
+          {#if malEnabled}
+            <Menu align="end">
+              {#snippet trigger({ open, props })}
+                <button type="button" class="account-trigger sign-in-trigger" class:open {...props}>
+                  Sign in
+                  <svg
+                    class="account-chevron"
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.6"
+                    aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg
                   >
-                </li>
-                <li>
-                  <a href={malSignInPath(redirectTo)} data-sveltekit-reload>With MyAnimeList</a>
-                </li>
-              </ul>
-            </details>
+                </button>
+              {/snippet}
+              <li>
+                <button type="button" onclick={() => startAniListSignIn(redirectTo)}
+                  >With AniList</button
+                >
+              </li>
+              <li>
+                <a href={malSignInPath(redirectTo)} data-sveltekit-reload>With MyAnimeList</a>
+              </li>
+            </Menu>
           {:else}
             <SignInButton compact {redirectTo} />
           {/if}
@@ -413,60 +381,52 @@
   .tw\:navbar-end > form {
     display: none;
   }
-  .account {
-    position: relative;
-    margin-left: 6px;
-  }
   .account-trigger {
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 7px;
     min-height: 44px;
+    margin-left: 6px;
     padding: 5px 8px 5px 5px;
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-control);
-    list-style: none;
     background: var(--surface);
     color: var(--text-accent);
     cursor: pointer;
-  }
-  .account-trigger::-webkit-details-marker {
-    display: none;
   }
   .account-chevron {
     width: 14px;
     height: 14px;
     transition: transform 160ms ease;
   }
-  .account[open] .account-chevron {
-    transform: rotate(180deg);
-  }
-  .account[open] .account-trigger {
+  .account-trigger.open {
     border-color: var(--you-blue);
   }
-  .account-menu {
-    position: absolute;
-    top: calc(100% + 12px);
-    right: 0;
-    width: 220px;
-    max-width: calc(100vw - 48px);
-    padding: 8px;
-    list-style: none;
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-panel);
-    background: var(--surface);
-    box-shadow: var(--shadow-popover);
-    color: var(--text-heading);
+  .open .account-chevron {
+    transform: rotate(180deg);
   }
+  /*
+   * The menu's items come from the shared menu; its account headings and sign-out are the header's.
+   * A line goes above each group after the first: another account, then syncing and signing out
+   */
   .account-name {
-    padding: 10px 12px 14px;
-    margin-bottom: 4px;
-    border-bottom: 1px solid var(--border-subtle);
+    padding: 10px 12px;
   }
-  .account-menu li + .account-name {
+  li + .account-name,
+  .sync,
+  .sign-out {
     margin-top: 4px;
     border-top: 1px solid var(--border-subtle);
+  }
+  .sync,
+  .sign-out {
+    padding-top: 4px;
+  }
+  .sync + .sign-out {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: 0;
   }
   .account-name span {
     display: block;
@@ -479,35 +439,11 @@
     font-size: 0.9rem;
     overflow-wrap: anywhere;
   }
-  .account-menu a,
-  .account-menu button {
-    display: flex;
-    align-items: center;
-    width: 100%;
-    min-height: 44px;
-    padding: 8px 12px;
-    border-radius: 10px;
-    font-size: 0.85rem;
-    font-weight: 650;
-    text-decoration: none;
-    cursor: pointer;
-  }
-  .account-menu a:hover,
-  .account-menu button:hover {
-    background: var(--you-blue-pale);
-  }
   .home-link:focus-visible,
   .utility-link:focus-visible,
-  .account-trigger:focus-visible,
-  .account-menu a:focus-visible,
-  .account-menu button:focus-visible {
+  .account-trigger:focus-visible {
     outline: 3px solid var(--you-blue);
     outline-offset: 3px;
-  }
-  .sign-out {
-    border-top: 1px solid var(--border-subtle);
-    margin-top: 4px;
-    padding-top: 4px;
   }
   .sign-out button {
     color: var(--text-accent);
@@ -619,7 +555,7 @@
     .home-link {
       gap: 8px;
     }
-    .account {
+    .account-trigger {
       margin-left: 0;
     }
   }

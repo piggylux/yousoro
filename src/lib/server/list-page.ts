@@ -118,10 +118,6 @@ export async function loadAnimePage({
     watchingList: withoutHiddenMature(animeList, locals.preferences.showMature),
     scoreFormat,
     hiddenSections,
-    userProfileLink:
-      domain === 'anilist'
-        ? `https://anilist.co/user/${encodeURIComponent(username)}/animelist/Watching`
-        : `https://myanimelist.net/animelist/${encodeURIComponent(username)}?status=1`,
     ...(unmatched.length ? { unmatched } : {}),
   };
 }

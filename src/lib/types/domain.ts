@@ -16,6 +16,13 @@ export function listPath(domain: Domain, username: string): string {
   return `/user/${domain}/${encodeURIComponent(username)}`;
 }
 
+/** Someone's profile on a service */
+export function profileUrl(domain: Domain, username: string): string {
+  return domain === 'anilist'
+    ? `https://anilist.co/user/${encodeURIComponent(username)}/`
+    : `https://myanimelist.net/profile/${encodeURIComponent(username)}`;
+}
+
 /** An anime's page on the list's own service: MyAnimeList's when the list is there and knows it */
 export function animePageUrl(
   domain: Domain,
