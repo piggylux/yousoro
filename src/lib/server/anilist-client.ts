@@ -262,7 +262,7 @@ const PLANNED_FIELDS = `
   meanScore
   genres
   startDate { ${FUZZY_DATE_FIELDS} }
-  relations { edges { relationType node { id type status isAdult title { romaji } } } }
+  relations { edges { relationType node { id idMal type status isAdult title { romaji } } } }
 `;
 
 export type AniListPlannedEntry = {
@@ -294,6 +294,7 @@ type PlannedRelation = {
   relationType: string;
   node: {
     id: number;
+    idMal?: number | null;
     type: 'ANIME' | 'MANGA' | null;
     status: AiringStatus | null;
     isAdult: boolean | null;

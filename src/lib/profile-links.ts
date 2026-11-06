@@ -1,4 +1,4 @@
-import { DOMAIN_NAMES, type Domain, listPath } from '#lib/types/domain.js';
+import { type Domain, listPath } from '#lib/types/domain.js';
 import type { SessionUser } from '#lib/types/session-user.js';
 import { wrappedPath } from '#lib/wrapped.js';
 
@@ -46,20 +46,51 @@ export function ownerProfiles(
   return profiles.sort((a, b) => Number(b.domain === 'anilist') - Number(a.domain === 'anilist'));
 }
 
-export type ProfileLink = { href: string; label: string };
+/**
+ * Whose friends the header's Friends tab leads to: the signed-in AniList account's, even when the
+ * main list is on MyAnimeList, or else those of the AniList list being looked at. Null when there
+ * are none, as friends are the people someone follows on AniList
+ */
+export function friendsList(
+  accounts: SignedInAccount[],
+  header: ListOwner | null
+): ListOwner | null {
+  const aniList = accounts.find(({ domain }) => domain === 'anilist');
+  if (aniList) return { domain: 'anilist', name: aniList.user.name };
+  return header?.domain === 'anilist' ? header : null;
+}
+
+/** The viewer's accounts on both services, when they're signed in to both */
+export type LinkedAccounts = {
+  /** The main account's list, where both lists show as one */
+  main: ListOwner;
+  aniListName: string;
+  malName: string;
+};
 
 /**
- * A signed-in account's own pages for the account menu: its list and, on AniList, its friends.
- * The header's tabs lead to one account's list and friends, so that account needs neither here
+ * The viewer's accounts when they're signed in to both services and the list is one of theirs: the
+ * two lists then show as one, at the main account's address. Null for anyone else's list, or when
+ * the viewer has only one account
  */
-export function accountMenuLinks(account: ListOwner, header: ListOwner | null): ProfileLink[] {
-  if (header && sameList(header, account)) return [];
-  const path = listPath(account.domain, account.name);
-  return [
-    { href: path, label: `My ${DOMAIN_NAMES[account.domain]} list` },
-    ...(account.domain === 'anilist' ? [{ href: `${path}/friends`, label: 'My friends' }] : []),
-  ];
+export function linkedAccounts(
+  owner: ListOwner,
+  accounts: SignedInAccount[]
+): LinkedAccounts | null {
+  const aniList = accounts.find(({ domain }) => domain === 'anilist');
+  const mal = accounts.find(({ domain }) => domain === 'myanimelist');
+  if (!aniList || !mal) return null;
+  const own = accounts.some(({ domain, user }) => sameList(owner, { domain, name: user.name }));
+  if (!own) return null;
+  const [main] = accounts;
+  return {
+    main: { domain: main.domain, name: main.user.name },
+    aniListName: aniList.user.name,
+    malName: mal.user.name,
+  };
 }
+
+export type ProfileLink = { href: string; label: string };
 
 /**
  * The owner's other pages, for the menu beside the profile's actions. The header's tabs already lead
@@ -72,6 +103,7 @@ export function moreProfileLinks({
   calendarView,
   header,
   year,
+  aniListName,
 }: {
   owner: ListOwner;
   ownList: boolean;
@@ -79,9 +111,14 @@ export function moreProfileLinks({
   header: ListOwner | null;
   /** The year the recap sums up */
   year: number;
+  /**
+   * The owner's AniList name, which friends, recaps and badges belong to: the list's own on
+   * AniList, their AniList account's on a combined list, and null otherwise
+   */
+  aniListName: string | null;
 }): ProfileLink[] {
   const path = listPath(owner.domain, owner.name);
-  const onAniList = owner.domain === 'anilist';
+  const aniListPath = aniListName === null ? null : listPath('anilist', aniListName);
   const links: ProfileLink[] = [];
   if (!header || !sameList(header, owner)) {
     links.push(
@@ -90,11 +127,11 @@ export function moreProfileLinks({
         : { href: `${path}?view=calendar`, label: 'Calendar' },
       { href: `${path}/planning`, label: 'Planning' }
     );
-    if (onAniList) links.push({ href: `${path}/friends`, label: 'Friends' });
+    if (aniListPath) links.push({ href: `${aniListPath}/friends`, label: 'Friends' });
   }
-  if (onAniList) {
-    links.push({ href: wrappedPath(owner.name, year), label: `${year} in anime` });
-    if (ownList) links.push({ href: `${path}/badge`, label: 'Profile badge' });
+  if (aniListName !== null && aniListPath) {
+    links.push({ href: wrappedPath(aniListName, year), label: `${year} in anime` });
+    if (ownList) links.push({ href: `${aniListPath}/badge`, label: 'Profile badge' });
   }
   return links;
 }

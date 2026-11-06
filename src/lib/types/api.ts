@@ -54,8 +54,21 @@ export type PlannedList = {
      * Every anime that continues it, before those the page lists are left out, and mature ones
      * when the viewer hides them
      */
-    allSequels: (Omit<PlannedSequel, 'planned'> & { isAdult: boolean })[];
+    allSequels: (Omit<PlannedSequel, 'planned'> & { isAdult: boolean; malId: number | null })[];
   })[];
+};
+
+/**
+ * A list of the viewer's own while they're signed in to both services, which shows both accounts'
+ * lists as one. The page is on the main account's service
+ */
+export type CombinedList = {
+  /** The owner's AniList name, whose friends, taste matches and years in anime the page offers */
+  aniListName: string;
+  /** How the owner scores anime on the other service, which cards only there are scored in */
+  otherScoreFormat: ScoreFormat;
+  /** Why only the main account's list is shown, when the other service didn't answer */
+  partial?: string;
 };
 
 export type PlanningPageData = {
@@ -63,6 +76,8 @@ export type PlanningPageData = {
   username: string;
   /** Whether the signed-in user owns this list and can start watching its anime */
   canEdit: boolean;
+  /** Plan lists have no scores, so a combined one needs no score format */
+  combined?: Omit<CombinedList, 'otherScoreFormat'>;
   /** The planned anime that are out, most recently planned first */
   planned: PlannedAnime[];
   /** How many more haven't aired yet: nobody can start those, so they're only counted */
@@ -85,6 +100,7 @@ export type AnimePageData = {
   avatarUrl: string | null;
   /** Whether the signed-in user owns this list and can update its progress */
   canEdit: boolean;
+  combined?: CombinedList;
   watchingList: Anime[];
   /** How the list owner scores anime */
   scoreFormat: ScoreFormat;

@@ -23,12 +23,15 @@ export function profileUrl(domain: Domain, username: string): string {
     : `https://myanimelist.net/profile/${encodeURIComponent(username)}`;
 }
 
-/** An anime's page on the list's own service: MyAnimeList's when the list is there and knows it */
+/**
+ * An anime's page on the list's own service: MyAnimeList's when the list is there and knows it, and
+ * also when AniList's id isn't known, as for an anime only on a combined list's MyAnimeList side
+ */
 export function animePageUrl(
   domain: Domain,
   { id, malId }: { id: number | null; malId: number | null }
 ): string {
-  return domain === 'myanimelist' && malId !== null
+  return malId !== null && (domain === 'myanimelist' || id === null)
     ? `https://myanimelist.net/anime/${malId}`
     : `https://anilist.co/anime/${id}`;
 }

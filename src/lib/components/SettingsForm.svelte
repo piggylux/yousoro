@@ -128,7 +128,7 @@
       <label for={`${id}-main-list`}>
         <span class="setting-name">Main list</span>
         <span class="setting-hint">
-          “My anime” opens this list. Episodes and scores you save go to both.
+          Your list shows both, at this one’s address, with its scores. Saves go to both.
         </span>
       </label>
       <select

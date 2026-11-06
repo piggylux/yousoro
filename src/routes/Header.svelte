@@ -7,7 +7,7 @@
   import SettingsDrawer from '#lib/components/SettingsDrawer.svelte';
   import SignInButton from '#lib/components/SignInButton.svelte';
   import { malSignInPath } from '#lib/myanimelist-auth.js';
-  import { accountMenuLinks, headerList, signedInAccounts } from '#lib/profile-links.js';
+  import { friendsList, headerList, signedInAccounts } from '#lib/profile-links.js';
   import { SYNC_ENABLED } from '#lib/sync.js';
   import { DOMAIN_NAMES, isDomain, listPath as pathOfList } from '#lib/types/domain.js';
   import type { Preferences } from '#lib/types/preferences.js';
@@ -52,19 +52,23 @@
     );
   });
   const listPath = $derived(navList ? pathOfList(navList.domain, navList.name) : null);
-  // Friends are the people someone follows on AniList
-  const hasFriends = $derived(navList?.domain === 'anilist');
+  // Friends are the people someone follows on AniList, so a MyAnimeList list's lead to the AniList
+  // account signed in beside it
+  const friendsOwner = $derived(friendsList(accounts, navList));
+  const friendsPath = $derived(
+    friendsOwner ? `${pathOfList(friendsOwner.domain, friendsOwner.name)}/friends` : null
+  );
+  const hasFriends = $derived(friendsPath !== null);
   const calendarView = $derived(page.url.searchParams.get('view') === 'calendar');
   // The tab of the page being looked at, in the order they're shown; -1 for none of them
   const activeNav = $derived.by(() => {
     if (!listPath) return -1;
+    if (page.url.pathname === friendsPath) return 3;
     switch (page.url.pathname) {
       case listPath:
         return calendarView ? 1 : 0;
       case `${listPath}/planning`:
         return 2;
-      case `${listPath}/friends`:
-        return 3;
       default:
         return -1;
     }
@@ -147,8 +151,8 @@
             >
             Planning
           </a>
-          {#if hasFriends}<a
-              href={`${listPath}/friends`}
+          {#if friendsPath}<a
+              href={friendsPath}
               aria-current={activeNav === 3 ? 'page' : undefined}
             >
               <svg
@@ -240,9 +244,6 @@
               <li class="account-name">
                 <span>{DOMAIN_NAMES[domain]} account</span><strong>{signedIn.name}</strong>
               </li>
-              {#each accountMenuLinks({ domain, name: signedIn.name }, navList) as link (link.href)}
-                <li><a href={link.href}>{link.label}</a></li>
-              {/each}
             {/each}
             {#if SYNC_ENABLED && accounts.length > 1}
               <li class="sync"><a href="/sync">Sync lists</a></li>

@@ -689,7 +689,7 @@ describe('planning lists', () => {
     expect(query).toMatch(/\bgenres\b/);
     expect(query).toContain('startDate { year month day }');
     expect(query).toContain(
-      'relations { edges { relationType node { id type status isAdult title { romaji } } } }'
+      'relations { edges { relationType node { id idMal type status isAdult title { romaji } } } }'
     );
     for (const field of ['synonyms', 'nextAiringEpisode', 'endDate', 'extraLarge', 'avatar'])
       expect(query).not.toContain(field);

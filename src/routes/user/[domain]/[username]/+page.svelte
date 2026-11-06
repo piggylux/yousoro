@@ -54,9 +54,19 @@
 
   let { data }: { data: AnimePageData } = $props();
   const service = $derived(DOMAIN_NAMES[data.domain]);
-  // Friends, taste matches, groups and years in anime are made of AniList accounts
-  const onAniList = $derived(data.domain === 'anilist');
-  const friendsViewer = $derived(onAniList ? page.data.user : null);
+  /*
+   * Friends, taste matches, groups and years in anime are made of AniList accounts: the list's own,
+   * or on a combined list, the owner's AniList account's
+   */
+  const aniListName = $derived(
+    data.domain === 'anilist' ? data.username : (data.combined?.aniListName ?? null)
+  );
+  const friendsViewer = $derived(aniListName ? page.data.user : null);
+  // A card only on the other service's list is scored as that service has it, and saved there
+  const cardScoreFormat = (anime: Anime) =>
+    data.combined && anime.onlyOn && anime.onlyOn !== data.domain
+      ? data.combined.otherScoreFormat
+      : data.scoreFormat;
   const calendarView = $derived(page.url.searchParams.get('view') === 'calendar');
   // The year the list links to a summary of
   const recapYear = wrappedYear(new Date());
@@ -73,6 +83,7 @@
       calendarView,
       header: headerList(accounts, owner),
       year: recapYear,
+      aniListName,
     })
   );
 
@@ -89,7 +100,7 @@
 
   let friendMatches = $state<FriendWatchingResult | null>(null);
   const visibleFriendMatches = $derived(
-    friendMatches ? withoutListOwner(friendMatches.matches, data.username) : null
+    friendMatches ? withoutListOwner(friendMatches.matches, aniListName ?? data.username) : null
   );
   let friendSelection = $state<{
     title: string;
@@ -223,6 +234,14 @@
       await update({ reset: false, refreshAll: false });
     };
   };
+
+  // On a combined list, why only the main account's list is shown, until the viewer dismisses it
+  let partialDismissed = $state<string | null>(null);
+  const partialNote = $derived(
+    data.combined?.partial && data.combined.partial !== partialDismissed
+      ? data.combined.partial
+      : null
+  );
 
   // Cards slide to their new place when an update reorders the list, instead of jumping there
   const duration = $derived(prefersReducedMotion.current ? 0 : 500);
@@ -487,10 +506,10 @@
         {/each}
         <ShareButton url={share.url} title={share.title} subject={share.subject} />
       </div>
-      {#if onAniList || moreLinks.length}
+      {#if aniListName || moreLinks.length}
         <div class="profile-actions">
-          {#if onAniList}
-            <a class="tw:btn tw:btn-sm profile-action" href={matchPath(data.username)}>
+          {#if aniListName}
+            <a class="tw:btn tw:btn-sm profile-action" href={matchPath(aniListName)}>
               <!-- Two tastes overlapping -->
               <svg
                 viewBox="0 0 24 24"
@@ -504,7 +523,7 @@
               >
               Taste match
             </a>
-            <a class="tw:btn tw:btn-sm profile-action" href={togetherPath(data.username)}>
+            <a class="tw:btn tw:btn-sm profile-action" href={togetherPath(aniListName)}>
               <!-- A screen to share -->
               <svg
                 viewBox="0 0 24 24"
@@ -661,7 +680,7 @@
             blurMature={data.preferences.blurMature}
             downloadLanguage={data.preferences.downloadLanguage}
             downloadVersion={data.preferences.downloadVersion}
-            scoreFormat={data.scoreFormat}
+            scoreFormat={cardScoreFormat(anime)}
             position={range.start + i}
             onConfirmed={confirmSaved}
             onLinkedFailure={noteLinkedFailure}
@@ -687,8 +706,17 @@
 
 <FriendsWatchingDialog selection={friendSelection} onclose={() => (friendSelection = null)} />
 
-{#if linkedNote || movedNote}
+{#if linkedNote || movedNote || partialNote}
   <div class="notes">
+    {#if partialNote}
+      <div class="note" role="status">
+        <span>{partialNote}</span>
+        <CloseButton
+          label="Dismiss notification"
+          onclick={() => (partialDismissed = partialNote)}
+        />
+      </div>
+    {/if}
     {#if linkedNote}
       <div class="note" role="alert">
         <span>{linkedNote.message}</span>
@@ -697,9 +725,10 @@
           <form method="POST" action="?/updateEntry" use:enhance={retryLinked}>
             <input type="hidden" name="mediaId" value={saved.id} />
             {#if saved.malId !== null}<input type="hidden" name="malId" value={saved.malId} />{/if}
+            {#if saved.onlyOn}<input type="hidden" name="list" value={saved.onlyOn} />{/if}
             <input type="hidden" name="progress" value={saved.currentEpisode} />
             {#if scored}
-              <input type="hidden" name="scoreFormat" value={data.scoreFormat} />
+              <input type="hidden" name="scoreFormat" value={cardScoreFormat(saved)} />
               <input type="hidden" name="score" value={saved.userScore ?? ''} />
             {/if}
             <button
@@ -746,7 +775,7 @@
   {#key scoring.id}
     <ScorePrompt
       anime={scoring}
-      format={data.scoreFormat}
+      format={cardScoreFormat(scoring)}
       {service}
       blurMature={data.preferences.blurMature}
       onLinkedFailure={(failure, saved) => noteLinkedFailure(failure, saved, true)}

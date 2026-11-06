@@ -65,6 +65,7 @@ export function rememberList(data: ListData, refresh = true) {
     username,
     avatarUrl,
     canEdit,
+    combined,
     watchingList,
     scoreFormat,
     hiddenSections,
@@ -76,6 +77,7 @@ export function rememberList(data: ListData, refresh = true) {
     username,
     avatarUrl,
     canEdit,
+    combined,
     watchingList,
     scoreFormat,
     hiddenSections,
@@ -104,6 +106,9 @@ export function getRememberedList(username: string, domain: Domain = 'anilist') 
 }
 
 function patchEntry<T extends ListData>(data: T, saved: Anime, status?: string): T {
+  // On a combined list, a score is in the format of the service its card saves to. Once a save
+  // puts an anime on both lists, the card's score is the main list's, which the save's isn't in
+  const scoredOn = (anime: Anime) => anime.onlyOn ?? data.domain;
   return {
     ...data,
     watchingList: data.watchingList.flatMap((anime) => {
@@ -114,7 +119,7 @@ function patchEntry<T extends ListData>(data: T, saved: Anime, status?: string):
             {
               ...anime,
               currentEpisode: saved.currentEpisode,
-              userScore: saved.userScore,
+              userScore: scoredOn(anime) === scoredOn(saved) ? saved.userScore : anime.userScore,
               lastUpdatedAt: saved.lastUpdatedAt,
               rewatching: status ? status === 'REPEATING' : saved.rewatching,
             },

@@ -53,7 +53,7 @@ MyAnimeList is optional. To turn it on, create a
 `http://localhost:5173/auth/myanimelist/callback`, and put its ID and secret in `.env` as
 `MAL_CLIENT_ID` and `MAL_CLIENT_SECRET`. MyAnimeList lists take aired episodes and airing times
 from AniList, matched by MyAnimeList id. Friends, taste matches, groups, years in anime and badges
-are AniList-only. Then:
+use AniList accounts. Signed in to both, your two lists show as one, with your AniList friends. Then:
 
 ```bash
 bun install

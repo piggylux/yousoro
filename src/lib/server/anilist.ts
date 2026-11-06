@@ -79,6 +79,7 @@ function toPlannedAnime({ media, updatedAt }: AniListPlannedEntry): PlannedList[
       )
       .map(({ node }) => ({
         id: node.id,
+        malId: node.idMal ?? null,
         title: node.title?.romaji ?? '',
         isAdult: node.isAdult ?? false,
         // A sequel AniList gives no status for is most likely out already, as on MyAnimeList

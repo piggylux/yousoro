@@ -24,6 +24,7 @@
     type Rotation,
   } from '#lib/card-rotation.js';
   import { clock } from '#lib/clock.js';
+  import { otherDomain } from '#lib/combined-list.js';
   import FriendAvatar from '#lib/components/FriendAvatar.svelte';
   import NyaaResultsDialog from '#lib/components/NyaaResultsDialog.svelte';
   import ScoreInput from '#lib/components/ScoreInput.svelte';
@@ -41,6 +42,7 @@
   } from '#lib/score.js';
   import type { Anime } from '#lib/types/anime.js';
   import type { LinkedFailure } from '#lib/types/api.js';
+  import { DOMAIN_NAMES } from '#lib/types/domain.js';
   import type { FriendWatching } from '#lib/types/friend-watching.js';
   import type { DownloadLanguage, DownloadVersion } from '#lib/types/preferences.js';
 
@@ -71,7 +73,10 @@
     downloadLanguage?: DownloadLanguage;
     /** The viewer's setting: subbed, dubbed or dual-audio releases for that search */
     downloadVersion?: DownloadVersion;
-    /** How the list owner scores anime on the list's service, which `anime.userScore` is in */
+    /**
+     * How the list owner scores anime on the service the card saves to, which `anime.userScore` is
+     * in: the list's, or on a combined list, the other one's for an anime only on its list
+     */
     scoreFormat?: ScoreFormat;
     /** Where the card is in the list, counting from 0 */
     position?: number;
@@ -152,7 +157,13 @@
       : null
   );
   const hasExtraFacts = $derived(
-    Boolean(airedEpisodes || anime.meanScore || anime.rewatching || (mounted && anime.nextEpisode))
+    Boolean(
+      airedEpisodes ||
+      anime.meanScore ||
+      anime.rewatching ||
+      anime.onlyOn ||
+      (mounted && anime.nextEpisode)
+    )
   );
   const episodesToWatch = $derived(getEpisodesToWatch(anime));
   const watchState = $derived(getWatchState(anime));
@@ -900,6 +911,13 @@
       <dd>Rewatching</dd>
     </div>
   {/if}
+  {#if anime.onlyOn}
+    <!-- On a combined list: the other list may have it as completed or paused, so it's not "only" -->
+    <div class="fact extra-fact">
+      <dt>Watching on</dt>
+      <dd>{DOMAIN_NAMES[anime.onlyOn]}, not {DOMAIN_NAMES[otherDomain(anime.onlyOn)]}</dd>
+    </div>
+  {/if}
   {#if mounted && anime.nextEpisode}
     <div class="fact extra-fact">
       <dt>Next</dt>
@@ -1055,6 +1073,8 @@
           {#if canEdit && (watchState === 'to-watch' || watchState === 'next-episode-unscheduled')}
             <form method="POST" action="?/updateEntry" use:enhance={submitEntry}>
               <input type="hidden" name="mediaId" value={anime.id} />
+              <!-- On a combined list, an anime only on one service's list is saved there -->
+              {#if anime.onlyOn}<input type="hidden" name="list" value={anime.onlyOn} />{/if}
               {#if anime.malId !== null}<input
                   type="hidden"
                   name="malId"
@@ -1210,6 +1230,7 @@
                 use:enhance={submitEntry}
               >
                 <input type="hidden" name="mediaId" value={anime.id} />
+                {#if anime.onlyOn}<input type="hidden" name="list" value={anime.onlyOn} />{/if}
                 {#if anime.malId !== null}<input
                     type="hidden"
                     name="malId"

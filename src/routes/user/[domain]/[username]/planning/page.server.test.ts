@@ -333,6 +333,50 @@ describe('planning list', () => {
     expect(getPlanningEntries).toHaveBeenCalledTimes(1);
   });
 
+  it('counts a sequel only on the MyAnimeList side of a combined list as planned', async () => {
+    const first = planned(1);
+    vi.mocked(getPlanningEntries).mockResolvedValue({
+      userId: 12,
+      userName: 'Fixture',
+      entries: [
+        {
+          ...first,
+          media: {
+            ...first.media,
+            relations: {
+              edges: [{ relationType: 'SEQUEL', node: { ...related(60), idMal: 1060 } }],
+            },
+          },
+        },
+      ],
+    });
+    vi.mocked(getPlanToWatchEntries).mockResolvedValue([
+      {
+        node: { id: 1060, title: 'Sequel on MyAnimeList', status: 'finished_airing' },
+        list_status: {
+          status: 'plan_to_watch',
+          score: 0,
+          num_episodes_watched: 0,
+          is_rewatching: false,
+          updated_at: '2026-11-01T00:00:00+00:00',
+        },
+      } as MalEntry,
+    ]);
+
+    const data = await read(event('anilist', { session: aniList, malSession: mal }));
+
+    expect(data.combined).toEqual({ aniListName: 'Fixture' });
+    // Planned last, on MyAnimeList, so it comes first
+    expect(data.planned.map(({ id, malId }: { id: number; malId: number }) => [id, malId])).toEqual(
+      [
+        [null, 1060],
+        [1, 1001],
+      ]
+    );
+    // Listed itself, from the MyAnimeList side, so it's not said to follow unplanned
+    expect(data.planned[1].sequels).toEqual([]);
+  });
+
   it("says when there's no such user", async () => {
     const { AniListNotFoundError } = await import('#lib/server/anilist-client.js');
     vi.mocked(getPlanningEntries).mockRejectedValue(new AniListNotFoundError('User not found'));

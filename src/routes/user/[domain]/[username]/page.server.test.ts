@@ -1,6 +1,8 @@
-import type { ActionFailure, Cookies } from '@sveltejs/kit';
+import { isRedirect, type ActionFailure, type Cookies } from '@sveltejs/kit';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { saveEntry as saveAniListEntry } from '#lib/server/anilist-client.js';
+import { copyToLinkedAccount } from '#lib/server/linked-save.js';
 import { MalTokenError, saveEntry } from '#lib/server/myanimelist-client.js';
 import { MyAnimeListApi } from '#lib/server/myanimelist.js';
 import type { MalSession, Session } from '#lib/server/session.js';
@@ -18,6 +20,11 @@ vi.mock('#lib/server/myanimelist-client.js', async (importOriginal) => ({
   saveEntry: vi.fn(),
 }));
 vi.mock('#lib/server/myanimelist.js', () => ({ MyAnimeListApi: vi.fn() }));
+vi.mock('#lib/server/anilist-client.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('#lib/server/anilist-client.js')>()),
+  saveEntry: vi.fn(),
+}));
+vi.mock('#lib/server/linked-save.js', () => ({ copyToLinkedAccount: vi.fn(async () => null) }));
 
 const user = { id: 12, name: 'Fixture', avatarUrl: null };
 const aniListSession: Session = { token: 'anilist.token.jwt', user: { ...user, id: 99 } };
@@ -136,5 +143,105 @@ describe('reading your own MyAnimeList list', () => {
 
     expect(page).toMatchObject({ canEdit: true, username: 'Fixture' });
     expect(MyAnimeListApi).toHaveBeenCalledWith({ token: 'mal-token', owner: user });
+  });
+});
+
+describe('signed in to both services', () => {
+  const aniList: Session = {
+    token: 'anilist-token',
+    user: { id: 99, name: 'AniFixture', avatarUrl: null },
+  };
+
+  function both(
+    domain: 'anilist' | 'myanimelist',
+    username: string,
+    fields: Record<string, string> = {},
+    search = ''
+  ) {
+    const { request, deleted } = event(malSession(), fields, aniList);
+    request.params = { domain, username };
+    request.url = new URL(`http://localhost/user/${domain}/${username}${search}`);
+    return { request, deleted };
+  }
+
+  async function loadError(request: ReturnType<typeof event>['request']) {
+    try {
+      await load(request as unknown as Parameters<typeof load>[0]);
+    } catch (err) {
+      return err;
+    }
+    return null;
+  }
+
+  it("shows your other account's list on your main list, keeping the view", async () => {
+    const err = await loadError(both('myanimelist', 'fixture', {}, '?view=calendar').request);
+
+    expect(isRedirect(err) && err).toMatchObject({
+      status: 303,
+      location: '/user/anilist/AniFixture?view=calendar',
+    });
+  });
+
+  it("doesn't move anyone else's list", async () => {
+    expect(isRedirect(await loadError(both('myanimelist', 'Someone').request))).toBe(false);
+  });
+
+  it("saves a card only on the other service's list there, in that service's format", async () => {
+    const saved = { progress: 4, score: 8, status: 'CURRENT', startedAt: null, completedAt: null };
+    vi.mocked(saveEntry).mockResolvedValue(saved);
+    const { request } = both('anilist', 'AniFixture', {
+      mediaId: '7',
+      malId: '52991',
+      list: 'myanimelist',
+      progress: '4',
+      score: '8',
+      scoreFormat: 'POINT_100',
+      episodes: '12',
+    });
+
+    expect(await update(request)).toEqual({ mediaId: 7, ...saved });
+    // MyAnimeList scores are out of 10, whatever format the form says
+    expect(saveEntry).toHaveBeenCalledWith(
+      'mal-token',
+      52991,
+      { progress: 4, score: 8 },
+      { episodes: 12 }
+    );
+    expect(saveAniListEntry).not.toHaveBeenCalled();
+    expect(copyToLinkedAccount).toHaveBeenCalledWith(
+      request,
+      'myanimelist',
+      expect.objectContaining({ malId: 52991 }),
+      saved
+    );
+  });
+
+  it("turns away a save to the other service from a list that isn't combined", async () => {
+    const { request } = event(malSession(), {
+      mediaId: '7',
+      malId: '52991',
+      list: 'anilist',
+      progress: '4',
+    });
+
+    const result = (await update(request)) as ActionFailure<{ message: string }>;
+
+    expect(result.status).toBe(400);
+    expect(saveAniListEntry).not.toHaveBeenCalled();
+  });
+
+  it("doesn't try to copy an anime MyAnimeList doesn't have", async () => {
+    const saved = { progress: 2, score: 0, status: 'CURRENT', startedAt: null, completedAt: null };
+    vi.mocked(saveAniListEntry).mockResolvedValue(saved);
+    const { request } = both('myanimelist', 'Fixture', {
+      mediaId: '7',
+      list: 'anilist',
+      progress: '2',
+    });
+    request.locals.preferences = { ...DEFAULT_PREFERENCES, mainList: 'myanimelist' };
+
+    expect(await update(request)).toEqual({ mediaId: 7, ...saved });
+    expect(saveAniListEntry).toHaveBeenCalledWith('anilist-token', 7, { progress: 2 });
+    expect(copyToLinkedAccount).not.toHaveBeenCalled();
   });
 });

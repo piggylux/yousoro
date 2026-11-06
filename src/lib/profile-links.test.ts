@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  accountMenuLinks,
+  friendsList,
   headerList,
+  linkedAccounts,
   moreProfileLinks,
   ownerProfiles,
   signedInAccounts,
@@ -62,7 +63,13 @@ describe('owner profiles', () => {
 });
 
 describe('more profile links', () => {
-  const base = { owner: sylux, ownList: false, calendarView: false, year: 2026 };
+  const base = {
+    owner: sylux,
+    ownList: false,
+    calendarView: false,
+    year: 2026,
+    aniListName: 'Sylux',
+  };
 
   it("leaves out the pages the header's tabs already lead to", () => {
     expect(labels({ ...base, header: sylux })).toEqual(['2026 in anime']);
@@ -91,27 +98,63 @@ describe('more profile links', () => {
 
   it('keeps AniList-only pages off MyAnimeList lists', () => {
     const owner = { domain: 'myanimelist', name: 'Xinil' } as const;
-    expect(labels({ ...base, owner, header: owner })).toEqual([]);
-    expect(labels({ ...base, owner, header: sylux })).toEqual(['Calendar', 'Planning']);
+    expect(labels({ ...base, owner, header: owner, aniListName: null })).toEqual([]);
+    expect(labels({ ...base, owner, header: sylux, aniListName: null })).toEqual([
+      'Calendar',
+      'Planning',
+    ]);
+  });
+
+  it("leads a combined MyAnimeList list's AniList pages to the owner's AniList account", () => {
+    const owner = { domain: 'myanimelist', name: 'ViewerMal' } as const;
+    expect(
+      moreProfileLinks({ ...base, owner, ownList: true, header: owner, aniListName: 'Viewer' })
+    ).toEqual([
+      { href: '/user/anilist/Viewer/wrapped/2026', label: '2026 in anime' },
+      { href: '/user/anilist/Viewer/badge', label: 'Profile badge' },
+    ]);
   });
 });
 
-describe('account menu links', () => {
-  const ani = { domain: 'anilist', name: 'Viewer' } as const;
-  const mal = { domain: 'myanimelist', name: 'ViewerMal' } as const;
+describe('linked accounts', () => {
+  const ownMal = { domain: 'myanimelist', name: 'viewermal' } as const;
 
-  it("leaves out the account whose list and friends the header's tabs lead to", () => {
-    expect(accountMenuLinks(ani, ani)).toEqual([]);
-    expect(accountMenuLinks(ani, { domain: 'anilist', name: 'VIEWER' })).toEqual([]);
+  it("combines the viewer's own lists, at the main account's address", () => {
+    expect(linkedAccounts(ownMal, signedInAccounts(aniUser, malUser, 'anilist'))).toEqual({
+      main: { domain: 'anilist', name: 'Viewer' },
+      aniListName: 'Viewer',
+      malName: 'ViewerMal',
+    });
+    expect(linkedAccounts(ownMal, signedInAccounts(aniUser, malUser, 'myanimelist'))?.main).toEqual(
+      { domain: 'myanimelist', name: 'ViewerMal' }
+    );
   });
 
-  it("links the other account's list, and its friends on AniList", () => {
-    expect(accountMenuLinks(mal, ani)).toEqual([
-      { href: '/user/myanimelist/ViewerMal', label: 'My MyAnimeList list' },
-    ]);
-    expect(accountMenuLinks(ani, mal)).toEqual([
-      { href: '/user/anilist/Viewer', label: 'My AniList list' },
-      { href: '/user/anilist/Viewer/friends', label: 'My friends' },
-    ]);
+  it("leaves anyone else's list, and a viewer with one account, as they are", () => {
+    expect(linkedAccounts(sylux, signedInAccounts(aniUser, malUser, 'anilist'))).toBeNull();
+    // The same name on the other service is someone else
+    expect(
+      linkedAccounts(
+        { domain: 'myanimelist', name: 'Viewer' },
+        signedInAccounts(aniUser, malUser, 'anilist')
+      )
+    ).toBeNull();
+    expect(linkedAccounts(ownMal, signedInAccounts(null, malUser, 'anilist'))).toBeNull();
+  });
+});
+
+describe('friends list', () => {
+  it('leads to the signed-in AniList account, even when the main list is on MyAnimeList', () => {
+    const accounts = signedInAccounts(aniUser, malUser, 'myanimelist');
+    expect(friendsList(accounts, headerList(accounts, null))).toEqual({
+      domain: 'anilist',
+      name: 'Viewer',
+    });
+  });
+
+  it("leads to the AniList list being looked at, and nowhere from MyAnimeList's alone", () => {
+    expect(friendsList([], sylux)).toBe(sylux);
+    const mal = signedInAccounts(null, malUser, 'anilist');
+    expect(friendsList(mal, headerList(mal, sylux))).toBeNull();
   });
 });

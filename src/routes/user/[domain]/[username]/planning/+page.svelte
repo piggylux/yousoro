@@ -219,7 +219,8 @@
           markStarted(data.domain, data.username, anime);
           // The watching list this tab remembers doesn't have it yet, nor do the friends pages
           expireRememberedList(data.username, data.domain);
-          if (data.domain === 'anilist' && data.user && anime.id !== null) {
+          // Friends are on AniList: the list's own account, or a combined list's AniList one
+          if ((data.domain === 'anilist' || data.combined) && data.user && anime.id !== null) {
             recordOwnWatchingEntry(
               data.user,
               {
@@ -268,6 +269,8 @@
   <form method="POST" action="?/startWatching" use:enhance={startWatching(anime)}>
     {#if anime.id !== null}<input type="hidden" name="mediaId" value={anime.id} />{/if}
     {#if anime.malId !== null}<input type="hidden" name="malId" value={anime.malId} />{/if}
+    <!-- On a combined list, an anime only on one service's plan list is started there -->
+    {#if anime.onlyOn}<input type="hidden" name="list" value={anime.onlyOn} />{/if}
     <button
       class="tw:btn tw:btn-primary start"
       disabled={saving}
@@ -380,6 +383,7 @@
         {#if data.upcoming}{count(data.upcoming)} not aired yet ·{/if}
         <a href={data.userProfileLink} target="_blank">See it on {service} ↗</a>
       </p>
+      {#if data.combined?.partial}<p class="summary" role="status">{data.combined.partial}</p>{/if}
     </div>
     <a class="tw:btn back-link" href={listUrl}
       ><span aria-hidden="true">←</span>

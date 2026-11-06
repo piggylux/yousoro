@@ -1,3 +1,5 @@
+import type { Domain } from '#lib/types/domain.js';
+
 /** Airing status, as AniList reports it */
 export type AiringStatus = 'FINISHED' | 'RELEASING' | 'NOT_YET_RELEASED' | 'CANCELLED' | 'HIATUS';
 
@@ -37,6 +39,11 @@ export type Anime = {
   numberAiredEpisodes: number | null;
   endDate: Date;
   numberEpisodes: number;
+  /**
+   * On a list that combines the owner's AniList and MyAnimeList accounts, the one service whose
+   * Watching list has the anime; unset when both have it, and on any other list
+   */
+  onlyOn?: Domain;
 };
 
 /**
@@ -75,6 +82,8 @@ export type PlannedAnime = {
    * after it: not planned, or not aired yet. Always empty on a MyAnimeList list, like `prequels`
    */
   sequels: PlannedSequel[];
+  /** On a combined plan list, the one service whose plan list has the anime, as on `Anime` */
+  onlyOn?: Domain;
 };
 
 /** A sequel of a planned anime that isn't listed: only what the plan list's single read gives */

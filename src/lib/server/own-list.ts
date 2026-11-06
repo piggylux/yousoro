@@ -6,8 +6,8 @@ import { clearMalSession, clearSession } from '#lib/server/session.js';
 import { DOMAIN_NAMES, type Domain } from '#lib/types/domain.js';
 
 /**
- * Runs an update on the signed-in user's own list on the page's service, whatever list the page
- * shows, and turns what can go wrong into a message for the card
+ * Runs an update on the signed-in user's own list on the given service, the page's or, on a
+ * combined list, the other one, and turns what can go wrong into a message for the card
  */
 export async function updateOwnList<T>(
   { locals, cookies }: Pick<RequestEvent, 'locals' | 'cookies'>,

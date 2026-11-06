@@ -1,14 +1,22 @@
 import { error, type Cookies } from '@sveltejs/kit';
 
 import { withoutHiddenMature } from '#lib/anime.js';
+import { combinePlannedLists, combineWatchingLists, otherDomain } from '#lib/combined-list.js';
 import { HIDDEN_SECTIONS_COOKIE, parseHiddenSections } from '#lib/hidden-sections.js';
 import { isUserName } from '#lib/match.js';
+import {
+  linkedAccounts,
+  signedInAccounts,
+  type LinkedAccounts,
+  type ListOwner,
+} from '#lib/profile-links.js';
+import { DEFAULT_SCORE_FORMAT } from '#lib/score.js';
 import {
   AniListNotFoundError,
   AniListTokenError,
   AniListRateLimitError,
 } from '#lib/server/anilist-client.js';
-import { AniListApi } from '#lib/server/anilist.js';
+import { AniListApi, withRecentAirings } from '#lib/server/anilist.js';
 import { MAL_ENABLED, withMalToken } from '#lib/server/myanimelist-auth.js';
 import {
   MalForbiddenError,
@@ -19,7 +27,7 @@ import {
 import { MyAnimeListApi } from '#lib/server/myanimelist.js';
 import { takeClientLimit } from '#lib/server/rate-limit.js';
 import { clearMalSession, clearSession } from '#lib/server/session.js';
-import type { PlanningPageData, UserAnimeList } from '#lib/types/api.js';
+import type { CombinedList, PlannedList, PlanningPageData, UserAnimeList } from '#lib/types/api.js';
 import { DOMAIN_NAMES, isDomain, type Domain } from '#lib/types/domain.js';
 
 type ListEvent = { locals: App.Locals; cookies: Cookies };
@@ -30,6 +38,51 @@ function listDomain(domain: string): Domain {
     error(404, `Unknown domain: ${domain}`);
   }
   return domain;
+}
+
+/** The viewer's accounts on both services when the list is one of theirs; null otherwise */
+function linkedOwner(locals: App.Locals, domain: Domain, username: string) {
+  const accounts = signedInAccounts(
+    locals.session?.user ?? null,
+    locals.malSession?.user ?? null,
+    locals.preferences.mainList
+  );
+  return linkedAccounts({ domain, name: username }, accounts);
+}
+
+/**
+ * Where to show the list instead: the viewer's main list, when this is their own list on the other
+ * service while they're signed in to both, as their two lists show as one there. Null otherwise
+ */
+export function mainListInstead(
+  locals: App.Locals,
+  domain: Domain,
+  username: string
+): ListOwner | null {
+  const linked = linkedOwner(locals, domain, username);
+  return linked && linked.main.domain !== domain ? linked.main : null;
+}
+
+/** The viewer's accounts, when the list is their own main one while signed in to both services */
+export function combinedOwner(locals: App.Locals, domain: Domain, username: string) {
+  const linked = linkedOwner(locals, domain, username);
+  return linked?.main.domain === domain ? linked : null;
+}
+
+/**
+ * Which service a save from the viewer's list goes to: the list's own, unless it's combined and the
+ * form names the other, where the anime is when it's only on that one's list. Null when the form
+ * names a service it can't go to
+ */
+export function saveTarget(
+  locals: App.Locals,
+  domain: Domain,
+  username: string,
+  list: FormDataEntryValue | null
+): Domain | null {
+  if (list === null || list === '' || list === domain) return domain;
+  if (typeof list !== 'string' || !isDomain(list)) return null;
+  return combinedOwner(locals, domain, username) ? list : null;
 }
 
 /**
@@ -78,16 +131,16 @@ export async function loadAnimePage({
   // Read on every load, so the list is rendered already filtered
   const hiddenSections = parseHiddenSections(cookies.get(HIDDEN_SECTIONS_COOKIE));
 
-  let userAnimeList;
+  const combined = combinedOwner(locals, domain, params.username);
+  const enrichAirings = url?.searchParams.get('view') !== 'calendar';
+  let userAnimeList: UserAnimeList & { combined?: CombinedList };
   try {
-    const limit = await takeClientLimit(getClientAddress(), 'read', 2);
+    // A combined list reads both services, which costs the viewer one more read
+    const limit = await takeClientLimit(getClientAddress(), 'read', combined ? 3 : 2);
     if (!limit.allowed) throw new AniListRateLimitError(limit.retryAfter);
-    userAnimeList = await getUserAnimeList(
-      domain,
-      params.username,
-      { locals, cookies },
-      url?.searchParams.get('view') !== 'calendar'
-    );
+    userAnimeList = combined
+      ? await readCombinedWatchingList(domain, combined, { locals, cookies }, enrichAirings)
+      : await getUserAnimeList(domain, params.username, { locals, cookies }, enrichAirings);
   } catch (err) {
     const retryAfter = checkReadError(err, domain, params.username, locals, !isDataRequest);
     // In the browser, the page may already show this list, reloading it by itself or after a
@@ -114,6 +167,7 @@ export async function loadAnimePage({
     username,
     avatarUrl,
     canEdit: userId !== null && viewer?.user.id === userId,
+    ...(userAnimeList.combined && { combined: userAnimeList.combined }),
     // Anime AniList marks as adult are left out entirely when the viewer chose not to see them
     watchingList: withoutHiddenMature(animeList, locals.preferences.showMature),
     scoreFormat,
@@ -141,13 +195,16 @@ export async function loadPlanningPage({
 }): Promise<PlanningPageData> {
   const domain = listDomain(params.domain);
   const { username } = params;
-  let list;
+  const combined = combinedOwner(locals, domain, username);
+  let list: PlannedList & { combined?: PlanningPageData['combined'] };
   try {
-    const limit = await takeClientLimit(getClientAddress(), 'read');
+    const limit = await takeClientLimit(getClientAddress(), 'read', combined ? 2 : 1);
     if (!limit.allowed) throw new AniListRateLimitError(limit.retryAfter);
-    list = await readList(domain, username, { locals, cookies }, (api) =>
-      api.getPlannedAnime(username)
-    );
+    list = combined
+      ? await readCombinedPlannedList(domain, combined, { locals, cookies })
+      : await readList(domain, username, { locals, cookies }, (api) =>
+          api.getPlannedAnime(username)
+        );
   } catch (err) {
     checkReadError(err, domain, username, locals, true);
     throw err;
@@ -175,6 +232,11 @@ export async function loadPlanningPage({
    */
   const listed = new Set(out.map(({ id }) => id));
   const plannedIds = new Set(planned.map(({ id }) => id));
+  // A combined list's anime only on MyAnimeList have no AniList id, so sequels match them by theirs
+  const malIds = (anime: { malId: number | null }[]) =>
+    new Set(anime.flatMap(({ malId }) => (malId === null ? [] : [malId])));
+  const listedMal = malIds(out);
+  const plannedMal = malIds(planned);
   const { showMature } = locals.preferences;
   // Of when each was planned and started, only the order and the prequels it gives are shown
   const outNow = out.map(({ addedAt: _addedAt, startedOn, prequelIds, allSequels, ...anime }) => ({
@@ -184,22 +246,129 @@ export async function loadPlanningPage({
         ? []
         : prequelIds.filter((id) => (airedOn.get(id) ?? Infinity) < startedOn),
     sequels: allSequels
-      .filter(({ id, isAdult }) => !listed.has(id) && (showMature || !isAdult))
-      .map(({ isAdult: _isAdult, ...sequel }) => ({
+      .filter(
+        ({ id, malId, isAdult }) =>
+          !listed.has(id) && !(malId !== null && listedMal.has(malId)) && (showMature || !isAdult)
+      )
+      .map(({ isAdult: _isAdult, malId, ...sequel }) => ({
         ...sequel,
-        planned: plannedIds.has(sequel.id),
+        planned: plannedIds.has(sequel.id) || (malId !== null && plannedMal.has(malId)),
       })),
   }));
   return {
     domain,
     username: list.username,
     canEdit: list.userId !== null && viewer?.user.id === list.userId,
+    ...(list.combined && { combined: list.combined }),
     planned: outNow,
     upcoming: planned.length - outNow.length,
     userProfileLink:
       domain === 'anilist'
         ? `https://anilist.co/user/${name}/animelist/Planning`
         : `https://myanimelist.net/animelist/${name}?status=6`,
+  };
+}
+
+/**
+ * Of two reads, the main service's and the other's. The main one failing fails the page, as for any
+ * list; the other one failing only leaves its list out, saying why
+ */
+function mainAndOther<T>(
+  main: Domain,
+  reads: Record<Domain, PromiseSettledResult<T>>
+): { main: T; other: T | null; partial?: string } {
+  const other = otherDomain(main);
+  const [mainRead, otherRead] = [reads[main], reads[other]];
+  if (mainRead.status === 'rejected') throw mainRead.reason;
+  if (otherRead.status === 'fulfilled') return { main: mainRead.value, other: otherRead.value };
+  console.error(`Could not read the ${DOMAIN_NAMES[other]} list to combine`, otherRead.reason);
+  return {
+    main: mainRead.value,
+    other: null,
+    partial: `Showing your ${DOMAIN_NAMES[main]} list only: ${DOMAIN_NAMES[other]} didn't answer.`,
+  };
+}
+
+async function settle<T>(read: () => Promise<T>): Promise<PromiseSettledResult<T>> {
+  try {
+    return { status: 'fulfilled', value: await read() };
+  } catch (reason) {
+    return { status: 'rejected', reason };
+  }
+}
+
+/**
+ * The viewer's Watching lists on both services as one, on their main list. Both are read at once,
+ * and the anime on the MyAnimeList list that the AniList one has already aren't asked about again,
+ * so matching lists cost AniList nothing more. Airings are then looked up once, for both
+ */
+async function readCombinedWatchingList(
+  main: Domain,
+  { aniListName, malName }: LinkedAccounts,
+  event: ListEvent,
+  enrichAirings: boolean
+): Promise<UserAnimeList & { combined: CombinedList }> {
+  const [aniList, malEntries] = await Promise.all([
+    settle(() => readAniList(event, (api) => api.getUserAnimeList(aniListName, false))),
+    settle(() =>
+      readMal(malName, event, async (api) => ({
+        api,
+        entries: await api.getWatchingEntries(malName),
+      }))
+    ),
+  ]);
+  const known =
+    aniList.status === 'fulfilled'
+      ? new Map(
+          aniList.value.animeList.flatMap((anime) =>
+            anime.malId === null ? [] : [[anime.malId, anime] as const]
+          )
+        )
+      : undefined;
+  const mal =
+    malEntries.status === 'fulfilled'
+      ? await settle(() =>
+          malEntries.value.api.buildList(malName, malEntries.value.entries, { known })
+        )
+      : malEntries;
+  const lists = mainAndOther(main, { anilist: aniList, myanimelist: mal });
+  const animeList = lists.other
+    ? combineWatchingLists(lists.main.animeList, lists.other.animeList, main)
+    : lists.main.animeList;
+  // Anime AniList doesn't know are only ever on MyAnimeList, whichever list is the main one
+  const unmatched = mal.status === 'fulfilled' ? mal.value.unmatched : undefined;
+  return {
+    ...lists.main,
+    animeList: enrichAirings ? await withRecentAirings(animeList) : animeList,
+    unmatched,
+    combined: {
+      aniListName,
+      otherScoreFormat: lists.other?.scoreFormat ?? DEFAULT_SCORE_FORMAT,
+      ...(lists.partial && { partial: lists.partial }),
+    },
+  };
+}
+
+/** The viewer's plan lists on both services as one, on their main list, both read at once */
+async function readCombinedPlannedList(
+  main: Domain,
+  { aniListName, malName }: LinkedAccounts,
+  event: ListEvent
+): Promise<PlannedList & { combined: PlanningPageData['combined'] }> {
+  const [aniList, mal] = await Promise.all([
+    settle(() => readAniList(event, (api) => api.getPlannedAnime(aniListName))),
+    settle(() => readMal(malName, event, (api) => api.getPlannedAnime(malName))),
+  ]);
+  const lists = mainAndOther(main, { anilist: aniList, myanimelist: mal });
+  const [aniListPlanned, malPlanned] =
+    main === 'anilist' ? [lists.main, lists.other] : [lists.other, lists.main];
+  return {
+    ...lists.main,
+    planned:
+      aniListPlanned && malPlanned
+        ? combinePlannedLists(aniListPlanned.planned, malPlanned.planned)
+        : lists.main.planned,
+    combined: { aniListName, ...(lists.partial && { partial: lists.partial }) },
   };
 }
 

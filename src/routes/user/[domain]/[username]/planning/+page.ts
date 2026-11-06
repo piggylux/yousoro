@@ -1,11 +1,12 @@
 import { browser } from '$app/env';
-import { error } from '@sveltejs/kit';
+import { error, redirect } from '@sveltejs/kit';
 
 import { viewerKey } from '#lib/list-data.js';
 import { getRememberedPlanned, rememberPlanned } from '#lib/planning.js';
+import { linkedAccounts, signedInAccounts } from '#lib/profile-links.js';
 import { retryAfterSeconds } from '#lib/read-retry.js';
 import type { PlanningPageData } from '#lib/types/api.js';
-import { DOMAIN_NAMES, isDomain } from '#lib/types/domain.js';
+import { DOMAIN_NAMES, isDomain, listPath } from '#lib/types/domain.js';
 
 import type { PageLoad } from './$types';
 
@@ -19,6 +20,16 @@ export const load: PageLoad = async ({ parent, fetch, params }) => {
   const { preferences, user, malUser } = await parent();
   const viewer = viewerKey(user, malUser);
   const { domain, username } = params;
+  // Signed in to both services, the viewer's two plan lists show as one, on their main list
+  const linked = isDomain(domain)
+    ? linkedAccounts(
+        { domain, name: username },
+        signedInAccounts(user, malUser, preferences.mainList)
+      )
+    : null;
+  if (linked && linked.main.domain !== domain) {
+    redirect(303, `${listPath(linked.main.domain, linked.main.name)}/planning`);
+  }
   if (browser) {
     const saved = getRememberedPlanned(viewer, preferences.showMature, domain, username);
     if (saved) return saved;

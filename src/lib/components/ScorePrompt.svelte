@@ -11,7 +11,7 @@
   type Props = {
     /** The anime just completed, which has already left the Watching list */
     anime: Anime;
-    /** The user's score format on the list's service */
+    /** The user's score format on the service the score is saved to */
     format: ScoreFormat;
     /** The service the list is on */
     service?: string;
@@ -93,6 +93,7 @@
     >
       <input type="hidden" name="mediaId" value={anime.id} />
       {#if anime.malId !== null}<input type="hidden" name="malId" value={anime.malId} />{/if}
+      {#if anime.onlyOn}<input type="hidden" name="list" value={anime.onlyOn} />{/if}
       <input type="hidden" name="scoreFormat" value={format} />
       <div class="field">
         <ScoreInput {format} bind:value={score} label="Your score" size="large" />
