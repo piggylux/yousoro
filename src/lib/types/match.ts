@@ -1,13 +1,24 @@
 import type { ScoreFormat } from '#lib/score.js';
+import type { Domain } from '#lib/types/domain.js';
+
+/** An anime's ids on each service */
+export type AnimeIds = {
+  /** AniList's; null on a MyAnimeList list, which only knows its own */
+  id: number | null;
+  /** MyAnimeList's; null when AniList doesn't know it, as for anime MyAnimeList doesn't have */
+  malId: number | null;
+};
 
 /** An anime on someone's list, with what's needed to show it */
-export type ListedAnime = {
-  id: number;
+export type ListedAnime = AnimeIds & {
   title: string;
   coverUrl: string | null;
-  /** Marked as adult (18+) on AniList */
+  /** Marked as adult (18+) */
   isAdult: boolean;
-  /** The average of all AniList users' scores, out of 100; null until enough have scored it */
+  /**
+   * The average of all users' scores on the list's service, out of 100; null until enough have
+   * scored it
+   */
   meanScore: number | null;
 };
 
@@ -20,20 +31,22 @@ export type ScoredAnime = ListedAnime & {
 };
 
 /**
- * What someone thinks of the anime on their public AniList list, to compare with someone else's.
- * Anime they've scored or plan to watch come with titles and covers, to show them; the others they
- * have seen are only ids
+ * What someone thinks of the anime on their public list, to compare with someone else's. Anime
+ * they've scored or plan to watch come with titles and covers, to show them; the others they have
+ * seen are only ids
  */
 export type TasteProfile = {
-  id: number;
-  /** Their name, as AniList spells it */
+  domain: Domain;
+  /** Their AniList user id; null on MyAnimeList, which doesn't say whose list it is */
+  id: number | null;
+  /** Their name, as AniList spells it, or as it was asked for on MyAnimeList */
   name: string;
   avatarUrl: string | null;
   /** How they score anime, which `score` is in */
   scoreFormat: ScoreFormat;
   scored: ScoredAnime[];
   /** The other anime they've watched some or all of, dropped ones included */
-  seen: number[];
+  seen: AnimeIds[];
   /** The anime they plan to watch, once they've started airing */
   planned: ListedAnime[];
 };

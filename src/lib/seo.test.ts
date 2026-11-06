@@ -103,21 +103,45 @@ describe('search metadata', () => {
   );
 
   it('titles a match and previews it with its own image, never indexing it', () => {
-    const seo = getPageSeo(new URL(`${SITE_ORIGIN}/user/anilist/Alice/match/Show%20Fan`));
-    expect(seo.title).toBe('Alice × Show Fan: Anime Taste Match | Yousoro');
+    const seo = getPageSeo(new URL(`${SITE_ORIGIN}/user/anilist/Alice/match/S%C3%B6ra`));
+    expect(seo.title).toBe('Alice × Söra: Anime Taste Match | Yousoro');
     expect(seo.image).toEqual({
-      url: `${SITE_ORIGIN}/user/anilist/Alice/match/Show%20Fan/preview.jpg`,
+      url: `${SITE_ORIGIN}/user/anilist/Alice/match/S%C3%B6ra/preview.jpg`,
       type: 'image/jpeg',
-      alt: "How Alice and Show Fan's anime tastes match",
+      alt: "How Alice and Söra's anime tastes match",
     });
     expect(seo.canonical).toBeUndefined();
     expect(seo.noindex).toBe(true);
   });
 
+  it('titles a match across services, with the service only for someone on the other', () => {
+    const seo = getPageSeo(new URL(`${SITE_ORIGIN}/user/myanimelist/Mika/match/anilist:Alice`));
+    expect(seo.title).toBe('Mika × Alice: Anime Taste Match | Yousoro');
+    expect(seo.image.url).toBe(
+      `${SITE_ORIGIN}/user/myanimelist/Mika/match/anilist:Alice/preview.jpg`
+    );
+  });
+
+  it('titles a MyAnimeList group and badge, naming the services', () => {
+    const group = getPageSeo(
+      new URL(`${SITE_ORIGIN}/user/myanimelist/Mika/together/Sora/anilist:Alice`)
+    );
+    expect(group.title).toBe('What Should Mika, Sora and Alice Watch Together? | Yousoro');
+    expect(group.description).toBe(
+      'Anime none of Mika, Sora and Alice have seen yet, picked from their MyAnimeList and AniList plan lists.'
+    );
+    expect(group.image.url).toBe(
+      `${SITE_ORIGIN}/user/myanimelist/Mika/together/Sora/anilist:Alice/preview.jpg`
+    );
+    const badge = getPageSeo(new URL(`${SITE_ORIGIN}/user/myanimelist/Mika/badge`));
+    expect(badge.title).toBe("Mika's Profile Badge | Yousoro");
+    expect(badge.description).toContain('on a MyAnimeList profile');
+  });
+
   it('invites anyone to compare with someone, with an image of their favorites', () => {
     const seo = getPageSeo(new URL(`${SITE_ORIGIN}/user/anilist/Alice/match`));
     expect(seo.title).toBe('Compare Your Anime Taste with Alice | Yousoro');
-    expect(seo.image.url).toBe(matchPreviewImage('Alice'));
+    expect(seo.image.url).toBe(matchPreviewImage({ domain: 'anilist', name: 'Alice' }));
     expect(seo.image.url).toBe(`${SITE_ORIGIN}/user/anilist/Alice/match/preview.jpg`);
     expect(seo.noindex).toBe(true);
   });

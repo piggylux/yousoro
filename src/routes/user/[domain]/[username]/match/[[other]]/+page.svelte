@@ -7,17 +7,29 @@
   import ShareButton from '#lib/components/ShareButton.svelte';
   import SharedAnimePoster from '#lib/components/SharedAnimePoster.svelte';
   import YouSvg from '#lib/images/minimalist_you.svg';
-  import { describeMatch, finalThought, matchComment, voiceFor } from '#lib/match-words.js';
   import {
+    describeMatch,
+    finalThought,
+    joinNames,
+    matchComment,
+    serviceNames,
+    voiceFor,
+  } from '#lib/match-words.js';
+  import {
+    canCompare,
     compareTastes,
     favoriteAnime,
     loadTasteProfile,
     matchPath,
     MIN_BOTH_SCORED,
-    parseUserName,
+    parsePerson,
+    sameName,
+    samePerson,
     type TasteProfileState,
+    viewerAccounts,
   } from '#lib/match.js';
   import { describeScore, formatScore } from '#lib/score.js';
+  import { animePageUrl, DOMAIN_NAMES, type Domain, listPath } from '#lib/types/domain.js';
   import type { ScoredByBoth, TasteProfile } from '#lib/types/match.js';
 
   import type { PageProps } from './$types';
@@ -25,15 +37,21 @@
   let { data }: PageProps = $props();
 
   const pair = $derived(data.other !== null);
-  // Read again only when the names change, not when other page data does, as after a settings change
-  const name = $derived(data.name);
-  const other = $derived(data.other);
+  /*
+   * Read again only when the people change, not when other page data does, as after a settings
+   * change
+   */
+  const ownerDomain = $derived(data.owner.domain);
+  const ownerName = $derived(data.owner.name);
+  const otherDomain = $derived(data.other?.domain);
+  const otherName = $derived(data.other?.name);
 
   let first = $state<TasteProfileState>({ status: 'loading' });
   let second = $state<TasteProfileState>({ status: 'loading' });
   let attempt = $state(0);
   $effect(() => {
-    const [a, b] = [name, other];
+    const a = { domain: ownerDomain, name: ownerName };
+    const b = otherDomain && otherName ? { domain: otherDomain, name: otherName } : null;
     void attempt;
     let active = true;
     first = { status: 'loading' };
@@ -51,9 +69,12 @@
     };
   });
 
+  const people = $derived(data.other ? [data.owner, data.other] : [data.owner]);
   const states = $derived(pair ? [first, second] : [first]);
-  const missing = $derived(
-    [data.name, data.other ?? ''].filter((_, index) => states[index]?.status === 'missing')
+  const missing = $derived(people.filter((_, index) => states[index]?.status === 'missing'));
+  // Whose services are busy or not answering, to name them
+  const troubled = $derived(
+    people.filter((_, index) => ['busy', 'failed'].includes(states[index]?.status))
   );
   const retryAt = $derived(
     Math.max(0, ...states.map((state) => (state.status === 'busy' ? state.retryAt : 0)))
@@ -63,7 +84,7 @@
     states.every((state) => state.status === 'ready' || state.status === 'missing')
   );
 
-  // Counts down to when "Try again" can be used, while AniList is busy, and stops there
+  // Counts down to when "Try again" can be used, while a service is busy, and stops there
   let now = $state(Date.now());
   $effect(() => {
     if (retryAt <= Date.now()) return;
@@ -79,18 +100,25 @@
   const profileB = $derived(pair && second.status === 'ready' ? second.profile : null);
   const showMature = $derived(data.preferences.showMature);
   // Two names of one AniList account, which their spelling alone couldn't show: never compared
-  const sameUser = $derived(profileA !== null && profileA.id === profileB?.id);
+  const sameUser = $derived(
+    profileA !== null && profileB !== null && samePerson(profileA, profileB)
+  );
   const match = $derived(
     profileA && profileB && !sameUser ? compareTastes(profileA, profileB, { showMature }) : null
   );
-  // As AniList spells them once read, as typed until then
-  const nameA = $derived(profileA?.name ?? data.name);
-  const nameB = $derived(profileB?.name ?? data.other ?? '');
+  // As AniList spells them once read, as typed until then and on MyAnimeList
+  const personA = $derived({ domain: data.owner.domain, name: profileA?.name ?? data.owner.name });
+  const personB = $derived(
+    data.other ? { domain: data.other.domain, name: profileB?.name ?? data.other.name } : null
+  );
+  const nameA = $derived(personA.name);
+  const nameB = $derived(personB?.name ?? '');
+  const services = $derived(serviceNames(personB ? [personA, personB] : [personA]));
 
-  const voice = $derived(voiceFor(data.user?.name));
+  const voice = $derived(voiceFor(viewerAccounts(data.user, data.malUser, data.owner.domain)));
   const { isViewer, who, Who, whose, Whose } = $derived(voice);
-  const ownInvite = $derived(isViewer(data.name));
-  const viewerCompared = $derived(isViewer(nameA) || isViewer(nameB));
+  const ownInvite = $derived(isViewer(data.owner));
+  const viewerCompared = $derived(isViewer(personA) || (personB !== null && isViewer(personB)));
   // One list of words and titles, its sentences a space apart
   const thought = $derived(
     match && profileA && profileB
@@ -105,25 +133,27 @@
     if (!match || !profileA || !profileB) return [];
     const forA = { to: profileA, from: profileB, picks: match.picksForA };
     const forB = { to: profileB, from: profileA, picks: match.picksForB };
-    return (isViewer(profileA.name) ? [forA, forB] : [forB, forA]).filter(
-      ({ picks }) => picks.length
-    );
+    return (isViewer(profileA) ? [forA, forB] : [forB, forA]).filter(({ picks }) => picks.length);
   });
   const favorites = $derived(profileA ? favoriteAnime(profileA, { showMature }).slice(0, 6) : []);
 
   const share = $derived(
-    pair
+    personB
       ? {
-          url: `${page.url.origin}${matchPath(nameA, nameB)}`,
+          url: `${page.url.origin}${matchPath(personA, personB)}`,
           title: `${nameA} × ${nameB}: ${viewerCompared ? 'our' : 'an'} anime taste match on Yousoro`,
           subject: 'this match',
         }
       : {
-          url: `${page.url.origin}${matchPath(nameA)}`,
+          url: `${page.url.origin}${matchPath(personA)}`,
           title: `Compare your anime taste with ${ownInvite ? 'mine' : nameA} on Yousoro`,
           subject: `${ownInvite ? 'your' : `${nameA}'s`} taste match link`,
         }
   );
+
+  // A name typed in the form is on the page's service, and a link says which it's on
+  const pageService = $derived(DOMAIN_NAMES[data.owner.domain]);
+  const linkServices = $derived(data.malEnabled ? 'AniList or MyAnimeList' : 'AniList');
 
   /*
    * What's wrong with the name in the form: as the load found it, or caught here before sending it,
@@ -136,36 +166,45 @@
   let typed = $derived(data.invalidName ?? '');
   let nameInput = $state<HTMLInputElement>();
   function checkName(event: SubmitEvent) {
-    const name = parseUserName(typed);
-    formError = !name ? 'invalid' : name.toLowerCase() === data.name.toLowerCase() ? 'same' : null;
+    const person = parsePerson(typed, data.owner.domain);
+    formError =
+      !person || !canCompare(person, data.malEnabled)
+        ? 'invalid'
+        : sameName(person, data.owner)
+          ? 'same'
+          : null;
     if (!formError) return;
     event.preventDefault();
     // Read with the error it now describes
     nameInput?.focus();
   }
 
-  const listUrl = (name: string) => `/user/anilist/${encodeURIComponent(name)}`;
+  const serviceOf = (domain: Domain) => DOMAIN_NAMES[domain];
+  const listUrl = (person: { domain: Domain; name: string }) =>
+    listPath(person.domain, person.name);
+  const animeKey = (anime: { id: number | null; malId: number | null }) =>
+    `${anime.id}:${anime.malId}`;
   const count = (value: number) => value.toLocaleString();
 </script>
 
 {#snippet scoredRows(entries: ScoredByBoth[], a: TasteProfile, b: TasteProfile)}
   <ul class="anime-rows">
-    {#each entries as { anime, a: scoreA, b: scoreB } (anime.id)}
+    {#each entries as { anime, a: scoreA, b: scoreB } (animeKey(anime))}
       <li>
         <AnimeRow
           {anime}
-          href={`https://anilist.co/anime/${anime.id}`}
-          label={`${anime.title}: ${who(a.name)} ${describeScore(scoreA, a.scoreFormat)}, ${who(b.name)} ${describeScore(scoreB, b.scoreFormat)}, opens in a new tab`}
+          href={animePageUrl('anilist', anime)}
+          label={`${anime.title}: ${who(a)} ${describeScore(scoreA, a.scoreFormat)}, ${who(b)} ${describeScore(scoreB, b.scoreFormat)}, opens in a new tab`}
           blurMature={data.preferences.blurMature}
         >
           {#snippet details()}
             <span class="row-scores">
               <span
-                >{Who(a.name)}
+                >{Who(a)}
                 <strong>{formatScore(scoreA, a.scoreFormat)}</strong></span
               >
               <span
-                >{Who(b.name)}
+                >{Who(b)}
                 <strong>{formatScore(scoreB, b.scoreFormat)}</strong></span
               >
             </span>
@@ -177,13 +216,13 @@
 {/snippet}
 
 {#snippet compareForm()}
-  <form class="compare-form" method="get" action={matchPath(data.name)} onsubmit={checkName}>
+  <form class="compare-form" method="get" action={matchPath(data.owner)} onsubmit={checkName}>
     <label for="compare-name">
       {pair
         ? `Compare ${nameA} with someone else`
         : ownInvite
           ? 'Compare with anyone'
-          : 'Your AniList name'}
+          : `Your ${pageService} name`}
     </label>
     <div class="compare-row">
       <input
@@ -193,12 +232,12 @@
         name="with"
         required
         bind:value={typed}
-        placeholder="AniList name or profile link"
+        placeholder={`${pageService} name or profile link`}
         autocapitalize="off"
         autocomplete="off"
         spellcheck="false"
         aria-invalid={formError ? 'true' : undefined}
-        aria-describedby={formError ? 'compare-error' : undefined}
+        aria-describedby={formError ? 'compare-error' : 'compare-hint'}
         oninput={() => (formError = null)}
       />
       <button class="tw:btn tw:btn-primary">Compare</button>
@@ -206,21 +245,26 @@
     {#if formError}
       <p id="compare-error" class="form-error">
         {#if formError === 'invalid'}
-          That doesn't look like an AniList name. Try the name shown on their profile.
+          That doesn't look like a name. Try the one shown on their profile, or paste a link to it.
         {:else if ownInvite}
           That's you! Enter a friend's name to compare.
         {:else if pair}
           That's {nameA}. Enter someone else's name to compare.
         {:else}
-          That's {nameA}. Enter your own AniList name to compare with them.
+          That's {nameA}. Enter your own name to compare with them.
         {/if}
+      </p>
+    {:else}
+      <p id="compare-hint" class="form-hint">
+        A name is looked up on {pageService}; paste a link to their {linkServices} profile to compare
+        across sites.
       </p>
     {/if}
   </form>
 {/snippet}
 
 <AutoReadRetry
-  retryKey={`match:${data.name}:${data.other ?? ''}`}
+  retryKey={`match:${ownerDomain}:${ownerName}:${otherDomain ?? ''}:${otherName ?? ''}`}
   {retryAt}
   recovered={settled}
   onretry={() => attempt++}
@@ -261,8 +305,8 @@
       <p class="summary">
         {#if pair}
           Anime taste match ·
-          <a href={listUrl(nameA)}>{Whose(nameA)} list</a> ·
-          <a href={listUrl(nameB)}>{Whose(nameB)} list</a>
+          <a href={listUrl(personA)}>{Whose(personA)} list</a>
+          {#if personB}· <a href={listUrl(personB)}>{Whose(personB)} list</a>{/if}
         {:else if ownInvite}
           Share this page so friends can see how their scores match yours.
         {:else}
@@ -273,28 +317,40 @@
   </header>
 
   {#if missing.length}
-    <!-- A signed-in viewer exists on AniList, so their own list is missing because it's private -->
-    {@const others = missing.filter((name) => !isViewer(name))}
+    <!-- A signed-in viewer's account exists, so their own list is missing because it's private -->
+    {@const others = missing.filter((person) => !isViewer(person))}
+    {@const own = missing.find((person) => isViewer(person))}
     <div class="notice" role="alert">
-      {#if others.length < missing.length}
-        <h2>Your AniList list isn't public</h2>
+      {#if own}
+        <h2>Your {serviceOf(own.domain)} list isn't public</h2>
         <p>
-          Make it public in your AniList settings to compare it{others.length
-            ? `, and check the spelling of ${others[0]}, whose list can't be found either`
+          Make it public in your {serviceOf(own.domain)} settings to compare it{others.length
+            ? `, and check the spelling of ${others[0].name}, whose list can't be found either`
             : ''}.
         </p>
       {:else}
         <h2>
           {others.length === 2
-            ? `There are no public AniList lists for ${others[0]} or ${others[1]}`
-            : `There's no public AniList list for ${others[0]}`}
+            ? `There are no public ${serviceNames(others, 'or')} lists for ${joinNames(
+                others.map(({ name }) => name),
+                'or'
+              )}`
+            : `There's no public ${serviceOf(others[0].domain)} list for ${others[0].name}`}
         </h2>
-        <p>Check the spelling, or ask them to make their list public on AniList.</p>
+        <p>
+          Check the spelling, or ask them to make their list public on {serviceNames(others, 'or')}.
+        </p>
       {/if}
     </div>
   {:else if failed || (retryAt && !settled)}
+    {@const busyServices = serviceNames(troubled)}
+    {@const both = new Set(troubled.map(({ domain }) => domain)).size > 1}
     <div class="notice" role="status">
-      <h2>{failed ? "AniList isn't answering right now" : 'AniList is busy right now'}</h2>
+      <h2>
+        {failed
+          ? `${busyServices} ${both ? "aren't" : "isn't"} answering right now`
+          : `${busyServices} ${both ? 'are' : 'is'} busy right now`}
+      </h2>
       <p>Please try again in a moment.</p>
       <button type="button" class="tw:btn" disabled={now < retryAt} onclick={() => attempt++}>
         {now < retryAt ? `Try again in ${Math.ceil((retryAt - now) / 1000)}s` : 'Try again'}
@@ -303,7 +359,9 @@
   {:else if sameUser}
     <div class="notice" role="alert">
       <h2>That's {nameA} twice</h2>
-      <p>Both names belong to the same AniList account. Compare {nameA} with someone else below.</p>
+      <p>
+        Both names belong to the same {services} account. Compare {nameA} with someone else below.
+      </p>
     </div>
   {:else if pair && !match}
     <div class="result loading" aria-hidden="true"><span></span><span></span></div>
@@ -331,7 +389,7 @@
         <p class="basis">
           A match needs at least {MIN_BOTH_SCORED} anime scored by both, {match.bothScored
             ? `and there ${match.bothScored === 1 ? 'is' : 'are'} only ${match.bothScored} so far`
-            : 'and there are none yet'}. Scores on AniList count right away.
+            : 'and there are none yet'}. Scores on {services} count right away.
         </p>
       {/if}
     </div>
@@ -350,20 +408,20 @@
       </section>
     {/if}
 
-    {#each pickSections as { to, from, picks }, index (to.id)}
+    {#each pickSections as { to, from, picks }, index (`${to.domain}:${to.name}`)}
       <section class="match-section" aria-labelledby={`picks-${index}`}>
         <h2 id={`picks-${index}`}>
-          For {who(to.name)}, from {whose(from.name)} favorites
+          For {who(to)}, from {whose(from)} favorites
         </h2>
         <ul class="poster-grid">
-          {#each picks as { anime, planned } (anime.id)}
+          {#each picks as { anime, planned } (animeKey(anime))}
             <li>
               <SharedAnimePoster
                 {anime}
                 blurMature={data.preferences.blurMature}
                 detail={{
                   badge: `${planned ? 'Planned · ' : ''}${formatScore(anime.score, from.scoreFormat)}`,
-                  label: `${who(from.name)} scored it ${describeScore(anime.score, from.scoreFormat)}${planned ? `, on ${whose(to.name)} plan list` : ''}`,
+                  label: `${who(from)} scored it ${describeScore(anime.score, from.scoreFormat)}${planned ? `, on ${whose(to)} plan list` : ''}`,
                 }}
               />
             </li>
@@ -393,16 +451,16 @@
 
   {#if !pair && favorites.length && profileA}
     <section class="match-section" aria-labelledby="favorites">
-      <h2 id="favorites">{Whose(nameA)} favorites</h2>
+      <h2 id="favorites">{Whose(personA)} favorites</h2>
       <ul class="poster-grid">
-        {#each favorites as anime (anime.id)}
+        {#each favorites as anime (animeKey(anime))}
           <li>
             <SharedAnimePoster
               {anime}
               blurMature={data.preferences.blurMature}
               detail={{
                 badge: formatScore(anime.score, profileA.scoreFormat),
-                label: `${who(nameA)} scored it ${describeScore(anime.score, profileA.scoreFormat)}`,
+                label: `${who(personA)} scored it ${describeScore(anime.score, profileA.scoreFormat)}`,
               }}
             />
           </li>
@@ -461,7 +519,7 @@
     font-weight: 650;
     letter-spacing: -0.02em;
     line-height: 1.25;
-    /* AniList names are one word of up to 20 letters, wider than a phone has room for */
+    /* A name is one long word, which can be wider than a phone has room for */
     overflow-wrap: anywhere;
   }
 
@@ -663,10 +721,15 @@
     padding-inline: 20px;
   }
 
-  .form-error {
+  .form-error,
+  .form-hint {
     margin-top: 8px;
     color: var(--text-heading);
     font-size: 0.8125rem;
+  }
+
+  .form-hint {
+    color: var(--text-accent);
   }
 
   @media (max-width: 480px) {

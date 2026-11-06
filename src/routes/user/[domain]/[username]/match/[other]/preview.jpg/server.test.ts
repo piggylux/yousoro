@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AniListNotFoundError, getTasteProfile } from '#lib/server/anilist-client.js';
+import { getTasteProfile as getMalTasteProfile } from '#lib/server/myanimelist-client.js';
 import {
   renderMatchInvitePreview,
   renderMatchPreview,
@@ -11,8 +12,13 @@ import type { TasteProfile } from '#lib/types/match.js';
 
 import { GET } from './+server.js';
 
+vi.mock('$app/env/private', () => ({ MAL_CLIENT_ID: 'client-id', MAL_CLIENT_SECRET: 'secret' }));
 vi.mock('#lib/server/anilist-client.js', async (original) => ({
   ...(await original<typeof import('#lib/server/anilist-client.js')>()),
+  getTasteProfile: vi.fn(),
+}));
+vi.mock('#lib/server/myanimelist-client.js', async (original) => ({
+  ...(await original<typeof import('#lib/server/myanimelist-client.js')>()),
   getTasteProfile: vi.fn(),
 }));
 vi.mock('#lib/server/preview-image.js', () => ({
@@ -23,6 +29,7 @@ vi.mock('#lib/server/preview-image.js', () => ({
 vi.mock('#lib/server/rate-limit.js', () => ({ takeClientLimit: vi.fn() }));
 
 const profile = (id: number, name: string): TasteProfile => ({
+  domain: 'anilist',
   id,
   name,
   avatarUrl: null,
@@ -32,9 +39,9 @@ const profile = (id: number, name: string): TasteProfile => ({
   planned: [],
 });
 
-function event(username: string, other: string) {
+function event(username: string, other: string, domain = 'anilist') {
   return {
-    params: { domain: 'anilist', username, other },
+    params: { domain, username, other },
     getClientAddress: () => '127.0.0.1',
   } as unknown as Parameters<typeof GET>[0];
 }
@@ -66,6 +73,24 @@ describe('match preview image', () => {
       expect.stringContaining('s-maxage=3600')
     );
     expect(renderMatchPreview).not.toHaveBeenCalled();
+  });
+
+  it('draws a match with someone on MyAnimeList, by the name the link gives them', async () => {
+    const mika = { ...profile(0, 'mika'), domain: 'myanimelist' as const, id: null };
+    vi.mocked(getTasteProfile).mockResolvedValue(profile(1, 'Alice'));
+    vi.mocked(getMalTasteProfile).mockResolvedValue(mika);
+    expect(await (await GET(event('Alice', 'myanimelist:Mika'))).text()).toBe('match');
+    expect(getMalTasteProfile).toHaveBeenCalledWith('Mika');
+    expect(renderMatchPreview).toHaveBeenCalledWith(
+      profile(1, 'Alice'),
+      { ...mika, name: 'Mika' },
+      expect.stringContaining('s-maxage=3600')
+    );
+  });
+
+  it('knows nobody at a path naming no one', async () => {
+    await expect(GET(event('Alice', 'kitsu:Mika'))).rejects.toMatchObject({ status: 404 });
+    await expect(GET(event('Alice', 'Bob', 'kitsu'))).rejects.toMatchObject({ status: 404 });
   });
 
   it('falls back to the site preview for a little while when a list cannot be read', async () => {

@@ -1,12 +1,15 @@
 import { MAL_CLIENT_ID } from '$app/env/private';
 
+import { isUserName } from '#lib/match.js';
 import { retryAfterSeconds } from '#lib/read-retry.js';
+import { toScore100 } from '#lib/score.js';
 import {
   fingerprint,
   pauseMal,
   takeMalRequest,
   type RequestPriority,
 } from '#lib/server/rate-limit.js';
+import type { TasteProfile } from '#lib/types/match.js';
 import type { SessionUser } from '#lib/types/session-user.js';
 
 const API_URL = 'https://api.myanimelist.net/v2';
@@ -180,15 +183,22 @@ async function readPages(
  * A user's "Watching" anime and the ones they're rewatching: their own with their token, which
  * shows a private list to its owner, or anyone's public list by name
  */
-export async function getWatchingEntries(userName: string, token?: string): Promise<MalEntry[]> {
+export async function getWatchingEntries(
+  userName: string,
+  token?: string,
+  priority?: RequestPriority
+): Promise<MalEntry[]> {
   const path = `${API_URL}/users/${token ? '@me' : encodeURIComponent(userName)}/animelist`;
   const query = 'fields=list_status,nsfw&nsfw=true';
   const [watching, recentlyCompleted] = await Promise.all([
-    readPages(`${path}?status=watching&limit=1000&${query}`, token),
+    readPages(`${path}?status=watching&limit=1000&${query}`, token, { priority }),
     // MyAnimeList keeps a rewatch as a completed entry marked as being rewatched, and doesn't say
     // whether the "watching" filter includes them. A rewatch in progress is among the entries
     // updated last, so the latest completed ones are enough to find it
-    request<MalPage>(`${path}?status=completed&sort=list_updated_at&limit=100&${query}`, { token }),
+    request<MalPage>(`${path}?status=completed&sort=list_updated_at&limit=100&${query}`, {
+      token,
+      priority,
+    }),
   ]);
 
   const entries = new Map<number, MalEntry>();
@@ -235,6 +245,71 @@ export async function getPlanToWatchEntries(userName: string, token?: string): P
     planningCache.set(key, { entries, expiresAt: Date.now() + PLANNING_TTL_MS });
   }
   return entries;
+}
+
+/*
+ * Taste profiles are read for links anyone can share, so each is kept a while, apart from the
+ * public cache, as AniList's are
+ */
+const tasteCache = new Map<string, { profile: TasteProfile; expiresAt: number }>();
+const TASTE_TTL_MS = 10 * 60 * 1000;
+const MAX_TASTE_PROFILES = 50;
+
+/**
+ * What someone thinks of the anime on their public list, to compare tastes, from their whole list:
+ * a request per 1,000 anime. Like AniList's, it's read anonymously, as comparisons are public and
+ * cached for anyone, and it's the first read to give way when MyAnimeList is busy. Its anime keep
+ * MyAnimeList's ids only, as AniList would need a request per 50 to give its own; and as
+ * MyAnimeList says neither whose list it is nor how they spell their name, the name is as asked for
+ */
+export async function getTasteProfile(userName: string): Promise<TasteProfile> {
+  // Anyone can ask for any name, and a name that can't exist would still spend a request
+  if (!isUserName(userName)) throw new MalNotFoundError(`No MyAnimeList user named ${userName}`);
+  // MyAnimeList ignores case in names, so every spelling shares one read
+  const key = userName.toLowerCase();
+  const cached = tasteCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.profile;
+
+  const entries = await readPages(
+    `${API_URL}/users/${encodeURIComponent(key)}/animelist?limit=1000&fields=list_status,nsfw,status,mean&nsfw=true`,
+    undefined,
+    { cacheMs: 0, priority: 'spare' }
+  );
+
+  const profile: TasteProfile = {
+    domain: 'myanimelist',
+    id: null,
+    name: key,
+    avatarUrl: null,
+    // MyAnimeList scores are whole numbers out of 10
+    scoreFormat: 'POINT_10',
+    scored: [],
+    seen: [],
+    planned: [],
+  };
+  for (const { node, list_status } of entries) {
+    const anime = {
+      id: null,
+      malId: node.id,
+      title: node.title,
+      coverUrl: node.main_picture?.medium ?? null,
+      isAdult: node.nsfw === 'black',
+      // Out of 10 with two decimals on MyAnimeList, out of 100 like AniList's here
+      meanScore: node.mean ? Math.round(node.mean * 10) : null,
+    };
+    if (list_status.status === 'plan_to_watch') {
+      // Nobody can start one that hasn't aired yet, alone or with friends
+      if (node.status !== 'not_yet_aired') profile.planned.push(anime);
+    } else if (list_status.score > 0) {
+      const { score } = list_status;
+      profile.scored.push({ ...anime, score, score100: toScore100(score, profile.scoreFormat) });
+    } else profile.seen.push({ id: null, malId: node.id });
+  }
+
+  tasteCache.delete(key);
+  if (tasteCache.size >= MAX_TASTE_PROFILES) tasteCache.delete(tasteCache.keys().next().value!);
+  tasteCache.set(key, { profile, expiresAt: Date.now() + TASTE_TTL_MS });
+  return profile;
 }
 
 /** Every anime on the token owner's list, whatever its status */

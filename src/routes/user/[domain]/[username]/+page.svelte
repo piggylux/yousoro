@@ -55,11 +55,17 @@
   let { data }: { data: AnimePageData } = $props();
   const service = $derived(DOMAIN_NAMES[data.domain]);
   /*
-   * Friends, taste matches, groups and years in anime are made of AniList accounts: the list's own,
-   * or on a combined list, the owner's AniList account's
+   * Friends and years in anime are made of AniList accounts: the list's own, or on a combined list,
+   * the owner's AniList account's
    */
   const aniListName = $derived(
     data.domain === 'anilist' ? data.username : (data.combined?.aniListName ?? null)
+  );
+  // Taste matches, groups and badges are too when there's one, or else made of the list's own
+  const tasteOwner = $derived(
+    aniListName !== null
+      ? { domain: 'anilist' as const, name: aniListName }
+      : { domain: data.domain, name: data.username }
   );
   const friendsViewer = $derived(aniListName ? page.data.user : null);
   // A card only on the other service's list is scored as that service has it, and saved there
@@ -84,6 +90,7 @@
       header: headerList(accounts, owner),
       year: recapYear,
       aniListName,
+      tasteOwner,
     })
   );
 
@@ -506,51 +513,46 @@
         {/each}
         <ShareButton url={share.url} title={share.title} subject={share.subject} />
       </div>
-      {#if aniListName || moreLinks.length}
-        <div class="profile-actions">
-          {#if aniListName}
-            <a class="tw:btn tw:btn-sm profile-action" href={matchPath(aniListName)}>
-              <!-- Two tastes overlapping -->
-              <svg
-                viewBox="0 0 24 24"
-                width="16"
-                height="16"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.8"
-                aria-hidden="true"
-                ><circle cx="9" cy="12" r="6" /><circle cx="15" cy="12" r="6" /></svg
-              >
-              Taste match
-            </a>
-            <a class="tw:btn tw:btn-sm profile-action" href={togetherPath(aniListName)}>
-              <!-- A screen to share -->
-              <svg
-                viewBox="0 0 24 24"
-                width="16"
-                height="16"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.8"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                aria-hidden="true"
-                ><rect x="3" y="4" width="18" height="13" rx="2" /><path
-                  d="M8 21h8m-5.5-12.5 4 2-4 2Z"
-                /></svg
-              >
-              Watch together
-            </a>
-          {/if}
-          {#if moreLinks.length}
-            <MoreMenu label={`More from ${data.username}`}>
-              {#each moreLinks as link (link.href)}
-                <li><a href={link.href}>{link.label}</a></li>
-              {/each}
-            </MoreMenu>
-          {/if}
-        </div>
-      {/if}
+      <div class="profile-actions">
+        <a class="tw:btn tw:btn-sm profile-action" href={matchPath(tasteOwner)}>
+          <!-- Two tastes overlapping -->
+          <svg
+            viewBox="0 0 24 24"
+            width="16"
+            height="16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            aria-hidden="true"><circle cx="9" cy="12" r="6" /><circle cx="15" cy="12" r="6" /></svg
+          >
+          Taste match
+        </a>
+        <a class="tw:btn tw:btn-sm profile-action" href={togetherPath(tasteOwner)}>
+          <!-- A screen to share -->
+          <svg
+            viewBox="0 0 24 24"
+            width="16"
+            height="16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+            ><rect x="3" y="4" width="18" height="13" rx="2" /><path
+              d="M8 21h8m-5.5-12.5 4 2-4 2Z"
+            /></svg
+          >
+          Watch together
+        </a>
+        {#if moreLinks.length}
+          <MoreMenu label={`More from ${data.username}`}>
+            {#each moreLinks as link (link.href)}
+              <li><a href={link.href}>{link.label}</a></li>
+            {/each}
+          </MoreMenu>
+        {/if}
+      </div>
     </div>
 
     <!-- Updates with every progress change, since the list reloads after each one -->

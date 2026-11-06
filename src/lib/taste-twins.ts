@@ -39,7 +39,7 @@ export async function compareWithFriends(
     active = () => true,
   }: { load?: typeof loadTasteProfile; parallel?: number; active?: () => boolean } = {}
 ): Promise<TwinOutcome | null> {
-  const own = await load(owner);
+  const own = await load({ domain: 'anilist', name: owner });
   if (!active()) return null;
   if (own.status === 'missing') return { status: 'private' };
   if (own.status === 'busy') return own;
@@ -49,7 +49,9 @@ export async function compareWithFriends(
 
   for (let start = 0; start < friends.length; start += parallel) {
     const batch = friends.slice(start, start + parallel);
-    const states = await Promise.all(batch.map((friend) => load(friend.name)));
+    const states = await Promise.all(
+      batch.map((friend) => load({ domain: 'anilist', name: friend.name }))
+    );
     if (!active()) return null;
     // The latest wait, so the next round doesn't start before AniList is ready again
     let retryAt = 0;

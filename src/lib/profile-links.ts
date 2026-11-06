@@ -1,10 +1,9 @@
-import { type Domain, listPath } from '#lib/types/domain.js';
+import { type Domain, listPath, type ListOwner } from '#lib/types/domain.js';
 import type { SessionUser } from '#lib/types/session-user.js';
 import { wrappedPath } from '#lib/wrapped.js';
 
+export type { ListOwner };
 export type SignedInAccount = { domain: Domain; user: SessionUser };
-/** Whose list it is, on which service */
-export type ListOwner = { domain: Domain; name: string };
 
 /** Every account signed in, the main list's first */
 export function signedInAccounts(
@@ -104,6 +103,7 @@ export function moreProfileLinks({
   header,
   year,
   aniListName,
+  tasteOwner,
 }: {
   owner: ListOwner;
   ownList: boolean;
@@ -116,6 +116,11 @@ export function moreProfileLinks({
    * AniList, their AniList account's on a combined list, and null otherwise
    */
   aniListName: string | null;
+  /**
+   * The account taste matches, groups and badges are made of: their AniList account's when it's
+   * known, as for friends, or else the list's own
+   */
+  tasteOwner: ListOwner;
 }): ProfileLink[] {
   const path = listPath(owner.domain, owner.name);
   const aniListPath = aniListName === null ? null : listPath('anilist', aniListName);
@@ -129,9 +134,14 @@ export function moreProfileLinks({
     );
     if (aniListPath) links.push({ href: `${aniListPath}/friends`, label: 'Friends' });
   }
-  if (aniListName !== null && aniListPath) {
+  if (aniListName !== null) {
     links.push({ href: wrappedPath(aniListName, year), label: `${year} in anime` });
-    if (ownList) links.push({ href: `${aniListPath}/badge`, label: 'Profile badge' });
+  }
+  if (ownList) {
+    links.push({
+      href: `${listPath(tasteOwner.domain, tasteOwner.name)}/badge`,
+      label: 'Profile badge',
+    });
   }
   return links;
 }

@@ -27,15 +27,15 @@ export class MyAnimeListApi implements Api {
     enrichAirings = true,
     priority?: RequestPriority
   ): Promise<UserAnimeList> {
-    const list = await this.buildList(username, await this.getWatchingEntries(username), {
+    const list = await this.buildList(username, await this.getWatchingEntries(username, priority), {
       priority,
     });
     return enrichAirings ? { ...list, animeList: await withRecentAirings(list.animeList) } : list;
   }
 
   /** Someone's Watching and Rewatching entries, as MyAnimeList has them, for `buildList` */
-  getWatchingEntries(username: string): Promise<MalEntry[]> {
-    return getWatchingEntries(username, this.signedIn?.token);
+  getWatchingEntries(username: string, priority?: RequestPriority): Promise<MalEntry[]> {
+    return getWatchingEntries(username, this.signedIn?.token, priority);
   }
 
   /**

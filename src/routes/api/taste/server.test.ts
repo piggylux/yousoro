@@ -6,17 +6,28 @@ import {
   AniListRateLimitError,
   getTasteProfile,
 } from '#lib/server/anilist-client.js';
+import {
+  getTasteProfile as getMalTasteProfile,
+  MalForbiddenError,
+  MalRateLimitError,
+} from '#lib/server/myanimelist-client.js';
 import { takeClientLimit } from '#lib/server/rate-limit.js';
 
-import { GET } from './[username]/+server.js';
+import { GET } from './[domain]/[username]/+server.js';
 
+vi.mock('$app/env/private', () => ({ MAL_CLIENT_ID: 'client-id', MAL_CLIENT_SECRET: 'secret' }));
 vi.mock('#lib/server/rate-limit.js', () => ({ takeClientLimit: vi.fn() }));
 vi.mock('#lib/server/anilist-client.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('#lib/server/anilist-client.js')>()),
   getTasteProfile: vi.fn(),
 }));
+vi.mock('#lib/server/myanimelist-client.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('#lib/server/myanimelist-client.js')>()),
+  getTasteProfile: vi.fn(),
+}));
 
 const PROFILE = {
+  domain: 'anilist' as const,
   id: 1,
   name: 'Alice',
   avatarUrl: null,
@@ -26,12 +37,15 @@ const PROFILE = {
   planned: [],
 };
 
-function event() {
+function event(domain = 'anilist', username = 'alice') {
   return {
-    params: { username: 'alice' },
+    params: { domain, username },
     locals: {},
     getClientAddress: () => '127.0.0.1',
-  } as unknown as RequestEvent<{ username: string }, '/api/taste/[username]'>;
+  } as unknown as RequestEvent<
+    { domain: string; username: string },
+    '/api/taste/[domain]/[username]'
+  >;
 }
 
 beforeEach(() => {
@@ -70,6 +84,39 @@ describe('taste profile endpoint', () => {
     expect(limited.status).toBe(429);
     expect(limited.headers.get('Cache-Control')).toBe('no-store');
     expect(getTasteProfile).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads a MyAnimeList list, keeping the name as it was asked for', async () => {
+    const mal = { ...PROFILE, domain: 'myanimelist' as const, id: null, name: 'mika' };
+    vi.mocked(getMalTasteProfile).mockResolvedValue(mal);
+    const response = await GET(event('myanimelist', 'mika'));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(mal);
+    expect(getMalTasteProfile).toHaveBeenCalledWith('mika');
+    expect(getTasteProfile).not.toHaveBeenCalled();
+    expect(response.headers.get('Cache-Control')).toBe(
+      'public, max-age=300, s-maxage=3600, stale-while-revalidate=86400'
+    );
+  });
+
+  it('keeps a private MyAnimeList list briefly, and never a busy answer, naming the service', async () => {
+    vi.mocked(getMalTasteProfile).mockRejectedValue(new MalForbiddenError('private'));
+    const missing = await GET(event('myanimelist', 'mika'));
+    expect(missing.status).toBe(404);
+    expect(missing.headers.get('Cache-Control')).toBe('public, max-age=300, s-maxage=300');
+    expect((await missing.json()).message).toBe("There's no public MyAnimeList list for mika");
+
+    vi.mocked(getMalTasteProfile).mockRejectedValue(new MalRateLimitError(30));
+    const busy = await GET(event('myanimelist', 'mika'));
+    expect(busy.status).toBe(429);
+    expect(busy.headers.get('Cache-Control')).toBe('no-store');
+    expect((await busy.json()).message).toBe('MyAnimeList is busy, please try again shortly');
+  });
+
+  it("knows no service but AniList's and MyAnimeList's", async () => {
+    const response = await GET(event('kitsu'));
+    expect(response.status).toBe(404);
+    expect(takeClientLimit).not.toHaveBeenCalled();
   });
 
   it('never keeps a failure', async () => {

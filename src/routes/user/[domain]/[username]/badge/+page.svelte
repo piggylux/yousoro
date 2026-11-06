@@ -1,28 +1,53 @@
 <script lang="ts">
   import CopyField from '#lib/components/CopyField.svelte';
+  import { sameName, viewerAccounts } from '#lib/match.js';
   import { badgePath, SITE_ORIGIN } from '#lib/seo.js';
+  import { DOMAIN_NAMES, listPath } from '#lib/types/domain.js';
 
   import type { PageProps } from './$types';
 
   let { data }: PageProps = $props();
 
-  const own = $derived(data.user?.name.toLowerCase() === data.name.toLowerCase());
-  // Most AniList profiles are dark, but a light theme chosen here is the likelier match
-  let theme = $derived<'light' | 'dark'>(data.preferences.theme === 'light' ? 'light' : 'dark');
+  const name = $derived(data.owner.name);
+  const service = $derived(DOMAIN_NAMES[data.owner.domain]);
+  const own = $derived(
+    viewerAccounts(data.user, data.malUser, data.owner.domain).some((account) =>
+      sameName(account, data.owner)
+    )
+  );
+  /*
+   * Most AniList profiles are dark and most MyAnimeList ones light, but a theme chosen here is the
+   * likelier match
+   */
+  let theme = $derived<'light' | 'dark'>(
+    data.owner.domain === 'myanimelist'
+      ? data.preferences.theme === 'dark'
+        ? 'dark'
+        : 'light'
+      : data.preferences.theme === 'light'
+        ? 'light'
+        : 'dark'
+  );
 
   /*
    * Visitors who click the badge see the list it shows, with every episode and what airs next. A
    * badge stays on a profile for good, so it's always the site's own address, never a preview's
    */
-  const listUrl = $derived(`${SITE_ORIGIN}/user/anilist/${encodeURIComponent(data.name)}`);
-  const imageUrl = $derived(`${SITE_ORIGIN}${badgePath(data.name, theme)}`);
-  const alt = $derived(`What ${data.name} is watching, tracked on Yousoro`);
+  const listUrl = $derived(`${SITE_ORIGIN}${listPath(data.owner.domain, name)}`);
+  const imageUrl = $derived(`${SITE_ORIGIN}${badgePath(data.owner, theme)}`);
+  const alt = $derived(`What ${name} is watching, tracked on Yousoro`);
   const snippets = $derived([
-    {
-      label: 'AniList profile',
-      value: `[img600(${imageUrl})](${listUrl})`,
-      hint: 'Paste it into About, under Profile in your AniList settings.',
-    },
+    data.owner.domain === 'anilist'
+      ? {
+          label: 'AniList profile',
+          value: `[img600(${imageUrl})](${listUrl})`,
+          hint: 'Paste it into About, under Profile in your AniList settings.',
+        }
+      : {
+          label: 'MyAnimeList profile',
+          value: `[url=${listUrl}][img]${imageUrl}[/img][/url]`,
+          hint: 'Paste it into About Me, under Edit Profile on MyAnimeList.',
+        },
     {
       label: 'Markdown',
       value: `[![${alt}](${imageUrl})](${listUrl})`,
@@ -39,17 +64,19 @@
 
 <section class="badge-page">
   <header>
-    <h1>{own ? 'Your profile badge' : `${data.name}'s profile badge`}</h1>
+    <h1>{own ? 'Your profile badge' : `${name}'s profile badge`}</h1>
     <p class="summary">
-      Show what {own ? "you're" : `${data.name} is`} watching on an AniList profile, in a README, or anywhere
-      that shows images. Visitors who click it see {own ? 'your' : `${data.name}'s`} whole list, episode
-      by episode. The badge keeps itself up to date, within an hour of each change.
+      Show what {own ? "you're" : `${name} is`} watching on {service === 'AniList' ? 'an' : 'a'}
+      {service} profile, in a README, or anywhere that shows images. Visitors who click it see {own
+        ? 'your'
+        : `${name}'s`} whole list, episode by episode. The badge keeps itself up to date, within an hour
+      of each change.
     </p>
   </header>
 
   <div class="preview" style:color-scheme={theme}>
     <!-- The badge's own size, so its room is kept while it's drawn -->
-    <img src={badgePath(data.name, theme)} {alt} width="600" height="180" />
+    <img src={badgePath(data.owner, theme)} {alt} width="600" height="180" />
   </div>
 
   <label class="theme-choice">
@@ -74,8 +101,8 @@
   </section>
 
   <p class="back">
-    <a href={`/user/anilist/${encodeURIComponent(data.name)}`}
-      ><span aria-hidden="true">←</span> {own ? 'Your watching list' : `${data.name}'s list`}</a
+    <a href={listPath(data.owner.domain, name)}
+      ><span aria-hidden="true">←</span> {own ? 'Your watching list' : `${name}'s list`}</a
     >
   </p>
 </section>

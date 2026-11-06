@@ -1,7 +1,7 @@
-import { joinNames } from '#lib/match-words.js';
-import { matchPath } from '#lib/match.js';
+import { joinNames, serviceNames } from '#lib/match-words.js';
+import { matchPath, parsePersonSegment } from '#lib/match.js';
 import { togetherPath } from '#lib/together.js';
-import { DOMAIN_NAMES, listPath, type Domain } from '#lib/types/domain.js';
+import { DOMAIN_NAMES, listPath, type Domain, type ListOwner } from '#lib/types/domain.js';
 import { wrappedPath } from '#lib/wrapped.js';
 
 export const SITE_ORIGIN = 'https://yousoro.vercel.app';
@@ -22,14 +22,14 @@ export function listPreviewImage(username: string, domain: Domain = 'anilist'): 
 }
 
 /** A profile badge of a list, as badge.jpg draws it, for light or dark pages */
-export function badgePath(username: string, theme: 'light' | 'dark'): string {
-  const path = `/user/anilist/${encodeURIComponent(username)}/badge.jpg`;
+export function badgePath(owner: ListOwner, theme: 'light' | 'dark'): string {
+  const path = `${listPath(owner.domain, owner.name)}/badge.jpg`;
   return theme === 'dark' ? `${path}?theme=dark` : path;
 }
 
-/** The link preview of a group picking an anime, or of an invitation to join `username` alone */
-export function groupPreviewImage(username: string, others: string[]): string {
-  return `${SITE_ORIGIN}${togetherPath(username, others)}/preview.jpg`;
+/** The link preview of a group picking an anime, or of an invitation to join `host` alone */
+export function groupPreviewImage(host: ListOwner, others: ListOwner[]): string {
+  return `${SITE_ORIGIN}${togetherPath(host, others)}/preview.jpg`;
 }
 
 /** The link preview of someone's year in anime */
@@ -37,9 +37,9 @@ export function wrappedPreviewImage(username: string, year: number): string {
   return `${SITE_ORIGIN}${wrappedPath(username, year)}/preview.jpg`;
 }
 
-/** The link preview of a taste match, or of an invitation to compare with `username` alone */
-export function matchPreviewImage(username: string, other?: string): string {
-  return `${SITE_ORIGIN}${matchPath(username, other)}/preview.jpg`;
+/** The link preview of a taste match, or of an invitation to compare with `owner` alone */
+export function matchPreviewImage(owner: ListOwner, other?: ListOwner): string {
+  return `${SITE_ORIGIN}${matchPath(owner, other)}/preview.jpg`;
 }
 
 type SeoUrl = Pick<URL, 'pathname' | 'origin'> & {
@@ -53,20 +53,30 @@ export function getPageSeo(url: SeoUrl, status = 200, resolvedUsername?: string)
   let canonical: string | undefined;
   let image = { url: SHARE_IMAGE, type: 'image/png', alt: SHARE_IMAGE_ALT };
   const home = path === '/home';
-  const taste = path.match(/^\/user\/anilist\/([^/]+)\/match(?:\/([^/]+))?$/);
-  const group = path.match(/^\/user\/anilist\/([^/]+)\/together((?:\/[^/]+)*)$/);
+  const taste = path.match(/^\/user\/(anilist|myanimelist)\/([^/]+)\/match(\/[^/]+)?$/);
+  const group = path.match(/^\/user\/(anilist|myanimelist)\/([^/]+)\/together((?:\/[^/]+)*)$/);
   const wrapped = path.match(/^\/user\/anilist\/([^/]+)\/wrapped\/(\d{4})$/);
-  const badge = path.match(/^\/user\/anilist\/([^/]+)\/badge$/);
-  // The names in the path of a group, a year in anime or a badge, its owner's first
-  const owned = group ?? wrapped ?? badge;
-  let names: string[] = [];
+  const badge = path.match(/^\/user\/(anilist|myanimelist)\/([^/]+)\/badge$/);
+  /*
+   * The people in the path of a match, a group or a badge, its owner's first, each on the owner's
+   * service unless their segment names the other; leaving out segments that name nobody
+   */
+  const owned = taste ?? group ?? badge;
+  let people: ListOwner[] = [];
+  let wrappedName = '';
   try {
     if (owned) {
-      names = [owned[1], ...(group?.[2].split('/').slice(1) ?? [])].map(decodeURIComponent);
-    }
+      const domain = owned[1] as Domain;
+      const segments = (owned[3] ?? '').split('/').slice(1).map(decodeURIComponent);
+      people = [
+        { domain, name: decodeURIComponent(owned[2]) },
+        ...segments.flatMap((segment) => parsePersonSegment(segment, domain) ?? []),
+      ];
+    } else if (wrapped) wrappedName = decodeURIComponent(wrapped[1]);
   } catch {
     return { title, description, canonical, image, noindex: true, home: false };
   }
+  const names = people.map(({ name }) => name);
   if (status >= 400) title = `${status} | ${SITE_NAME}`;
   else if (home) {
     title = HOME_TITLE;
@@ -76,27 +86,27 @@ export function getPageSeo(url: SeoUrl, status = 200, resolvedUsername?: string)
   else if (path.startsWith('/auth/')) title = `Signing in | ${SITE_NAME}`;
   else if (group) {
     // Groups are picked in the browser and never indexed, but their links are shared
-    const [host, ...others] = names;
+    const [host, ...others] = people;
     if (others.length) {
       const everyone = joinNames(names);
       title = `What Should ${everyone} Watch Together? | ${SITE_NAME}`;
-      description = `Anime none of ${everyone} have seen yet, picked from their AniList plan lists.`;
+      description = `Anime none of ${everyone} have seen yet, picked from their ${serviceNames(people)} plan lists.`;
       image = {
         url: groupPreviewImage(host, others),
         type: 'image/jpeg',
         alt: `What ${everyone} could watch together`,
       };
     } else {
-      title = `Pick an Anime to Watch with ${host} | ${SITE_NAME}`;
-      description = `Join ${host}'s group to find an anime none of you have seen, from your AniList plan lists.`;
+      title = `Pick an Anime to Watch with ${host.name} | ${SITE_NAME}`;
+      description = `Join ${host.name}'s group to find an anime none of you have seen, from your plan lists.`;
       image = {
         url: groupPreviewImage(host, []),
         type: 'image/jpeg',
-        alt: `Pick an anime to watch with ${host}`,
+        alt: `Pick an anime to watch with ${host.name}`,
       };
     }
   } else if (wrapped) {
-    const [name] = names;
+    const name = wrappedName;
     const year = Number(wrapped[2]);
     title = `${name}'s ${year} in Anime | ${SITE_NAME}`;
     description = `The anime ${name} finished in ${year}: hours watched, top genres, favorites, and their hottest take.`;
@@ -106,32 +116,28 @@ export function getPageSeo(url: SeoUrl, status = 200, resolvedUsername?: string)
       alt: `${name}'s ${year} in anime`,
     };
   } else if (badge) {
-    title = `${names[0]}'s Profile Badge | ${SITE_NAME}`;
-    description = `Show what ${names[0]} is watching on an AniList profile, in a README, or anywhere that shows images.`;
+    const [owner] = people;
+    const service = DOMAIN_NAMES[owner.domain];
+    title = `${owner.name}'s Profile Badge | ${SITE_NAME}`;
+    description = `Show what ${owner.name} is watching on ${service === 'AniList' ? 'an' : 'a'} ${service} profile, in a README, or anywhere that shows images.`;
   } else if (taste) {
     // Comparisons are drawn in the browser and never indexed, but their links are shared
-    let a: string;
-    let b: string | undefined;
-    try {
-      [a, b] = taste.slice(1).map((name) => name && decodeURIComponent(name));
-    } catch {
-      return { title, description, canonical, image, noindex: true, home: false };
-    }
+    const [a, b] = people;
     if (b) {
-      title = `${a} × ${b}: Anime Taste Match | ${SITE_NAME}`;
-      description = `How alike are ${a} and ${b}'s anime tastes? See the anime they both loved, where they disagree, and what each should watch next.`;
+      title = `${a.name} × ${b.name}: Anime Taste Match | ${SITE_NAME}`;
+      description = `How alike are ${a.name} and ${b.name}'s anime tastes? See the anime they both loved, where they disagree, and what each should watch next.`;
       image = {
         url: matchPreviewImage(a, b),
         type: 'image/jpeg',
-        alt: `How ${a} and ${b}'s anime tastes match`,
+        alt: `How ${a.name} and ${b.name}'s anime tastes match`,
       };
     } else {
-      title = `Compare Your Anime Taste with ${a} | ${SITE_NAME}`;
-      description = `See how your AniList scores match ${a}'s: the anime you both loved, where you disagree, and what to watch next.`;
+      title = `Compare Your Anime Taste with ${a.name} | ${SITE_NAME}`;
+      description = `See how your anime scores match ${a.name}'s: the anime you both loved, where you disagree, and what to watch next.`;
       image = {
         url: matchPreviewImage(a),
         type: 'image/jpeg',
-        alt: `Compare your anime taste with ${a}`,
+        alt: `Compare your anime taste with ${a.name}`,
       };
     }
   } else {

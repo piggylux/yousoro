@@ -1,5 +1,6 @@
 <script lang="ts">
   import { imageFallback } from '#lib/image-fallback.js';
+  import { animePageUrl } from '#lib/types/domain.js';
   import type { SharedAnime } from '#lib/types/friend-watching.js';
   let {
     anime,
@@ -8,7 +9,16 @@
     decorative = false,
     detail,
   }: {
-    anime: SharedAnime & { progress?: number; rewatching?: boolean };
+    /**
+     * Linked to on AniList, or on MyAnimeList when only its id there is known, as for anime from a
+     * MyAnimeList list
+     */
+    anime: Omit<SharedAnime, 'id'> & {
+      id: number | null;
+      malId?: number | null;
+      progress?: number;
+      rewatching?: boolean;
+    };
     blurMature?: boolean;
     compact?: boolean;
     /**
@@ -44,7 +54,9 @@
   this={decorative ? 'span' : 'a'}
   class="poster"
   class:compact
-  href={decorative ? undefined : `https://anilist.co/anime/${anime.id}`}
+  href={decorative
+    ? undefined
+    : animePageUrl('anilist', { id: anime.id, malId: anime.malId ?? null })}
   target={decorative ? undefined : '_blank'}
   rel={decorative ? undefined : 'noopener noreferrer'}
   title={decorative
@@ -54,7 +66,7 @@
     ? undefined
     : `${anime.title}${shown ? `, ${shown.label}` : ''}, opens in a new tab`}
   aria-hidden={decorative ? 'true' : undefined}
-  style={`--poster-hue: ${(anime.id * 31 + 195) % 360}`}
+  style={`--poster-hue: ${((anime.id ?? anime.malId ?? 0) * 31 + 195) % 360}`}
 >
   {#if anime.coverUrl && !failed}
     <img

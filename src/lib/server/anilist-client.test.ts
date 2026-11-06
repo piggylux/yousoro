@@ -477,6 +477,8 @@ describe('taste profiles', () => {
     updatedAt,
     media: {
       id,
+      // AniList doesn't know every anime's MyAnimeList id
+      idMal: id === 2 ? null : id + 1000,
       title: { romaji: `Anime ${id}` },
       coverImage: { large: `https://s4.anilist.co/${id}.jpg` },
       isAdult: false,
@@ -519,21 +521,24 @@ describe('taste profiles', () => {
     vi.mocked(fetch).mockResolvedValue(collection('Taster'));
     const profile = await getTasteProfile('Taster');
     expect(profile).toEqual({
+      domain: 'anilist',
       id: 7,
       name: 'Taster',
       avatarUrl: null,
       scoreFormat: 'POINT_10',
       scored: [
-        expect.objectContaining({ id: 1, score: 9, score100: 90 }),
-        expect.objectContaining({ id: 4, score: 8, score100: 80 }),
+        expect.objectContaining({ id: 1, malId: 1001, score: 9, score100: 90 }),
+        expect.objectContaining({ id: 4, malId: 1004, score: 8, score100: 80 }),
       ],
-      seen: [2],
-      planned: [expect.objectContaining({ id: 3 })],
+      seen: [{ id: 2, malId: null }],
+      planned: [expect.objectContaining({ id: 3, malId: 1003 })],
     });
     const init = vi.mocked(fetch).mock.calls[0][1]!;
     expect(init.headers).not.toHaveProperty('Authorization');
     const { query } = JSON.parse(init.body as string);
     expect(query).not.toContain('status_in');
+    // For comparing with MyAnimeList lists, at no extra cost
+    expect(query).toContain('idMal');
     // AniList answers both with scores out of 100 when one query asks for both
     expect(query).not.toContain('POINT_100');
     expect(takeAniListRequest).toHaveBeenCalledWith('spare');

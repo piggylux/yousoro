@@ -2,18 +2,21 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { TasteProfileState } from '#lib/match.js';
 import { compareWithFriends, rankTwins, type TwinResult } from '#lib/taste-twins.js';
+import type { ListOwner } from '#lib/types/domain.js';
 import type { ScoredAnime, TasteProfile } from '#lib/types/match.js';
 
 const SCORES = [90, 85, 80, 75, 70, 65, 60, 55, 50, 45];
 
 function profile(id: number, name: string, scores: number[]): TasteProfile {
   return {
+    domain: 'anilist',
     id,
     name,
     avatarUrl: null,
     scoreFormat: 'POINT_100',
     scored: scores.map((score100, index): ScoredAnime => ({
       id: index + 1,
+      malId: null,
       title: `Anime ${index + 1}`,
       coverUrl: null,
       isAdult: false,
@@ -29,7 +32,7 @@ function profile(id: number, name: string, scores: number[]): TasteProfile {
 const friend = (id: number, name: string) => ({ id, name, avatarUrl: null });
 type Loaded = Exclude<TasteProfileState, { status: 'loading' }>;
 const loader = (states: Record<string, Loaded>) =>
-  vi.fn(async (name: string) => states[name] ?? { status: 'failed' as const });
+  vi.fn(async ({ name }: ListOwner) => states[name] ?? { status: 'failed' as const });
 const ready = (profile: TasteProfile): Loaded => ({ status: 'ready', profile });
 
 describe('comparing tastes with friends', () => {
@@ -87,7 +90,7 @@ describe('comparing tastes with friends', () => {
     );
     expect(outcome).toEqual({ status: 'busy', retryAt: 9000 });
     expect(results.map(({ id }) => id)).toEqual([2]);
-    expect(load).not.toHaveBeenCalledWith('d');
+    expect(load).not.toHaveBeenCalledWith({ domain: 'anilist', name: 'd' });
   });
 
   it('stops quietly once nobody is waiting', async () => {

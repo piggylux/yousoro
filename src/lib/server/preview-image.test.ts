@@ -155,6 +155,7 @@ describe('preview images', () => {
 
 function taster(name: string, scored: ScoredAnime[]): TasteProfile {
   return {
+    domain: 'anilist',
     id: 1,
     name,
     avatarUrl: `https://s4.anilist.co/${name}.png`,
@@ -168,6 +169,7 @@ function taster(name: string, scored: ScoredAnime[]): TasteProfile {
 function scoredAnime(id: number, score: number, isAdult = false): ScoredAnime {
   return {
     id,
+    malId: id + 1000,
     title: `Anime ${id}`,
     coverUrl: `https://s4.anilist.co/cover-${id}.jpg`,
     isAdult,
@@ -225,6 +227,37 @@ describe('match previews', () => {
       'https://s4.anilist.co/Bob.png',
       'https://s4.anilist.co/cover-1.jpg',
       'https://s4.anilist.co/cover-2.jpg',
+    ]);
+  });
+
+  it('draws a match with a MyAnimeList list from its covers there, without an avatar', async () => {
+    const fetch = vi.fn(
+      async (_url: string) => new Response(PIXEL, { headers: { 'Content-Type': 'image/png' } })
+    );
+    vi.stubGlobal('fetch', fetch);
+    const scores = [90, 80, 70, 60, 50];
+    const alice = taster(
+      'Alice',
+      scores.map((score, index) => scoredAnime(index + 1, score))
+    );
+    const mika: TasteProfile = {
+      ...taster('mika', []),
+      domain: 'myanimelist',
+      id: null,
+      avatarUrl: null,
+      scored: scores.map((score, index) => ({
+        ...scoredAnime(index + 1, score),
+        id: null,
+        coverUrl: `https://cdn.myanimelist.net/images/anime/${index + 1}.jpg`,
+      })),
+    };
+
+    const response = await renderMatchPreview(mika, alice, 'public, max-age=3600');
+    expect(await imageOf(response)).toEqual({ format: 'jpeg', width: 1200, height: 630 });
+    expect(fetch.mock.calls.map(([url]) => url).toSorted()).toEqual([
+      'https://cdn.myanimelist.net/images/anime/1.jpg',
+      'https://cdn.myanimelist.net/images/anime/2.jpg',
+      'https://s4.anilist.co/Alice.png',
     ]);
   });
 
@@ -403,6 +436,7 @@ describe('year previews', () => {
     vi.stubGlobal('fetch', fetch);
     const finished = (id: number, isAdult = false) => ({
       ...scoredAnime(id, 80, isAdult),
+      id,
       episodes: 12,
       minutes: 288,
       month: 3,

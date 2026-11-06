@@ -83,7 +83,7 @@ describe('MyAnimeListApi', () => {
       lastUpdatedAt: Date.parse('2026-10-30T10:00:00+00:00'),
     });
     expect(list.animeList[1]).toMatchObject({ id: 5114, rewatching: true });
-    expect(getWatchingEntries).toHaveBeenCalledWith('Fixture', undefined);
+    expect(getWatchingEntries).toHaveBeenCalledWith('Fixture', undefined, undefined);
   });
 
   it("lists anime AniList doesn't know apart, and shows a shared AniList anime once", async () => {
@@ -108,7 +108,7 @@ describe('MyAnimeListApi', () => {
 
     const list = await new MyAnimeListApi({ token: 'token', owner }).getUserAnimeList('fixture');
 
-    expect(getWatchingEntries).toHaveBeenCalledWith('fixture', 'token');
+    expect(getWatchingEntries).toHaveBeenCalledWith('fixture', 'token', undefined);
     expect(list).toMatchObject({ userId: 12, username: 'Fixture', avatarUrl: owner.avatarUrl });
   });
 

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   copyEntry,
   getPlanToWatchEntries,
+  getTasteProfile,
   getWatchingEntries,
   MalForbiddenError,
   MalNotFoundError,
@@ -61,6 +62,13 @@ describe('getWatchingEntries', () => {
     const [url, init] = vi.mocked(fetch).mock.calls[0];
     expect(String(url)).toMatch(`${API}/users/Fixture/animelist?`);
     expect(init?.headers).toMatchObject({ 'X-MAL-CLIENT-ID': 'client-id' });
+  });
+
+  it('reads both of its requests at the priority asked for, as a badge does', async () => {
+    vi.mocked(fetch).mockImplementation(async () => Response.json({ data: [] }));
+    await getWatchingEntries('Badge', undefined, 'spare');
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(takeMalRequest).mock.calls).toEqual([['spare'], ['spare']]);
   });
 
   it("reads the signed-in user's own list as @me with their token", async () => {
@@ -381,6 +389,108 @@ describe('getPlanToWatchEntries', () => {
     // An anonymous read afterwards doesn't get the owner's view of the list
     await getPlanToWatchEntries('Owner');
     expect(fetch).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('getTasteProfile', () => {
+  const scoredEntry = (
+    id: number,
+    status: string,
+    score: number,
+    node: Partial<MalEntry['node']> = {}
+  ): MalEntry => {
+    const base = entry(id, status);
+    return {
+      node: {
+        ...base.node,
+        nsfw: 'white',
+        main_picture: { medium: `https://cdn.myanimelist.net/${id}.jpg`, large: '' },
+        mean: 7.86,
+        status: 'finished_airing',
+        ...node,
+      },
+      list_status: { ...base.list_status, score },
+    };
+  };
+
+  it('reads a whole public list anonymously, at the lowest priority, a request per 1,000', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(
+        Response.json({
+          data: [
+            scoredEntry(1, 'completed', 9),
+            scoredEntry(2, 'dropped', 0),
+            scoredEntry(3, 'plan_to_watch', 0, { nsfw: 'black' }),
+            // Not aired yet, so nobody can start it
+            scoredEntry(5, 'plan_to_watch', 0, { status: 'not_yet_aired' }),
+          ],
+          paging: { next: `${API}/users/mika/animelist?offset=1000` },
+        })
+      )
+      .mockResolvedValueOnce(Response.json({ data: [scoredEntry(4, 'watching', 6)] }));
+
+    const profile = await getTasteProfile('Mika');
+    expect(profile).toEqual({
+      domain: 'myanimelist',
+      id: null,
+      name: 'mika',
+      avatarUrl: null,
+      scoreFormat: 'POINT_10',
+      scored: [
+        {
+          id: null,
+          malId: 1,
+          title: 'Anime 1',
+          coverUrl: 'https://cdn.myanimelist.net/1.jpg',
+          isAdult: false,
+          meanScore: 79,
+          score: 9,
+          score100: 90,
+        },
+        expect.objectContaining({ id: null, malId: 4, score: 6, score100: 60 }),
+      ],
+      seen: [{ id: null, malId: 2 }],
+      planned: [expect.objectContaining({ id: null, malId: 3, isAdult: true })],
+    });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    const [url, init] = vi.mocked(fetch).mock.calls[0];
+    const first = new URL(String(url));
+    expect(first.pathname).toBe('/v2/users/mika/animelist');
+    expect(first.searchParams.get('status')).toBeNull();
+    expect(first.searchParams.get('limit')).toBe('1000');
+    expect(first.searchParams.get('fields')?.split(',')).toEqual(
+      expect.arrayContaining(['list_status', 'nsfw', 'status', 'mean'])
+    );
+    expect(init?.headers).toMatchObject({ 'X-MAL-CLIENT-ID': 'client-id' });
+    expect(init?.headers).not.toHaveProperty('Authorization');
+    expect(takeMalRequest).toHaveBeenCalledWith('spare');
+  });
+
+  it('reads a list once for ten minutes, whatever the spelling of the name', async () => {
+    vi.mocked(fetch).mockImplementation(async () => Response.json({ data: [] }));
+    const now = Date.now();
+    vi.spyOn(Date, 'now').mockReturnValue(now);
+    await Promise.all([getTasteProfile('Kept'), getTasteProfile('KEPT')]);
+    vi.mocked(Date.now).mockReturnValue(now + 9 * 60 * 1000);
+    await getTasteProfile('kept');
+    expect(fetch).toHaveBeenCalledTimes(1);
+    vi.mocked(Date.now).mockReturnValue(now + 10 * 60 * 1000);
+    await getTasteProfile('kept');
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('tells a private list and a missing user apart from MyAnimeList being busy', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(null, { status: 403 }));
+    await expect(getTasteProfile('Private')).rejects.toBeInstanceOf(MalForbiddenError);
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(null, { status: 404 }));
+    await expect(getTasteProfile('Nobody')).rejects.toBeInstanceOf(MalNotFoundError);
+    vi.mocked(takeMalRequest).mockResolvedValueOnce({ allowed: false, retryAfter: 20 });
+    await expect(getTasteProfile('Waiting')).rejects.toBeInstanceOf(MalRateLimitError);
+  });
+
+  it('asks nothing about a name nobody can have', async () => {
+    await expect(getTasteProfile('two words')).rejects.toBeInstanceOf(MalNotFoundError);
+    expect(fetch).not.toHaveBeenCalled();
   });
 });
 

@@ -892,6 +892,7 @@ export async function getTasteProfile(userName: string): Promise<TasteProfile> {
           updatedAt: number;
           media: {
             id: number;
+            idMal: number | null;
             title: { romaji: string };
             coverImage: { large: string | null } | null;
             isAdult: boolean;
@@ -911,7 +912,7 @@ export async function getTasteProfile(userName: string): Promise<TasteProfile> {
             status
             score
             updatedAt
-            media { id title { romaji } coverImage { large } isAdult meanScore status }
+            media { id idMal title { romaji } coverImage { large } isAdult meanScore status }
           }
         }
       }
@@ -923,6 +924,7 @@ export async function getTasteProfile(userName: string): Promise<TasteProfile> {
 
   const { user, lists } = MediaListCollection;
   const profile: TasteProfile = {
+    domain: 'anilist',
     id: user.id,
     name: user.name,
     avatarUrl: user.avatar?.large ?? null,
@@ -943,6 +945,7 @@ export async function getTasteProfile(userName: string): Promise<TasteProfile> {
   for (const { status, score, media } of entries) {
     const anime = {
       id: media.id,
+      malId: media.idMal ?? null,
       title: media.title.romaji,
       coverUrl: media.coverImage?.large ?? null,
       isAdult: media.isAdult,
@@ -953,7 +956,7 @@ export async function getTasteProfile(userName: string): Promise<TasteProfile> {
       if (media.status !== 'NOT_YET_RELEASED') profile.planned.push(anime);
     } else if (score > 0)
       profile.scored.push({ ...anime, score, score100: toScore100(score, profile.scoreFormat) });
-    else profile.seen.push(media.id);
+    else profile.seen.push({ id: anime.id, malId: anime.malId });
   }
 
   tasteCache.delete(key);

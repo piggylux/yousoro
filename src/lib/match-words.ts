@@ -1,4 +1,6 @@
+import { sameName } from '#lib/match.js';
 import { formatScore, type ScoreFormat } from '#lib/score.js';
+import { DOMAIN_NAMES, type ListOwner } from '#lib/types/domain.js';
 import type {
   MatchPick,
   ScoredAnime,
@@ -8,27 +10,37 @@ import type {
 } from '#lib/types/match.js';
 
 /**
- * How to speak of the two people compared: by name, or as "you" to a viewer who is one of them.
- * The capitalized forms start a sentence; names keep their own case
+ * How to speak of the people compared: by name, or as "you" to a viewer who is one of them, on the
+ * same service, with any of `viewer`'s accounts. The capitalized forms start a sentence; names keep
+ * their own case
  */
-export function voiceFor(viewer: string | null | undefined) {
-  const isViewer = (name: string) => viewer?.toLowerCase() === name.toLowerCase();
+export function voiceFor(viewer: ListOwner[]) {
+  const isViewer = (person: ListOwner) => viewer.some((account) => sameName(account, person));
   return {
     isViewer,
-    who: (name: string) => (isViewer(name) ? 'you' : name),
-    Who: (name: string) => (isViewer(name) ? 'You' : name),
-    whose: (name: string) => (isViewer(name) ? 'your' : `${name}'s`),
-    Whose: (name: string) => (isViewer(name) ? 'Your' : `${name}'s`),
+    who: (person: ListOwner) => (isViewer(person) ? 'you' : person.name),
+    Who: (person: ListOwner) => (isViewer(person) ? 'You' : person.name),
+    whose: (person: ListOwner) => (isViewer(person) ? 'your' : `${person.name}'s`),
+    Whose: (person: ListOwner) => (isViewer(person) ? 'Your' : `${person.name}'s`),
   };
 }
 
 export type Voice = ReturnType<typeof voiceFor>;
 
-/** Names as one phrase: "Mika", "Mika and Sora", or "Mika, Sora and Ren" */
-export function joinNames(names: string[]): string {
+/** Names as one phrase: "Mika", "Mika and Sora", or "Mika, Sora and Ren", or with another word */
+export function joinNames(names: string[], conjunction = 'and'): string {
   return names.length > 1
-    ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`
+    ? `${names.slice(0, -1).join(', ')} ${conjunction} ${names.at(-1)}`
     : (names[0] ?? '');
+}
+
+/** The services people's lists are on, as one phrase: "AniList", or "AniList and MyAnimeList" */
+export function serviceNames(people: ListOwner[], conjunction = 'and'): string {
+  const domains = [...new Set(people.map(({ domain }) => domain))];
+  return joinNames(
+    domains.map((domain) => DOMAIN_NAMES[domain]),
+    conjunction
+  );
 }
 
 /** A piece of a sentence: words, or an anime's title, which is shown as one */
@@ -56,10 +68,21 @@ function say(strings: TemplateStringsArray, ...values: (string | WordPart | Word
  * first, so a match and its link preview always read alike. Each choice in a match, its `slot`,
  * reads another base-3 digit of the pair's number, so wordings don't always come in the same sets
  */
-const chooserFor =
-  (a: { id: number }, b: { id: number }) =>
-  <T>(options: T[], slot = 0) =>
-    options[Math.floor((a.id + b.id) / 3 ** slot) % options.length];
+const chooserFor = (a: Person, b: Person) => {
+  const number = numberOf(a) + numberOf(b);
+  return <T>(options: T[], slot = 0) => options[Math.floor(number / 3 ** slot) % options.length];
+};
+
+/** Someone compared, by their AniList id, or by name on MyAnimeList, which gives no id */
+type Person = { id: number | null; name: string };
+
+/** A number for someone that stays the same: their AniList id, or one from their name */
+function numberOf({ id, name }: Person) {
+  if (id !== null) return id;
+  let number = 0;
+  for (const char of name.toLowerCase()) number = (number * 31 + char.codePointAt(0)!) % 10_000_019;
+  return number;
+}
 
 /**
  * A joke, said the same to the two of them and about them, or as said to them and about them.
@@ -82,7 +105,7 @@ const TIERS: { min: number; label: string; tone: 'close' | 'mixed' | 'rivals'; j
         "Are you two sure you're not one person with two accounts?",
         "Are these two sure they're not one person with two accounts?",
       ],
-      'Two AniList accounts, one opinion. Statistically suspicious.',
+      'Two accounts, one opinion. Statistically suspicious.',
       [
         'Even your hot takes match. This is getting a little spooky.',
         'Even their hot takes match. This is getting a little spooky.',
@@ -192,12 +215,7 @@ export function describeMatch(percent: number): string {
  * The joke for a match between `a` and `b`, made to be shared: said to the two of them when the
  * viewer is one of them, or about them otherwise
  */
-export function matchComment(
-  percent: number,
-  a: { id: number },
-  b: { id: number },
-  toThem: boolean
-): string {
+export function matchComment(percent: number, a: Person, b: Person, toThem: boolean): string {
   const joke = chooserFor(a, b)(tierOf(percent).jokes);
   return typeof joke === 'string' ? joke : joke[toThem ? 0 : 1];
 }
@@ -256,9 +274,9 @@ export function finalThought(
   const { who, Who, whose, Whose, isViewer } = voice;
   const choose = chooserFor(a, b);
   // The viewer first: "You and Alice"
-  const [first, second] = isViewer(b.name) ? [b, a] : [a, b];
-  const pair = `${who(first.name)} and ${second.name}`;
-  const Pair = `${Who(first.name)} and ${second.name}`;
+  const [first, second] = isViewer(b) ? [b, a] : [a, b];
+  const pair = `${who(first)} and ${second.name}`;
+  const Pair = `${Who(first)} and ${second.name}`;
   const tone = match.percent === null ? 'unknown' : tierOf(match.percent).tone;
 
   const loved = lovedTitles(match.bothLoved);
@@ -292,9 +310,9 @@ export function finalThought(
     split &&
     choose(
       [
-        say`Never bring up ${title(split.anime)} at dinner: ${who(a.name)} gave it ${scoreA}, ${who(b.name)} gave it ${scoreB}, and someone is wrong.`,
-        say`${title(split.anime)} is where the gloves come off, ${scoreA} from ${who(a.name)} against ${scoreB} from ${who(b.name)}.`,
-        say`${title(split.anime)}: ${scoreA} from ${who(a.name)}, ${scoreB} from ${who(b.name)}. Settle it with a rewatch, or a duel.`,
+        say`Never bring up ${title(split.anime)} at dinner: ${who(a)} gave it ${scoreA}, ${who(b)} gave it ${scoreB}, and someone is wrong.`,
+        say`${title(split.anime)} is where the gloves come off, ${scoreA} from ${who(a)} against ${scoreB} from ${who(b)}.`,
+        say`${title(split.anime)}: ${scoreA} from ${who(a)}, ${scoreB} from ${who(b)}. Settle it with a rewatch, or a duel.`,
       ],
       2
     );
@@ -303,9 +321,9 @@ export function finalThought(
     split &&
     choose(
       [
-        say`The only crack in the armor: ${title(split.anime)}, ${scoreA} from ${who(a.name)} against ${scoreB} from ${who(b.name)}.`,
-        say`Just never bring up ${title(split.anime)}: ${who(a.name)} gave it ${scoreA}, ${who(b.name)} gave it ${scoreB}.`,
-        say`Mostly peaceful, apart from ${title(split.anime)}: ${scoreA} from ${who(a.name)}, ${scoreB} from ${who(b.name)}.`,
+        say`The only crack in the armor: ${title(split.anime)}, ${scoreA} from ${who(a)} against ${scoreB} from ${who(b)}.`,
+        say`Just never bring up ${title(split.anime)}: ${who(a)} gave it ${scoreA}, ${who(b)} gave it ${scoreB}.`,
+        say`Mostly peaceful, apart from ${title(split.anime)}: ${scoreA} from ${who(a)}, ${scoreB} from ${who(b)}.`,
       ],
       2
     );
@@ -321,7 +339,7 @@ export function finalThought(
     { to: b, from: a, pick: homework(match.picksForB) },
     { to: a, from: b, pick: homework(match.picksForA) },
   ];
-  const next = (isViewer(a.name) ? sides.reverse() : sides).find(({ pick }) => pick);
+  const next = (isViewer(a) ? sides.reverse() : sides).find(({ pick }) => pick);
   let assignment: WordPart[] | undefined;
   if (next?.pick) {
     const { to, from, pick } = next;
@@ -329,13 +347,13 @@ export function finalThought(
     assignment = choose(
       pick.planned
         ? [
-            say`${title(pick.anime)} has been collecting dust on ${whose(to.name)} plan list. ${Who(from.name)} gave it ${score}, so the excuses end today.`,
-            say`${title(pick.anime)} is already on ${whose(to.name)} plan list, and ${who(from.name)} gave it ${score}. Today's the day.`,
-            say`${Who(to.name)} planned to watch ${title(pick.anime)} ages ago. ${Who(from.name)} gave it ${score}, so consider this a reminder.`,
+            say`${title(pick.anime)} has been collecting dust on ${whose(to)} plan list. ${Who(from)} gave it ${score}, so the excuses end today.`,
+            say`${title(pick.anime)} is already on ${whose(to)} plan list, and ${who(from)} gave it ${score}. Today's the day.`,
+            say`${Who(to)} planned to watch ${title(pick.anime)} ages ago. ${Who(from)} gave it ${score}, so consider this a reminder.`,
           ]
         : [
-            say`Homework for ${who(to.name)}: ${title(pick.anime)}, straight from ${whose(from.name)} favorites. No excuses.`,
-            say`${Who(to.name)} ${isViewer(to.name) ? 'have' : 'has'} been assigned ${title(pick.anime)}. ${Whose(from.name)} orders.`,
+            say`Homework for ${who(to)}: ${title(pick.anime)}, straight from ${whose(from)} favorites. No excuses.`,
+            say`${Who(to)} ${isViewer(to) ? 'have' : 'has'} been assigned ${title(pick.anime)}. ${Whose(from)} orders.`,
           ],
       3
     );

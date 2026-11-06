@@ -11,7 +11,7 @@
     blurMature = true,
     details,
   }: {
-    anime: SharedAnime;
+    anime: Omit<SharedAnime, 'id'> & { id: number | null; malId?: number | null };
     /** The anime's own page, which opens in a new tab */
     href: string;
     /** What the link is called, when its text doesn't say it all; it should say it opens a new tab */

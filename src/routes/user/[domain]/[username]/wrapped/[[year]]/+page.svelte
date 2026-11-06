@@ -7,7 +7,7 @@
   import SharedAnimePoster from '#lib/components/SharedAnimePoster.svelte';
   import YouSvg from '#lib/images/minimalist_you.svg';
   import { joinNames, voiceFor } from '#lib/match-words.js';
-  import { matchPath } from '#lib/match.js';
+  import { matchPath, viewerAccounts } from '#lib/match.js';
   import { describeScore, formatScore } from '#lib/score.js';
   import {
     FIRST_YEAR,
@@ -47,8 +47,11 @@
   );
   // As AniList spells it once read, as typed until then
   const shownName = $derived(animeYear?.name ?? data.name);
-  const { isViewer, Who, whose, Whose } = $derived(voiceFor(data.user?.name));
-  const own = $derived(isViewer(shownName));
+  const shownPerson = $derived({ domain: 'anilist' as const, name: shownName });
+  const { isViewer, Who, whose, Whose } = $derived(
+    voiceFor(viewerAccounts(data.user, null, 'anilist'))
+  );
+  const own = $derived(isViewer(shownPerson));
   const inProgress = $derived(year === new Date().getFullYear());
 
   // Counts down to when "Try again" can be used, while AniList is busy, and stops there
@@ -96,13 +99,13 @@
     />
     <div class="heading-copy">
       <div class="title-row">
-        <h1>{Whose(shownName)} {year} in anime</h1>
+        <h1>{Whose(shownPerson)} {year} in anime</h1>
         <ShareButton url={share.url} title={share.title} subject={share.subject} />
       </div>
       <p class="summary">
         {inProgress ? 'So far this year, from' : 'From'} the anime {own ? 'you' : shownName} finished
         on AniList ·
-        <a href={listUrl(shownName)}>{Whose(shownName)} list</a>
+        <a href={listUrl(shownName)}>{Whose(shownPerson)} list</a>
       </p>
     </div>
   </header>
@@ -168,7 +171,7 @@
             >
           </p>
           <p class="feature-detail">
-            {Who(shownName)} scored it
+            {Who(shownPerson)} scored it
             <span aria-hidden="true">{scoreOf(favorite)}</span><span class="tw:sr-only"
               >{scoreWords(favorite)}</span
             >
@@ -209,7 +212,7 @@
       <section class="panel hot-take" aria-labelledby="hot-take">
         <h2 id="hot-take" class="eyebrow">Hottest take</h2>
         <p>
-          {Who(shownName)} scored <cite>{take.anime.title}</cite>
+          {Who(shownPerson)} scored <cite>{take.anime.title}</cite>
           <strong aria-hidden="true">{scoreOf(take.anime)}</strong><span class="tw:sr-only"
             >{scoreWords(take.anime)}</span
           >, while AniList users average <strong>{take.meanScore}%</strong>.
@@ -233,7 +236,7 @@
                   detail={favorite.score
                     ? {
                         badge: scoreOf(favorite),
-                        label: `${Who(shownName)} scored it ${scoreWords(favorite)}`,
+                        label: `${Who(shownPerson)} scored it ${scoreWords(favorite)}`,
                       }
                     : undefined}
                 />
@@ -248,7 +251,7 @@
     <section class="panel final-thought" aria-labelledby="final-thought">
       <img class="final-you" src={YouSvg} alt="" width="1010" height="700" />
       <div class="final-copy">
-        <h2 id="final-thought">Who shares {whose(shownName)} taste?</h2>
+        <h2 id="final-thought">Who shares {whose(shownPerson)} taste?</h2>
         <p>
           {summary.topGenres.length
             ? `A year of ${joinNames(summary.topGenres.map(({ genre }) => genre))}. `
@@ -259,7 +262,7 @@
         <div class="final-actions">
           <a
             class="tw:btn tw:btn-primary final-link"
-            href={own ? `${listUrl(shownName)}/friends` : matchPath(shownName)}
+            href={own ? `${listUrl(shownName)}/friends` : matchPath(shownPerson)}
             >{own ? 'Find your taste twins' : `Compare with ${shownName}`}</a
           >
           <ShareButton url={share.url} title={share.title} subject={share.subject} />

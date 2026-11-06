@@ -1,8 +1,9 @@
 import type { ScoreFormat } from '#lib/score.js';
-import type { ListedAnime } from '#lib/types/match.js';
+import type { AnimeIds, ListedAnime } from '#lib/types/match.js';
 
-/** An anime someone finished in a year, with what's needed to sum up their year */
-export type FinishedAnime = ListedAnime & {
+/** An anime someone finished in a year, with what's needed to sum up their year, from AniList */
+export type FinishedAnime = Omit<ListedAnime, keyof AnimeIds> & {
+  id: number;
   /** Their score, in their own score format; 0 when they haven't scored it */
   score: number;
   /** The same score out of 100; null when they haven't scored it */

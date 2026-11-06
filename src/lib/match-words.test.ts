@@ -12,6 +12,7 @@ import type { ScoredAnime, TasteMatch, TasteProfile } from '#lib/types/match.js'
 function anime(id: number, title: string, score = 9): ScoredAnime {
   return {
     id,
+    malId: null,
     title,
     coverUrl: null,
     isAdult: false,
@@ -22,8 +23,19 @@ function anime(id: number, title: string, score = 9): ScoredAnime {
 }
 
 function person(id: number, name: string): TasteProfile {
-  return { id, name, avatarUrl: null, scoreFormat: 'POINT_10', scored: [], seen: [], planned: [] };
+  return {
+    domain: 'anilist',
+    id,
+    name,
+    avatarUrl: null,
+    scoreFormat: 'POINT_10',
+    scored: [],
+    seen: [],
+    planned: [],
+  };
 }
+
+const onAniList = (name: string) => ({ domain: 'anilist' as const, name });
 
 const FRIEREN = anime(1, 'Frieren');
 const MUSHISHI = anime(2, 'Mushishi');
@@ -59,18 +71,24 @@ const bob = person(2, 'Bob');
 
 describe('the voice of a match', () => {
   it('names people, or says "you" to the viewer whatever case their name is typed in', () => {
-    const voice = voiceFor('ALICE');
-    expect([voice.who('Alice'), voice.Who('alice'), voice.whose('Alice')]).toEqual([
-      'you',
-      'You',
-      'your',
-    ]);
-    expect([voice.who('bob'), voice.Who('bob'), voice.Whose('bob')]).toEqual([
-      'bob',
-      'bob',
-      "bob's",
-    ]);
-    expect(voiceFor(null).isViewer('Alice')).toBe(false);
+    const voice = voiceFor([onAniList('ALICE')]);
+    expect([
+      voice.who(onAniList('Alice')),
+      voice.Who(onAniList('alice')),
+      voice.whose(onAniList('Alice')),
+    ]).toEqual(['you', 'You', 'your']);
+    expect([
+      voice.who(onAniList('bob')),
+      voice.Who(onAniList('bob')),
+      voice.Whose(onAniList('bob')),
+    ]).toEqual(['bob', 'bob', "bob's"]);
+    expect(voiceFor([]).isViewer(onAniList('Alice'))).toBe(false);
+  });
+
+  it("knows the viewer by any of their accounts, but not by someone else's on another service", () => {
+    const voice = voiceFor([onAniList('Alice'), { domain: 'myanimelist', name: 'alice_mal' }]);
+    expect(voice.isViewer({ domain: 'myanimelist', name: 'Alice_MAL' })).toBe(true);
+    expect(voice.who({ domain: 'myanimelist', name: 'Alice' })).toBe('Alice');
   });
 });
 
@@ -86,7 +104,13 @@ describe('match comments', () => {
   });
 
   // Pairs whose ids add up to 0, 1 and 2 more than a multiple of three, each given another joke
-  const pairs = [0, 1, 2].map((extra) => [{ id: 1 }, { id: 2 + extra }] as const);
+  const pairs = [0, 1, 2].map(
+    (extra) =>
+      [
+        { id: 1, name: 'A' },
+        { id: 2 + extra, name: 'B' },
+      ] as const
+  );
   const PERCENTS = [97, 88, 75, 60, 45, 30, 10];
 
   it('says a joke to the two of them, or about them', () => {
@@ -119,6 +143,16 @@ describe('match comments', () => {
     );
   });
 
+  it('words a match the same every time for MyAnimeList people, who have no ids', () => {
+    const mika = { id: null, name: 'Mika' };
+    const sora = { id: null, name: 'sora' };
+    for (const percent of PERCENTS) {
+      expect(matchComment(percent, mika, sora, true)).toBe(
+        matchComment(percent, { id: null, name: 'SORA' }, { id: null, name: 'mika' }, true)
+      );
+    }
+  });
+
   it('keeps every joke to one line of a link preview', () => {
     for (const percent of PERCENTS) {
       for (const [a, b] of pairs) {
@@ -132,7 +166,7 @@ describe('match comments', () => {
 
 describe('final thoughts', () => {
   it('celebrates a close match, teases its one disagreement, and sets homework', () => {
-    const sentences = finalThought(match(), alice, bob, voiceFor(null));
+    const sentences = finalThought(match(), alice, bob, voiceFor([]));
     expect(read(sentences)).toBe(
       'Alice and Bob agree Frieren and Mushishi are peak. Nobody tell the comment section. ' +
         'The only crack in the armor: Ex-Arm, 8 / 10 from Alice against 2 / 10 from Bob. ' +
@@ -145,7 +179,7 @@ describe('final thoughts', () => {
   });
 
   it('leads rivals with their fight, then concedes the anime they both love', () => {
-    expect(read(finalThought(match({ percent: 20 }), alice, bob, voiceFor(null)))).toBe(
+    expect(read(finalThought(match({ percent: 20 }), alice, bob, voiceFor([])))).toBe(
       'Never bring up Ex-Arm at dinner: Alice gave it 8 / 10, Bob gave it 2 / 10, and someone is wrong. ' +
         'The one thing keeping the peace: Frieren, loved on both sides. ' +
         "Homework for Bob: Monster, straight from Alice's favorites. No excuses."
@@ -153,14 +187,14 @@ describe('final thoughts', () => {
   });
 
   it('gives a mixed match both its common ground and its fight', () => {
-    const thought = read(finalThought(match({ percent: 50 }), alice, bob, voiceFor(null)));
+    const thought = read(finalThought(match({ percent: 50 }), alice, bob, voiceFor([])));
     expect(thought).toContain('Alice and Bob agree Frieren and Mushishi are peak.');
     expect(thought).toContain('Never bring up Ex-Arm at dinner');
   });
 
   it('changes its tone exactly where the label does', () => {
     const thought = (percent: number) =>
-      read(finalThought(match({ percent }), alice, bob, voiceFor(null)));
+      read(finalThought(match({ percent }), alice, bob, voiceFor([])));
     // Watch-party ready, then Couch compatible
     expect(thought(70)).toContain('The only crack in the armor');
     expect(thought(69)).toContain('Never bring up Ex-Arm at dinner');
@@ -171,19 +205,19 @@ describe('final thoughts', () => {
 
   it('says at most three sentences, never repeating how many anime they share', () => {
     for (const percent of [95, 80, 50, 20, null]) {
-      const sentences = finalThought(match({ percent }), alice, bob, voiceFor(null));
+      const sentences = finalThought(match({ percent }), alice, bob, voiceFor([]));
       expect(sentences.length).toBeLessThanOrEqual(3);
       expect(read(sentences)).not.toContain('anime in common');
     }
   });
 
   it('talks to the viewer, and gives them the homework', () => {
-    expect(read(finalThought(match(), alice, bob, voiceFor('bob')))).toBe(
+    expect(read(finalThought(match(), alice, bob, voiceFor([onAniList('bob')])))).toBe(
       'You and Alice agree Frieren and Mushishi are peak. Nobody tell the comment section. ' +
         'The only crack in the armor: Ex-Arm, 8 / 10 from Alice against 2 / 10 from you. ' +
         "Homework for you: Monster, straight from Alice's favorites. No excuses."
     );
-    expect(read(finalThought(match(), alice, bob, voiceFor('alice')))).toContain(
+    expect(read(finalThought(match(), alice, bob, voiceFor([onAniList('alice')])))).toContain(
       "Homework for you: Utena, straight from Bob's favorites."
     );
   });
@@ -199,7 +233,7 @@ describe('final thoughts', () => {
           loved('Steins;Gate', 'Steins;Gate 0', 'Steins;Gate: Fuka Ryouiki', 'Mushishi'),
           alice,
           bob,
-          voiceFor(null)
+          voiceFor([])
         )
       )
     ).toContain('agree Steins;Gate and Mushishi are peak.');
@@ -212,7 +246,7 @@ describe('final thoughts', () => {
           ),
           alice,
           bob,
-          voiceFor(null)
+          voiceFor([])
         )
       )
     ).toContain('agree Mushoku Tensei: Isekai Ittara Honki Dasu is peak.');
@@ -221,7 +255,7 @@ describe('final thoughts', () => {
   it('sets homework from the plan list first, then from a show’s first season', () => {
     const SEQUEL = anime(20, 'VINLAND SAGA SEASON 2');
     const picks = (...picksForB: TasteMatch['picksForB']) =>
-      read(finalThought(match({ picksForB }), alice, bob, voiceFor('bob')));
+      read(finalThought(match({ picksForB }), alice, bob, voiceFor([onAniList('bob')])));
     expect(picks({ anime: SEQUEL, planned: false }, { anime: MONSTER, planned: false })).toContain(
       'Homework for you: Monster'
     );
@@ -236,7 +270,7 @@ describe('final thoughts', () => {
 
   it('reads the same every time for a pair, and differently for another pair', () => {
     const thought = (other: TasteProfile) =>
-      read(finalThought(match(), alice, other, voiceFor(null)));
+      read(finalThought(match(), alice, other, voiceFor([])));
     expect(thought(bob)).toBe(thought(bob));
     expect(thought(person(5, 'Dana'))).toContain(
       "On Frieren and Mushishi, Alice and Dana could finish each other's sentences, spoilers included."
@@ -247,7 +281,7 @@ describe('final thoughts', () => {
     const combinations = new Set(
       Array.from({ length: 9 }, (_, index) => {
         const other = person(2 + index, 'Other');
-        const agreement = read([finalThought(match(), alice, other, voiceFor(null))[0]]);
+        const agreement = read([finalThought(match(), alice, other, voiceFor([]))[0]]);
         return `${matchComment(60, alice, other, true)} ${agreement}`;
       })
     );
@@ -262,15 +296,15 @@ describe('final thoughts', () => {
       bothLoved: [],
       disagreements: [],
     });
-    expect(read(finalThought(empty, alice, bob, voiceFor(null)))).toMatch(
+    expect(read(finalThought(empty, alice, bob, voiceFor([])))).toMatch(
       /^Zero anime in common\. Either a beautiful friendship is about to begin/
     );
     const unscored = match({ percent: null, inCommon: 12, bothScored: 2, disagreements: [] });
-    expect(read(finalThought(unscored, alice, bob, voiceFor(null)))).toContain(
+    expect(read(finalThought(unscored, alice, bob, voiceFor([])))).toContain(
       'Not enough shared scores to call it yet.'
     );
     expect(
-      finalThought(match({ ...empty, picksForA: [], picksForB: [] }), alice, bob, voiceFor(null))
+      finalThought(match({ ...empty, picksForA: [], picksForB: [] }), alice, bob, voiceFor([]))
     ).toHaveLength(1);
   });
 });

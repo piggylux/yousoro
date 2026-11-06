@@ -117,7 +117,7 @@ describe('request security', () => {
       '/user/anilist/fixture/match/other/preview.jpg',
       '/user/[domain]/[username]/match/[other]/preview.jpg',
     ],
-    ['/api/taste/fixture', '/api/taste/[username]'],
+    ['/api/taste/anilist/fixture', '/api/taste/[domain]/[username]'],
   ])(
     'lets the public data at %s keep its own caching, even for a signed-in request',
     async (path, routeId) => {

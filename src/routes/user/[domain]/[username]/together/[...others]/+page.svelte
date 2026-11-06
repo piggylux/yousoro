@@ -8,41 +8,60 @@
   import FriendAvatar from '#lib/components/FriendAvatar.svelte';
   import ShareButton from '#lib/components/ShareButton.svelte';
   import SharedAnimePoster from '#lib/components/SharedAnimePoster.svelte';
-  import { joinNames, voiceFor } from '#lib/match-words.js';
-  import { loadTasteProfile, parseUserName, type TasteProfileState } from '#lib/match.js';
+  import { joinNames, serviceNames, voiceFor } from '#lib/match-words.js';
+  import {
+    canCompare,
+    loadTasteProfile,
+    parsePerson,
+    sameName,
+    samePerson,
+    type TasteProfileState,
+    viewerAccounts,
+  } from '#lib/match.js';
   import { MAX_GROUP, pickForGroup, togetherPath, type GroupPick } from '#lib/together.js';
+  import { animePageUrl, DOMAIN_NAMES, listPath, type ListOwner } from '#lib/types/domain.js';
   import type { TasteProfile } from '#lib/types/match.js';
 
   import type { PageProps } from './$types';
 
   let { data }: PageProps = $props();
 
-  const names = $derived([data.host, ...data.others]);
+  const members = $derived([data.host, ...data.others]);
+  const keyOf = (person: ListOwner) => `${person.domain}:${person.name.toLowerCase()}`;
   // Read again only when the group changes, not when other page data does
-  const groupKey = $derived(names.join('/'));
+  const groupKey = $derived(members.map((member) => `${member.domain}:${member.name}`).join('/'));
 
   /*
-   * Everyone's list, by name in lower case, kept as the group changes: removing someone reads no
-   * list, and adding someone reads only theirs. "Try again" reads again only the lists AniList
-   * didn't answer
+   * Everyone's list, by service and name in lower case, kept as the group changes: removing someone
+   * reads no list, and adding someone reads only theirs. "Try again" reads again only the lists
+   * their service didn't answer
    */
-  let byName = $state<Record<string, TasteProfileState>>({});
+  let byPerson = $state<Record<string, TasteProfileState>>({});
   let attempt = $state(0);
   $effect(() => {
     void attempt;
-    for (const name of groupKey.split('/')) {
-      const key = name.toLowerCase();
-      const known = untrack(() => byName[key]);
+    for (const segment of groupKey.split('/')) {
+      const separator = segment.indexOf(':');
+      const person = {
+        domain: segment.slice(0, separator) as ListOwner['domain'],
+        name: segment.slice(separator + 1),
+      };
+      const key = keyOf(person);
+      const known = untrack(() => byPerson[key]);
       if (known && known.status !== 'busy' && known.status !== 'failed') continue;
-      byName[key] = { status: 'loading' };
-      loadTasteProfile(name).then((state) => (byName[key] = state));
+      byPerson[key] = { status: 'loading' };
+      loadTasteProfile(person).then((state) => (byPerson[key] = state));
     }
   });
   const states = $derived(
-    names.map((name): TasteProfileState => byName[name.toLowerCase()] ?? { status: 'loading' })
+    members.map((member): TasteProfileState => byPerson[keyOf(member)] ?? { status: 'loading' })
   );
 
-  const missing = $derived(names.filter((_, index) => states[index]?.status === 'missing'));
+  const missing = $derived(members.filter((_, index) => states[index]?.status === 'missing'));
+  // Whose services are busy or not answering, to name them
+  const troubled = $derived(
+    members.filter((_, index) => ['busy', 'failed'].includes(states[index]?.status))
+  );
   const retryAt = $derived(
     Math.max(0, ...states.map((state) => (state.status === 'busy' ? state.retryAt : 0)))
   );
@@ -51,7 +70,7 @@
     states.every((state) => state.status === 'ready' || state.status === 'missing')
   );
 
-  // Counts down to when "Try again" can be used, while AniList is busy, and stops there
+  // Counts down to when "Try again" can be used, while a service is busy, and stops there
   let now = $state(Date.now());
   $effect(() => {
     if (retryAt <= Date.now()) return;
@@ -67,14 +86,23 @@
     const state = states[index];
     return state?.status === 'ready' ? state.profile : null;
   };
-  // As AniList spells them once read, as typed until then
-  const spelled = $derived(names.map((name, index) => profileAt(index)?.name ?? name));
+  // As AniList spells them once read, as typed until then and on MyAnimeList
+  const spelled = $derived(
+    members.map((member, index) => ({
+      domain: member.domain,
+      name: profileAt(index)?.name ?? member.name,
+    }))
+  );
+  const spelledNames = $derived(spelled.map(({ name }) => name));
   // Everyone whose list could be read, once each: two names of one account are one person
   const people = $derived(
-    names
+    members
       .map((_, index) => profileAt(index))
       .filter((profile, index, all): profile is TasteProfile =>
-        Boolean(profile && all.findIndex((other) => other?.id === profile.id) === index)
+        Boolean(
+          profile &&
+          all.findIndex((other) => other !== null && samePerson(other, profile)) === index
+        )
       )
   );
   const picks = $derived(
@@ -83,24 +111,26 @@
       : null
   );
 
-  const voice = $derived(voiceFor(data.user?.name));
+  const viewer = $derived(viewerAccounts(data.user, data.malUser, data.host.domain));
+  const voice = $derived(voiceFor(viewer));
   const { isViewer, who } = $derived(voice);
   const viewerIn = $derived(spelled.some(isViewer));
   const canJoin = $derived(
-    data.user !== null && !viewerIn && data.others.length > 0 && names.length < MAX_GROUP
+    viewer.length > 0 && !viewerIn && data.others.length > 0 && members.length < MAX_GROUP
   );
-  const full = $derived(names.length >= MAX_GROUP);
+  const full = $derived(members.length >= MAX_GROUP);
+  const services = $derived(serviceNames(members));
 
   const share = $derived(
     data.others.length
       ? {
           url: `${page.url.origin}${togetherPath(spelled[0], spelled.slice(1))}`,
-          title: `What should ${joinNames(spelled)} watch together? On Yousoro`,
+          title: `What should ${joinNames(spelledNames)} watch together? On Yousoro`,
           subject: 'this group',
         }
       : {
           url: `${page.url.origin}${togetherPath(spelled[0])}`,
-          title: `Pick an anime to watch with ${isViewer(spelled[0]) ? 'me' : spelled[0]} on Yousoro`,
+          title: `Pick an anime to watch with ${isViewer(spelled[0]) ? 'me' : spelled[0].name} on Yousoro`,
           subject: 'your group link',
         }
   );
@@ -116,6 +146,10 @@
     membersHeading?.focus();
   }
 
+  // A name typed in the form is on the host's service, and a link says which it's on
+  const hostService = $derived(DOMAIN_NAMES[data.host.domain]);
+  const linkServices = $derived(data.malEnabled ? 'AniList or MyAnimeList' : 'AniList');
+
   /*
    * What's wrong with the name in the form: as the load found it, or caught here before sending it,
    * so nobody waits on a page load to learn they typed someone already in the group
@@ -124,14 +158,15 @@
   let typed = $derived(data.typed);
   let nameInput = $state<HTMLInputElement>();
   function checkName(event: SubmitEvent) {
-    const name = parseUserName(typed);
-    formError = !name
-      ? 'invalid'
-      : names.some((member) => member.toLowerCase() === name.toLowerCase())
-        ? 'member'
-        : full
-          ? 'full'
-          : null;
+    const person = parsePerson(typed, data.host.domain);
+    formError =
+      !person || !canCompare(person, data.malEnabled)
+        ? 'invalid'
+        : members.some((member) => sameName(member, person))
+          ? 'member'
+          : full
+            ? 'full'
+            : null;
     if (!formError) return;
     event.preventDefault();
     nameInput?.focus();
@@ -139,22 +174,29 @@
 
   function memberNote(index: number) {
     const state = states[index];
+    const service = DOMAIN_NAMES[members[index].domain];
     if (!state || state.status === 'loading') return 'Reading their list…';
-    if (state.status === 'missing') return 'No public AniList list';
-    if (state.status !== 'ready') return 'Waiting for AniList';
+    if (state.status === 'missing') return `No public ${service} list`;
+    if (state.status !== 'ready') return `Waiting for ${service}`;
     const { scored, seen, planned } = state.profile;
     return `${count(scored.length + seen.length)} watched · ${count(planned.length)} planned`;
   }
 
-  /** Who wants to see a pick, and how AniList rates it, for its caption and its poster's label */
+  /**
+   * Who wants to see a pick, and how its service rates it, for its caption and its poster's label.
+   * An anime with AniList's id came from an AniList list, and its average from AniList
+   */
   function reasons({ anime, plannedBy }: GroupPick) {
+    const service = DOMAIN_NAMES[anime.id === null ? 'myanimelist' : 'anilist'];
     return [
       `Planned by ${joinNames(plannedBy.map(who))}`,
-      anime.meanScore === null ? null : `AniList average ${anime.meanScore}%`,
+      anime.meanScore === null ? null : `${service} average ${anime.meanScore}%`,
     ].filter((reason) => reason !== null);
   }
 
-  const listUrl = (name: string) => `/user/anilist/${encodeURIComponent(name)}`;
+  const listUrl = (person: ListOwner) => listPath(person.domain, person.name);
+  const animeKey = (anime: { id: number | null; malId: number | null }) =>
+    `${anime.id}:${anime.malId}`;
   const count = (value: number) => value.toLocaleString();
 </script>
 
@@ -173,11 +215,11 @@
           {#if !data.others.length}
             {isViewer(spelled[0])
               ? 'Pick an anime to watch together'
-              : `Pick an anime to watch with ${spelled[0]}`}
+              : `Pick an anime to watch with ${spelled[0].name}`}
           {:else if viewerIn}
             What should we watch?
           {:else}
-            What should {joinNames(spelled)} watch?
+            What should {joinNames(spelledNames)} watch?
           {/if}
         </h1>
         <ShareButton url={share.url} title={share.title} subject={share.subject} />
@@ -185,8 +227,8 @@
       <p class="summary">
         {#if data.others.length}
           {viewerIn
-            ? 'Anime none of you have seen yet, picked from your AniList plan lists.'
-            : `Anime none of ${joinNames(spelled)} have seen yet, picked from their AniList plan lists.`}
+            ? `Anime none of you have seen yet, picked from your ${services} plan lists.`
+            : `Anime none of ${joinNames(spelledNames)} have seen yet, picked from their ${services} plan lists.`}
         {:else}
           Add up to {MAX_GROUP - 1} people, or share this page so friends can join.
         {/if}
@@ -196,29 +238,31 @@
 
   <section class="members" aria-labelledby="members-heading">
     <h2 id="members-heading" tabindex="-1" bind:this={membersHeading}>
-      Who's watching <span class="members-count">{names.length} of {MAX_GROUP}</span>
+      Who's watching <span class="members-count">{members.length} of {MAX_GROUP}</span>
     </h2>
     <ul>
-      {#each names as name, index (name.toLowerCase())}
+      {#each members as member, index (keyOf(member))}
         {@const profile = profileAt(index)}
         <li>
           <a class="member" href={listUrl(spelled[index])}>
             <FriendAvatar
               id={profile?.id ?? 0}
-              {name}
+              name={member.name}
               avatarUrl={profile?.avatarUrl ?? null}
               size={40}
             />
             <span class="member-identity">
               <strong
-                >{isViewer(spelled[index]) ? `You · ${spelled[index]}` : spelled[index]}</strong
+                >{isViewer(spelled[index])
+                  ? `You · ${spelled[index].name}`
+                  : spelled[index].name}</strong
               >
               <span>{index === 0 ? 'Started the group · ' : ''}{memberNote(index)}</span>
             </span>
           </a>
           {#if index > 0}
             <CloseButton
-              label={`Remove ${spelled[index]} from the group`}
+              label={`Remove ${spelled[index].name} from the group`}
               onclick={() => remove(index)}
             />
           {/if}
@@ -226,10 +270,10 @@
       {/each}
     </ul>
 
-    {#if canJoin && data.user}
+    {#if canJoin && viewer[0]}
       <a
         class="tw:btn tw:btn-primary join"
-        href={togetherPath(data.host, [...data.others, data.user.name])}>Join this group</a
+        href={togetherPath(data.host, [...data.others, viewer[0]])}>Join this group</a
       >
     {/if}
 
@@ -240,7 +284,9 @@
       onsubmit={checkName}
     >
       <label for="add-name"
-        >{!data.others.length && !isViewer(spelled[0]) ? 'Your AniList name' : 'Add someone'}</label
+        >{!data.others.length && !isViewer(spelled[0])
+          ? `Your ${hostService} name`
+          : 'Add someone'}</label
       >
       <div class="add-row">
         <input
@@ -250,13 +296,13 @@
           name="add"
           required
           bind:value={typed}
-          placeholder="AniList name or profile link"
+          placeholder={`${hostService} name or profile link`}
           autocapitalize="off"
           autocomplete="off"
           spellcheck="false"
           disabled={full}
           aria-invalid={formError ? 'true' : undefined}
-          aria-describedby={formError || full ? 'add-error' : undefined}
+          aria-describedby={formError || full ? 'add-error' : 'add-hint'}
           oninput={() => (formError = null)}
         />
         <button class="tw:btn" disabled={full}>Add</button>
@@ -264,35 +310,48 @@
       {#if formError || full}
         <p id="add-error" class="form-error">
           {#if formError === 'invalid'}
-            That doesn't look like an AniList name. Try the name shown on their profile.
+            That doesn't look like a name. Try the one shown on their profile, or paste a link to
+            it.
           {:else if formError === 'member'}
             They're already in the group.
           {:else}
             Groups have up to {MAX_GROUP} people. Remove someone to add another.
           {/if}
         </p>
+      {:else}
+        <p id="add-hint" class="form-hint">
+          A name is looked up on {hostService}; paste a link to their {linkServices} profile to add someone
+          from another site.
+        </p>
       {/if}
     </form>
   </section>
 
   {#if missing.length}
+    {@const own = missing.find((person) => isViewer(person))}
     <div class="notice" role="alert">
       <h2>
         {missing.length === 1
-          ? `There's no public AniList list for ${missing[0]}`
-          : `There are no public AniList lists for ${joinNames(missing)}`}
+          ? `There's no public ${DOMAIN_NAMES[missing[0].domain]} list for ${missing[0].name}`
+          : `There are no public ${serviceNames(missing)} lists for ${joinNames(missing.map(({ name }) => name))}`}
       </h2>
       <p>
-        {missing.some(isViewer)
-          ? 'Make your list public in your AniList settings so it counts.'
-          : 'Check the spelling, or ask them to make their list public on AniList.'}
+        {own
+          ? `Make your list public in your ${DOMAIN_NAMES[own.domain]} settings so it counts.`
+          : `Check the spelling, or ask them to make their list public on ${serviceNames(missing, 'or')}.`}
         Picks leave {missing.length === 1 ? 'them' : 'those lists'} out until then.
       </p>
     </div>
   {/if}
   {#if failed || (retryAt && !settled)}
+    {@const busyServices = serviceNames(troubled)}
+    {@const both = new Set(troubled.map(({ domain }) => domain)).size > 1}
     <div class="notice" role="status">
-      <h2>{failed ? "AniList isn't answering right now" : 'AniList is busy right now'}</h2>
+      <h2>
+        {failed
+          ? `${busyServices} ${both ? "aren't" : "isn't"} answering right now`
+          : `${busyServices} ${both ? 'are' : 'is'} busy right now`}
+      </h2>
       <p>Please try again in a moment.</p>
       <button type="button" class="tw:btn" disabled={now < retryAt} onclick={() => attempt++}>
         {now < retryAt ? `Try again in ${Math.ceil((retryAt - now) / 1000)}s` : 'Try again'}
@@ -317,10 +376,7 @@
         <div class="top-copy">
           <p class="eyebrow">Top pick</p>
           <h2>
-            <a
-              href={`https://anilist.co/anime/${top.anime.id}`}
-              target="_blank"
-              rel="noopener noreferrer"
+            <a href={animePageUrl('anilist', top.anime)} target="_blank" rel="noopener noreferrer"
               >{top.anime.title}<span class="tw:sr-only">, opens in a new tab</span></a
             >
           </h2>
@@ -334,8 +390,8 @@
       <div class="notice">
         <h2>Nothing new to all of you yet</h2>
         <p>
-          Picks come from anime on someone's AniList plan list that nobody in the group has watched.
-          Plan lists count right away, so add a few there and try again, or change the group.
+          Picks come from anime on someone's plan list that nobody in the group has watched. Plan
+          lists count right away, so add a few there and try again, or change the group.
         </p>
       </div>
     {/if}
@@ -344,7 +400,7 @@
       <section class="picks" aria-labelledby="more-picks">
         <h2 id="more-picks">More picks</h2>
         <ul class="poster-grid">
-          {#each more as pick (pick.anime.id)}
+          {#each more as pick (animeKey(pick.anime))}
             {@const why = reasons(pick)}
             <li>
               <SharedAnimePoster
@@ -395,7 +451,7 @@
     font-weight: 650;
     letter-spacing: -0.02em;
     line-height: 1.25;
-    /* AniList names are one word of up to 20 letters, wider than a phone has room for */
+    /* A name is one long word, which can be wider than a phone has room for */
     overflow-wrap: anywhere;
   }
 
@@ -524,10 +580,15 @@
     padding-inline: 20px;
   }
 
-  .form-error {
+  .form-error,
+  .form-hint {
     margin-top: 8px;
     color: var(--text-heading);
     font-size: 0.8125rem;
+  }
+
+  .form-hint {
+    color: var(--text-accent);
   }
 
   .notice p {

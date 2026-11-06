@@ -22,6 +22,8 @@
    * Each friend's list is a read of its own, so they're compared only when asked, and a round at a
    * time: a long following list would otherwise keep AniList busy for minutes
    */
+  // Friends are AniList's follows, as is the list whose friends they are
+  const aniList = (name: string) => ({ domain: 'anilist' as const, name });
   const ROUND = 24;
   // Ranks shown before "Show all"
   const SHOWN = 5;
@@ -88,7 +90,7 @@
   const share = $derived(
     top
       ? {
-          url: `${page.url.origin}${matchPath(owner, top.name)}`,
+          url: `${page.url.origin}${matchPath(aniList(owner), aniList(top.name))}`,
           title: `${own ? 'My' : `${owner}'s`} anime taste twin is ${top.name} (${top.percent}% match) on Yousoro`,
         }
       : null
@@ -152,7 +154,7 @@
       <div class="twin-top-copy">
         <p class="eyebrow">{status === 'done' ? 'Closest match' : 'Closest so far'}</p>
         <p class="twin-name">
-          <a href={matchPath(owner, top.name)}>{top.name}</a>
+          <a href={matchPath(aniList(owner), aniList(top.name))}>{top.name}</a>
           <strong>{top.percent}%</strong>
           <span>{describeMatch(top.percent)}</span>
         </p>
@@ -165,7 +167,7 @@
     <ol class="twin-list">
       {#each shown as twin, index (twin.id)}
         <li>
-          <a href={matchPath(owner, twin.name)}>
+          <a href={matchPath(aniList(owner), aniList(twin.name))}>
             <span class="rank" aria-hidden="true">{index + 1}</span>
             <FriendAvatar id={twin.id} name={twin.name} avatarUrl={twin.avatarUrl} size={32} />
             <span class="twin-row-name">{twin.name}</span>

@@ -130,14 +130,18 @@ export function badgeLine(animeList: Anime[], variant = 0): { line: string; quip
   };
 }
 
+/** The image hosts covers and avatars come from: AniList's, and MyAnimeList's for its lists */
+const IMAGE_HOSTS = ['https://s4.anilist.co/', 'https://cdn.myanimelist.net/'];
+
 /**
- * Fetches an AniList image as a data URL, so a slow or broken one is left out of the preview
- * rather than failing it. Only AniList's CDN is fetched, and only image types the renderer reads
+ * Fetches an AniList or MyAnimeList image as a data URL, so a slow or broken one is left out of the
+ * preview rather than failing it. Only their CDNs are fetched, and only image types the renderer
+ * reads
  */
 async function loadImage(url: string | null): Promise<string | null> {
-  if (!url?.startsWith('https://s4.anilist.co/')) return null;
+  if (!url || !IMAGE_HOSTS.some((host) => url.startsWith(host))) return null;
   try {
-    // A redirect could lead off AniList's CDN, so it's refused as the API client does
+    // A redirect could lead off the CDN, so it's refused as the API clients do
     const response = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(3000) });
     const type = response.headers.get('content-type')?.split(';')[0] ?? '';
     if (!response.ok || !['image/jpeg', 'image/png', 'image/gif'].includes(type)) {
@@ -218,7 +222,7 @@ export async function renderMatchInvitePreview(
     favoriteAnime(profile).map((anime) => anime.coverUrl),
     {
       headline: 'How well do your tastes match?',
-      detail: `Compare your AniList scores with ${profile.name}'s`,
+      detail: `Compare your anime scores with ${profile.name}'s`,
     },
     cacheControl
   );

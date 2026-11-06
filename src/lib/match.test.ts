@@ -5,13 +5,19 @@ import {
   favoriteAnime,
   loadTasteProfile,
   matchPath,
-  parseUserName,
+  parsePerson,
+  parsePersonSegment,
+  samePerson,
 } from '#lib/match.js';
 import type { ScoredAnime, TasteProfile } from '#lib/types/match.js';
+
+// An AniList anime's MyAnimeList id, in these tests
+const MAL = 1000;
 
 function scored(id: number, score100: number, overrides: Partial<ScoredAnime> = {}): ScoredAnime {
   return {
     id,
+    malId: id + MAL,
     title: `Anime ${id}`,
     coverUrl: null,
     isAdult: false,
@@ -24,6 +30,7 @@ function scored(id: number, score100: number, overrides: Partial<ScoredAnime> = 
 
 function profile(name: string, overrides: Partial<TasteProfile> = {}): TasteProfile {
   return {
+    domain: 'anilist',
     id: name.length,
     name,
     avatarUrl: null,
@@ -73,8 +80,9 @@ describe('comparing tastes', () => {
   });
 
   it('gives no percent until enough anime are scored by both, but still counts what they share', () => {
-    const alice = profile('Alice', { scored: scoredAll(SCORES.slice(0, 4)), seen: [20, 21] });
-    const bob = profile('Bob', { scored: scoredAll(SCORES.slice(0, 4)), seen: [20, 30] });
+    const seen = (...ids: number[]) => ids.map((id) => ({ id, malId: id + MAL }));
+    const alice = profile('Alice', { scored: scoredAll(SCORES.slice(0, 4)), seen: seen(20, 21) });
+    const bob = profile('Bob', { scored: scoredAll(SCORES.slice(0, 4)), seen: seen(20, 30) });
     const match = compareTastes(alice, bob);
     expect(match.percent).toBeNull();
     expect(match.bothScored).toBe(4);
@@ -127,8 +135,17 @@ describe('comparing tastes', () => {
   it("picks each one's above-average anime the other hasn't watched, and notes planned ones", () => {
     const alice = profile('Alice', {
       scored: [scored(1, 90), scored(2, 40)],
-      seen: [10],
-      planned: [{ id: 11, title: 'Anime 11', coverUrl: null, isAdult: false, meanScore: 70 }],
+      seen: [{ id: 10, malId: 10 + MAL }],
+      planned: [
+        {
+          id: 11,
+          malId: 11 + MAL,
+          title: 'Anime 11',
+          coverUrl: null,
+          isAdult: false,
+          meanScore: 70,
+        },
+      ],
     });
     const bob = profile('Bob', {
       scored: [
@@ -165,7 +182,7 @@ describe('comparing tastes', () => {
     expect(shown.picksForA.map(({ anime }) => anime.id)).toEqual([21]);
   });
 
-  it('orders favorites by score, then by how AniList users rate them', () => {
+  it('orders favorites by score, then by how users of their service rate them', () => {
     const alice = profile('Alice', {
       scored: [
         scored(1, 80),
@@ -179,24 +196,93 @@ describe('comparing tastes', () => {
   });
 });
 
-describe('names to compare with', () => {
-  it('accepts a name, an @name, or a link to an AniList profile or list', () => {
-    expect(parseUserName('  Alice ')).toBe('Alice');
-    expect(parseUserName('@Alice')).toBe('Alice');
-    expect(parseUserName('https://anilist.co/user/Alice/')).toBe('Alice');
-    expect(parseUserName('anilist.co/user/Alice/animelist/Completed')).toBe('Alice');
+describe('comparing across AniList and MyAnimeList', () => {
+  // A MyAnimeList list's anime, which only know their MyAnimeList ids
+  const fromMal = (malId: number, score100: number) => scored(0, score100, { id: null, malId });
+  const onMal = (name: string, overrides: Partial<TasteProfile> = {}) =>
+    profile(name, { domain: 'myanimelist', id: null, ...overrides });
+
+  it('matches anime by their MyAnimeList ids', () => {
+    const alice = profile('Alice', { scored: scoredAll(SCORES) });
+    const bob = onMal('bob', {
+      scored: SCORES.map((score, index) => fromMal(index + 1 + MAL, score - 5)),
+    });
+    const match = compareTastes(alice, bob);
+    expect(match).toMatchObject({ percent: 97, bothScored: 10, inCommon: 10 });
+  });
+
+  it("never matches an AniList anime MyAnimeList doesn't have, but can still suggest it", () => {
+    const alice = profile('Alice', {
+      scored: [...scoredAll(SCORES), scored(50, 100, { malId: null })],
+    });
+    const bob = onMal('bob', {
+      scored: SCORES.map((score, index) => fromMal(index + 1 + MAL, score)),
+      seen: [{ id: null, malId: 50 }],
+    });
+    const match = compareTastes(alice, bob);
+    expect(match.bothScored).toBe(10);
+    // MyAnimeList's anime 50 is another anime than AniList's 50
+    expect(match.picksForB.map(({ anime }) => anime.id)).toEqual([50]);
+  });
+
+  it('compares two MyAnimeList lists by their own ids', () => {
+    const mika = onMal('mika', { scored: [fromMal(7, 90)], seen: [{ id: null, malId: 8 }] });
+    const sora = onMal('sora', { scored: [fromMal(7, 80), fromMal(8, 60)] });
+    expect(compareTastes(mika, sora)).toMatchObject({ bothScored: 1, inCommon: 2 });
+  });
+
+  it('tells people apart by AniList account, or by MyAnimeList name', () => {
+    expect(samePerson(profile('Alice', { id: 1 }), profile('Alicia', { id: 1 }))).toBe(true);
+    expect(samePerson(onMal('Mika'), onMal('MIKA'))).toBe(true);
+    expect(samePerson(profile('Mika'), onMal('Mika'))).toBe(false);
+  });
+});
+
+describe('people to compare with', () => {
+  it('reads a name, an @name, or a link to an AniList or MyAnimeList profile or list', () => {
+    expect(parsePerson('  Alice ', 'anilist')).toEqual({ domain: 'anilist', name: 'Alice' });
+    expect(parsePerson('@Alice', 'myanimelist')).toEqual({ domain: 'myanimelist', name: 'Alice' });
+    expect(parsePerson('https://anilist.co/user/Alice/', 'myanimelist')).toEqual({
+      domain: 'anilist',
+      name: 'Alice',
+    });
+    expect(parsePerson('anilist.co/user/Alice/animelist/Completed', 'anilist')).toEqual({
+      domain: 'anilist',
+      name: 'Alice',
+    });
+    expect(parsePerson('https://myanimelist.net/profile/Mika', 'anilist')).toEqual({
+      domain: 'myanimelist',
+      name: 'Mika',
+    });
+    expect(parsePerson('myanimelist.net/animelist/Mika?status=2', 'anilist')).toEqual({
+      domain: 'myanimelist',
+      name: 'Mika',
+    });
   });
 
   it('refuses text that cannot be a name', () => {
-    expect(parseUserName('')).toBeNull();
-    expect(parseUserName('two words')).toBeNull();
-    expect(parseUserName('../settings')).toBeNull();
-    expect(parseUserName('https://example.com/user/Alice')).toBeNull();
+    expect(parsePerson('', 'anilist')).toBeNull();
+    expect(parsePerson('two words', 'anilist')).toBeNull();
+    expect(parsePerson('../settings', 'anilist')).toBeNull();
+    expect(parsePerson('https://example.com/user/Alice', 'anilist')).toBeNull();
+    expect(parsePerson('kitsu:Alice', 'anilist')).toBeNull();
   });
 
-  it('builds the paths of an invitation and of a match', () => {
-    expect(matchPath('Alice')).toBe('/user/anilist/Alice/match');
-    expect(matchPath('Alice', 'Bob')).toBe('/user/anilist/Alice/match/Bob');
+  it('names the service in a path only for someone on the other one', () => {
+    const alice = { domain: 'anilist' as const, name: 'Alice' };
+    const mika = { domain: 'myanimelist' as const, name: 'Mika' };
+    expect(matchPath(alice)).toBe('/user/anilist/Alice/match');
+    expect(matchPath(alice, { domain: 'anilist', name: 'Bob' })).toBe(
+      '/user/anilist/Alice/match/Bob'
+    );
+    expect(matchPath(alice, mika)).toBe('/user/anilist/Alice/match/myanimelist:Mika');
+    expect(matchPath(mika, alice)).toBe('/user/myanimelist/Mika/match/anilist:Alice');
+    expect(parsePersonSegment('myanimelist:Mika', 'anilist')).toEqual(mika);
+    expect(parsePersonSegment('Bob', 'myanimelist')).toEqual({
+      domain: 'myanimelist',
+      name: 'Bob',
+    });
+    expect(parsePersonSegment('mal:Mika', 'anilist')).toBeNull();
   });
 });
 
@@ -205,29 +291,41 @@ describe('reading a taste profile in the browser', () => {
 
   it('asks for the name in lower case, so every spelling shares one cached profile', async () => {
     const fetcher = vi.fn().mockResolvedValue(Response.json(profile('Alice')));
-    expect(await loadTasteProfile('ALICE', fetcher)).toEqual({
+    expect(await loadTasteProfile({ domain: 'anilist', name: 'ALICE' }, fetcher)).toEqual({
       status: 'ready',
       profile: profile('Alice'),
     });
-    expect(fetcher).toHaveBeenCalledWith('/api/taste/alice?v=2');
+    expect(fetcher).toHaveBeenCalledWith('/api/taste/anilist/alice?v=3');
   });
 
-  it('tells a missing list, a busy AniList and a failure apart', async () => {
+  it("keeps a MyAnimeList name as it was asked for, as MyAnimeList doesn't say its spelling", async () => {
+    const mal = profile('mika', { domain: 'myanimelist', id: null });
+    const fetcher = vi.fn().mockResolvedValue(Response.json(mal));
+    expect(await loadTasteProfile({ domain: 'myanimelist', name: 'Mika' }, fetcher)).toEqual({
+      status: 'ready',
+      profile: { ...mal, name: 'Mika' },
+    });
+    expect(fetcher).toHaveBeenCalledWith('/api/taste/myanimelist/mika?v=3');
+  });
+
+  const someone = { domain: 'anilist' as const, name: 'a' };
+
+  it('tells a missing list, a busy service and a failure apart', async () => {
     const now = Date.now();
     vi.spyOn(Date, 'now').mockReturnValue(now);
     const answer = (response: Response) => vi.fn().mockResolvedValue(response);
-    expect(await loadTasteProfile('a', answer(new Response(null, { status: 404 })))).toEqual({
+    expect(await loadTasteProfile(someone, answer(new Response(null, { status: 404 })))).toEqual({
       status: 'missing',
     });
     const busy = new Response(null, { status: 429, headers: { 'Retry-After': '12' } });
-    expect(await loadTasteProfile('a', answer(busy))).toEqual({
+    expect(await loadTasteProfile(someone, answer(busy))).toEqual({
       status: 'busy',
       retryAt: now + 12_000,
     });
-    expect(await loadTasteProfile('a', answer(new Response(null, { status: 502 })))).toEqual({
+    expect(await loadTasteProfile(someone, answer(new Response(null, { status: 502 })))).toEqual({
       status: 'failed',
     });
-    expect(await loadTasteProfile('a', vi.fn().mockRejectedValue(new TypeError()))).toEqual({
+    expect(await loadTasteProfile(someone, vi.fn().mockRejectedValue(new TypeError()))).toEqual({
       status: 'failed',
     });
   });

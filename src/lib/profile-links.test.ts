@@ -69,6 +69,7 @@ describe('more profile links', () => {
     calendarView: false,
     year: 2026,
     aniListName: 'Sylux',
+    tasteOwner: sylux,
   };
 
   it("leaves out the pages the header's tabs already lead to", () => {
@@ -98,17 +99,36 @@ describe('more profile links', () => {
 
   it('keeps AniList-only pages off MyAnimeList lists', () => {
     const owner = { domain: 'myanimelist', name: 'Xinil' } as const;
-    expect(labels({ ...base, owner, header: owner, aniListName: null })).toEqual([]);
-    expect(labels({ ...base, owner, header: sylux, aniListName: null })).toEqual([
-      'Calendar',
-      'Planning',
-    ]);
+    const onMal = { ...base, owner, aniListName: null, tasteOwner: owner };
+    expect(labels({ ...onMal, header: owner })).toEqual([]);
+    expect(labels({ ...onMal, header: sylux })).toEqual(['Calendar', 'Planning']);
+  });
+
+  it('offers the profile badge on your own MyAnimeList list', () => {
+    const owner = { domain: 'myanimelist', name: 'Xinil' } as const;
+    expect(
+      moreProfileLinks({
+        ...base,
+        owner,
+        ownList: true,
+        header: owner,
+        aniListName: null,
+        tasteOwner: owner,
+      })
+    ).toEqual([{ href: '/user/myanimelist/Xinil/badge', label: 'Profile badge' }]);
   });
 
   it("leads a combined MyAnimeList list's AniList pages to the owner's AniList account", () => {
     const owner = { domain: 'myanimelist', name: 'ViewerMal' } as const;
     expect(
-      moreProfileLinks({ ...base, owner, ownList: true, header: owner, aniListName: 'Viewer' })
+      moreProfileLinks({
+        ...base,
+        owner,
+        ownList: true,
+        header: owner,
+        aniListName: 'Viewer',
+        tasteOwner: { domain: 'anilist', name: 'Viewer' },
+      })
     ).toEqual([
       { href: '/user/anilist/Viewer/wrapped/2026', label: '2026 in anime' },
       { href: '/user/anilist/Viewer/badge', label: 'Profile badge' },

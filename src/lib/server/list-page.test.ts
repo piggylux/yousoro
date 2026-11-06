@@ -116,7 +116,7 @@ describe('a combined watching list', () => {
     expect(getAniListWatching).toHaveBeenCalledTimes(1);
     expect(getAniListWatching).toHaveBeenCalledWith('Viewer', 'anilist-token', undefined);
     expect(getMalWatching).toHaveBeenCalledTimes(1);
-    expect(getMalWatching).toHaveBeenCalledWith('ViewerMal', 'mal-token');
+    expect(getMalWatching).toHaveBeenCalledWith('ViewerMal', 'mal-token', undefined);
     expect(getMediaByMalIds).toHaveBeenCalledTimes(1);
     expect(getMediaByMalIds).toHaveBeenCalledWith([130], undefined);
     // Airings are looked up once, for both lists

@@ -5,6 +5,9 @@ export function isDomain(value: string): value is Domain {
   return DOMAIN_VALUES.includes(value as never);
 }
 
+/** Whose list it is, on which service */
+export type ListOwner = { domain: Domain; name: string };
+
 /** How each service is named to people */
 export const DOMAIN_NAMES: Record<Domain, string> = {
   anilist: 'AniList',
