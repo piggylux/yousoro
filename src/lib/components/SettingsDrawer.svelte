@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { prefersReducedMotion } from 'svelte/motion';
 
   import CloseButton from '#lib/components/CloseButton.svelte';
@@ -21,13 +22,38 @@
   let dialog = $state<HTMLDialogElement>();
   // Only a press that starts on the dimmed page closes the drawer, not a drag that ends there
   let pressedBackdrop = false;
+  // The page behind is held still from opening until the drawer has slid away again, so its
+  // scrollbar doesn't come back beside the drawer as it leaves
+  let holdingPage = $state(false);
 
   // A modal dialog keeps focus inside the drawer, gives it back when it closes, and closes on Esc.
   // The close button and the backdrop set `open` themselves; Esc reports back through `onclose`
   $effect(() => {
-    if (open && !dialog?.open) dialog?.showModal();
-    if (!open && dialog?.open) dialog.close();
+    if (dialog && open && !dialog.open) {
+      // The page loses its scrollbar while held; its width stays as padding so the page doesn't
+      // widen and shift under the backdrop. Reopening mid-slide keeps the width already measured
+      if (!untrack(() => holdingPage)) {
+        const root = document.documentElement;
+        root.style.setProperty(
+          '--page-scrollbar-width',
+          `${window.innerWidth - root.clientWidth}px`
+        );
+      }
+      holdingPage = true;
+      dialog.showModal();
+    }
+    if (dialog && !open && dialog.open) dialog.close();
   });
+
+  // Lets the page go once the drawer has slid out, unless it was opened again meanwhile. The slide
+  // can end cancelled rather than finished, as the drawer is hidden in the same frame
+  function closed() {
+    open = false;
+    const sliding = dialog?.getAnimations() ?? [];
+    void Promise.allSettled(sliding.map((animation) => animation.finished)).then(
+      () => (holdingPage = Boolean(dialog?.open))
+    );
+  }
 </script>
 
 <!-- Clicking the dimmed page beside the drawer closes it; Esc and the close button do too -->
@@ -35,9 +61,10 @@
 <dialog
   class="drawer"
   class:animated={!prefersReducedMotion.current}
+  class:holds-page={holdingPage}
   bind:this={dialog}
   aria-labelledby="settings-drawer-title"
-  onclose={() => (open = false)}
+  onclose={closed}
   onpointerdown={(event) => (pressedBackdrop = event.target === dialog)}
   onclick={(event) => {
     if (pressedBackdrop && event.target === dialog) open = false;
@@ -68,9 +95,10 @@
     box-shadow: var(--shadow-dialog);
   }
 
-  /* The page behind stays where it is while the drawer is open */
-  :global(:root:has(dialog.drawer[open])) {
+  /* The page behind stays where it is while the drawer is showing */
+  :global(:root:has(dialog.drawer.holds-page)) {
     overflow: hidden;
+    padding-right: var(--page-scrollbar-width, 0);
   }
 
   .drawer::backdrop {
