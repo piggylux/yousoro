@@ -68,7 +68,6 @@ export function rememberList(data: ListData, refresh = true) {
     watchingList,
     scoreFormat,
     hiddenSections,
-    userProfileLink,
     airingsEnriched,
     unmatched,
   } = data;
@@ -80,7 +79,6 @@ export function rememberList(data: ListData, refresh = true) {
     watchingList,
     scoreFormat,
     hiddenSections,
-    userProfileLink,
     airingsEnriched,
     unmatched,
   };

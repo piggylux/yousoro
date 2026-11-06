@@ -90,7 +90,6 @@ export type AnimePageData = {
   scoreFormat: ScoreFormat;
   /** The sections of the list the viewer hides with the filters above it */
   hiddenSections: ListSection[];
-  userProfileLink: string;
   unmatched?: UnmatchedAnime[];
   /** The viewer's display settings, from the root layout */
   preferences: Preferences;

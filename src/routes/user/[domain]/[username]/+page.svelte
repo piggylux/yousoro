@@ -27,7 +27,9 @@
   import FriendsWatchingDialog from '#lib/components/FriendsWatchingDialog.svelte';
   import FriendsWatchingLoader from '#lib/components/FriendsWatchingLoader.svelte';
   import ListFilters from '#lib/components/ListFilters.svelte';
+  import MoreMenu from '#lib/components/MoreMenu.svelte';
   import ScorePrompt from '#lib/components/ScorePrompt.svelte';
+  import ServiceProfileLink from '#lib/components/ServiceProfileLink.svelte';
   import ShareButton from '#lib/components/ShareButton.svelte';
   import YousoroCelebration from '#lib/components/YousoroCelebration.svelte';
   import { flippedCard } from '#lib/flipped-card.svelte.js';
@@ -36,13 +38,19 @@
   import { expireRememberedList, recordSavedEntry } from '#lib/list-data.js';
   import { nextAiringReloadDelay, planReload, reloadsOnReturn } from '#lib/live-updates.js';
   import { matchPath } from '#lib/match.js';
+  import {
+    headerList,
+    moreProfileLinks,
+    ownerProfiles,
+    signedInAccounts,
+  } from '#lib/profile-links.js';
   import { togetherPath } from '#lib/together.js';
   import type { Anime } from '#lib/types/anime.js';
   import type { AnimePageData, LinkedFailure } from '#lib/types/api.js';
   import { animePageUrl, DOMAIN_NAMES, listPath } from '#lib/types/domain.js';
   import type { FriendWatching, FriendWatchingResult } from '#lib/types/friend-watching.js';
   import { countColumns, getVisibleRange, type VisibleRange } from '#lib/virtual-grid.js';
-  import { wrappedPath, wrappedYear } from '#lib/wrapped.js';
+  import { wrappedYear } from '#lib/wrapped.js';
 
   let { data }: { data: AnimePageData } = $props();
   const service = $derived(DOMAIN_NAMES[data.domain]);
@@ -52,6 +60,21 @@
   const calendarView = $derived(page.url.searchParams.get('view') === 'calendar');
   // The year the list links to a summary of
   const recapYear = wrappedYear(new Date());
+
+  const owner = $derived({ domain: data.domain, name: data.username });
+  const accounts = $derived(
+    signedInAccounts(page.data.user ?? null, page.data.malUser ?? null, data.preferences.mainList)
+  );
+  const profiles = $derived(ownerProfiles(owner, data.canEdit, accounts));
+  const moreLinks = $derived(
+    moreProfileLinks({
+      owner,
+      ownList: data.canEdit,
+      calendarView,
+      header: headerList(accounts, owner),
+      year: recapYear,
+    })
+  );
 
   // The view being looked at, as anyone would see it: without the viewer's filters or search
   const share = $derived.by(() => {
@@ -451,35 +474,64 @@
       {#if data.avatarUrl}
         <img class="avatar-img" src={data.avatarUrl} alt={`${data.username}'s profile picture`} />
       {/if}
-      <div>
-        <div class="name-row">
-          {#if calendarView}
-            <span class="name">{data.username}</span>
-          {:else}
-            <h1 class="name">
-              {data.username}<span class="tw:sr-only">'s anime watching list</span>
-            </h1>
-          {/if}
-          <ShareButton url={share.url} title={share.title} subject={share.subject} />
-        </div>
-        <span class="profile-links">
-          {#if onAniList}
-            <a href={`${listPath(data.domain, data.username)}/friends`}>Friends</a>
-            · <a href={matchPath(data.username)}>Taste match</a>
-            · <a href={togetherPath(data.username)}>Watch together</a>
-            ·
-            <a href={wrappedPath(data.username, recapYear)}>{recapYear} in anime</a>
-            {#if data.canEdit}
-              · <a href={`${listPath(data.domain, data.username)}/badge`}>Profile badge</a>
-            {/if}
-            ·
-          {/if}
-          <a href={calendarView ? page.url.pathname : `${page.url.pathname}?view=calendar`}
-            >{calendarView ? 'Anime list' : 'Calendar'}</a
-          >
-          · <a href={data.userProfileLink} target="_blank">{service} profile ↗</a>
-        </span>
+      <div class="name-row">
+        {#if calendarView}
+          <span class="name">{data.username}</span>
+        {:else}
+          <h1 class="name">
+            {data.username}<span class="tw:sr-only">'s anime watching list</span>
+          </h1>
+        {/if}
+        {#each profiles as profile (profile.domain)}
+          <ServiceProfileLink domain={profile.domain} username={profile.name} />
+        {/each}
+        <ShareButton url={share.url} title={share.title} subject={share.subject} />
       </div>
+      {#if onAniList || moreLinks.length}
+        <div class="profile-actions">
+          {#if onAniList}
+            <a class="tw:btn tw:btn-sm profile-action" href={matchPath(data.username)}>
+              <!-- Two tastes overlapping -->
+              <svg
+                viewBox="0 0 24 24"
+                width="16"
+                height="16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                aria-hidden="true"
+                ><circle cx="9" cy="12" r="6" /><circle cx="15" cy="12" r="6" /></svg
+              >
+              Taste match
+            </a>
+            <a class="tw:btn tw:btn-sm profile-action" href={togetherPath(data.username)}>
+              <!-- A screen to share -->
+              <svg
+                viewBox="0 0 24 24"
+                width="16"
+                height="16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+                ><rect x="3" y="4" width="18" height="13" rx="2" /><path
+                  d="M8 21h8m-5.5-12.5 4 2-4 2Z"
+                /></svg
+              >
+              Watch together
+            </a>
+          {/if}
+          {#if moreLinks.length}
+            <MoreMenu label={`More from ${data.username}`}>
+              {#each moreLinks as link (link.href)}
+                <li><a href={link.href}>{link.label}</a></li>
+              {/each}
+            </MoreMenu>
+          {/if}
+        </div>
+      {/if}
     </div>
 
     <!-- Updates with every progress change, since the list reloads after each one -->
@@ -825,10 +877,20 @@
     margin-bottom: 12px;
   }
 
+  /*
+   * The avatar sits beside the name with the actions under it. On a phone the actions take the
+   * whole width below the avatar, so they still fit on one line
+   */
   .profile {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
     align-items: center;
-    gap: 12px;
+    gap: 8px 12px;
+    min-width: 0;
+  }
+
+  .profile:has(> .avatar-img) {
+    grid-template-columns: auto minmax(0, 1fr);
   }
 
   .avatar-img {
@@ -838,8 +900,13 @@
     box-shadow: none;
   }
 
-  .profile > div {
-    min-width: 0;
+  .profile:has(> .profile-actions) .avatar-img {
+    grid-row: span 2;
+  }
+
+  .name-row,
+  .profile-actions {
+    grid-column: -2;
   }
 
   .name {
@@ -859,15 +926,33 @@
     column-gap: 4px;
   }
 
-  .profile-links {
-    font-size: 0.85rem;
-    opacity: 1;
-    color: var(--text-accent);
+  .profile-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
   }
 
-  .profile-links a:hover,
-  .profile-links a:focus-visible {
-    text-decoration: underline;
+  /* The same size as the links they replace, and the menu's items */
+  .profile-action {
+    gap: 6px;
+    font-size: 0.85rem;
+  }
+
+  @media (pointer: coarse) {
+    .profile-action {
+      min-height: 44px;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .profile:has(> .profile-actions) .avatar-img {
+      grid-row: auto;
+    }
+
+    .profile-actions {
+      grid-column: 1 / -1;
+    }
   }
   /*
    * As many card columns as fit, from one on phones up to as many as a wide screen allows. The

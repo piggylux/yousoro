@@ -48,7 +48,6 @@ beforeEach(() => {
     watchingList: [anime, { ...anime, id: 2, isAdult: true }],
     scoreFormat: 'POINT_10',
     hiddenSections: [],
-    userProfileLink: '',
   });
 });
 
