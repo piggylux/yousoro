@@ -1,14 +1,16 @@
 import { isScoreFormat, parseScore, type ScoreFormat } from '#lib/score.js';
+import type { ListMove } from '#lib/types/api.js';
 import { DOMAIN_NAMES, type Domain } from '#lib/types/domain.js';
 
 export type EntryChanges = {
   progress?: number;
   score?: number;
   /**
-   * Moved to "Watching" from the plan list, and nothing else. A copy to a linked account then sets
-   * the status alone: that list may be further along, and its episode count and dates stay
+   * Moved to "Watching", as from the plan list, or to "Planning", as an announced sequel, and
+   * nothing else. A copy to a linked account then sets the status alone: that list may be further
+   * along, and its episode count and dates stay
    */
-  start?: true;
+  move?: ListMove;
 };
 
 /** MyAnimeList scores are always whole numbers out of 10, whatever a form says */
@@ -73,12 +75,12 @@ export function parseEntryUpdate(
 }
 
 /**
- * Which anime a "Start watching" form asks to move to the list owner's "Watching" list: by its
- * AniList id on an AniList list, and by its MyAnimeList id on a MyAnimeList list, whose planned
- * anime aren't looked up on AniList. The other id comes too when the page knows it, to copy the
- * change to a linked account. Returns a message for the user when an id is missing
+ * Which anime a "Start watching" or "Add to Planning" form asks to move on the list owner's list:
+ * by its AniList id on an AniList list, and by its MyAnimeList id on a MyAnimeList list, whose
+ * planned anime aren't looked up on AniList. The other id comes too when the page knows it, to copy
+ * the change to a linked account. Returns a message for the user when an id is missing
  */
-export function parseStartWatching(
+export function parseListMove(
   form: FormData,
   domain: Domain
 ): { mediaId?: number; malId?: number } | { message: string } {

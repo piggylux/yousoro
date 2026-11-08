@@ -10,6 +10,7 @@ import {
   getFollowing,
   getLatestAirings,
   getPlanningEntries,
+  getSequels,
   getSeries,
   getTasteProfile,
   getViewer,
@@ -761,5 +762,91 @@ describe('planning lists', () => {
     await getPlanningEntries('Private');
     expect(fetch).toHaveBeenCalledTimes(3);
     expect(vi.mocked(fetch).mock.calls[2][1]!.headers).not.toHaveProperty('Authorization');
+  });
+});
+
+describe('sequels', () => {
+  const node = (id: number, changes: Record<string, unknown> = {}) => ({
+    id,
+    idMal: id + 1000,
+    type: 'ANIME',
+    format: 'TV',
+    status: 'FINISHED',
+    episodes: 12,
+    isAdult: false,
+    title: { romaji: `Anime ${id}`, english: null },
+    coverImage: { large: `https://img.example/${id}.jpg` },
+    startDate: { year: 2020 + id, month: 4, day: null },
+    mediaListEntry: null,
+    ...changes,
+  });
+
+  it('keeps the anime sequels, once each, with where the viewer has them on their list', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      Response.json({
+        data: {
+          Media: {
+            relations: {
+              edges: [
+                { relationType: 'PREQUEL', node: node(1) },
+                {
+                  relationType: 'SEQUEL',
+                  node: node(2, { mediaListEntry: { status: 'PLANNING' } }),
+                },
+                { relationType: 'SEQUEL', node: node(2) },
+                { relationType: 'SEQUEL', node: node(3, { type: 'MANGA' }) },
+                { relationType: 'SIDE_STORY', node: node(4) },
+                {
+                  relationType: 'SEQUEL',
+                  node: node(5, { idMal: null, status: null, isAdult: null, coverImage: null }),
+                },
+                // Nothing to show it by, so it's left out rather than failing the others
+                { relationType: 'SEQUEL', node: node(6, { title: null }) },
+              ],
+            },
+          },
+        },
+      })
+    );
+
+    expect(await getSequels(9, 'viewer.token')).toEqual([
+      {
+        id: 2,
+        malId: 1002,
+        title: 'Anime 2',
+        englishTitle: null,
+        coverUrl: 'https://img.example/2.jpg',
+        isAdult: false,
+        status: 'FINISHED',
+        format: 'TV',
+        episodes: 12,
+        startDate: { year: 2022, month: 4, day: null },
+        listStatus: 'PLANNING',
+      },
+      expect.objectContaining({
+        id: 5,
+        malId: null,
+        coverUrl: null,
+        isAdult: false,
+        // Out already, as AniList gives no status
+        status: 'FINISHED',
+        startDate: { year: 2025, month: 4, day: null },
+        listStatus: null,
+      }),
+    ]);
+    const [, init] = vi.mocked(fetch).mock.calls[0];
+    expect(init!.headers).toMatchObject({ Authorization: 'Bearer viewer.token' });
+    const { query, variables } = JSON.parse(init!.body as string);
+    expect(variables).toEqual({ id: 9 });
+    // An announced sequel says when it starts, as far as AniList knows
+    expect(query).toContain('startDate { year month day }');
+    // Only an offer, so it gives way when AniList is busy
+    expect(takeAniListRequest).toHaveBeenCalledWith('optional');
+  });
+
+  it('copes with an anime AniList relates to nothing', async () => {
+    vi.mocked(fetch).mockResolvedValue(Response.json({ data: { Media: { relations: null } } }));
+
+    expect(await getSequels(9)).toEqual([]);
   });
 });

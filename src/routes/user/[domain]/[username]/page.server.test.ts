@@ -1,7 +1,7 @@
 import type { ActionFailure, Cookies } from '@sveltejs/kit';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { MalTokenError, saveEntry } from '#lib/server/myanimelist-client.js';
+import { MalTokenError, moveToList, saveEntry } from '#lib/server/myanimelist-client.js';
 import { MyAnimeListApi } from '#lib/server/myanimelist.js';
 import type { MalSession, Session } from '#lib/server/session.js';
 import { DEFAULT_PREFERENCES } from '#lib/types/preferences.js';
@@ -16,6 +16,7 @@ vi.mock('#lib/server/rate-limit.js', async (importOriginal) => ({
 vi.mock('#lib/server/myanimelist-client.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('#lib/server/myanimelist-client.js')>()),
   saveEntry: vi.fn(),
+  moveToList: vi.fn(),
 }));
 vi.mock('#lib/server/myanimelist.js', () => ({ MyAnimeListApi: vi.fn() }));
 
@@ -114,6 +115,37 @@ describe('saving to a MyAnimeList list', () => {
     expect(result.status).toBe(401);
     expect(result.data.message).toBe('Your MyAnimeList sign-in expired, please sign in again');
     expect(deleted).toEqual(['session_mal']);
+  });
+});
+
+describe('adding a sequel from the score prompt', () => {
+  const move = (name: 'startWatching' | 'planToWatch', fields: Record<string, string>) => {
+    const action = actions[name]!;
+    return action(event(malSession(), fields).request as unknown as Parameters<typeof action>[0]);
+  };
+
+  it.each([
+    ['startWatching', 'CURRENT'],
+    ['planToWatch', 'PLANNING'],
+  ] as const)('%s moves it to %s on a MyAnimeList list, and nothing else', async (name, status) => {
+    const saved = { progress: 0, score: 0, status, startedAt: null, completedAt: null };
+    vi.mocked(moveToList).mockResolvedValue(saved);
+
+    expect(await move(name, { mediaId: '7', malId: '1007' })).toEqual({
+      mediaId: 7,
+      malId: 1007,
+      ...saved,
+    });
+    expect(moveToList).toHaveBeenCalledWith('mal-token', 1007, status);
+    expect(saveEntry).not.toHaveBeenCalled();
+  });
+
+  it("turns away a sequel MyAnimeList doesn't know", async () => {
+    expect(await move('planToWatch', { mediaId: '7' })).toMatchObject({
+      status: 400,
+      data: { message: 'Unknown anime' },
+    });
+    expect(moveToList).not.toHaveBeenCalled();
   });
 });
 

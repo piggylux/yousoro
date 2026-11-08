@@ -91,7 +91,7 @@ function toPlannedAnime({ media, updatedAt }: AniListPlannedEntry): PlannedList[
  * An AniList start date as one number to compare, YYYYMMDD, with an unknown month or day as the
  * start of what is known. Null without a year, as there's then nothing to order it by
  */
-function startedOn(date: AniListPlannedEntry['media']['startDate']) {
+export function startedOn(date: AniListPlannedEntry['media']['startDate']) {
   if (!date?.year) return null;
   return date.year * 10000 + (date.month ?? 0) * 100 + (date.day ?? 0);
 }

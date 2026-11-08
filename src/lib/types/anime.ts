@@ -86,3 +86,27 @@ export type PlannedSequel = {
   /** On the plan list, only not aired yet, so it's counted rather than listed */
   planned: boolean;
 };
+
+/**
+ * An anime that continues one the user just finished, which the score prompt offers: to start when
+ * it's out and either not on their list or only planned, and to plan when it isn't out and not on
+ * their list
+ */
+export type Sequel = {
+  /** AniList's id */
+  id: number;
+  malId: number | null;
+  title: string;
+  englishTitle: string | null;
+  coverUrl: string | null;
+  isAdult: boolean;
+  status: AiringStatus;
+  /** As AniList names it: "TV", "MOVIE", "OVA"…; null when it doesn't say */
+  format: string | null;
+  /** How many episodes it has or will have; null until that's known */
+  episodes: number | null;
+  /** When it starts or started airing, as far as AniList knows: any part may be unknown */
+  startDate: { year: number | null; month: number | null; day: number | null };
+  /** On the user's plan list already */
+  planned: boolean;
+};

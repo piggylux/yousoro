@@ -4,6 +4,7 @@ import {
   countAnime,
   describePlanned,
   distinctEnglishTitle,
+  forgetPlanned,
   getRememberedPlanned,
   groupSeries,
   markStarted,
@@ -11,11 +12,12 @@ import {
   PLAN_FILTERS,
   type PlannedSeries,
   rememberPlanned,
+  sequelFacts,
   seriesGenres,
   seriesSteps,
   sortSeries,
 } from '#lib/planning.js';
-import type { PlannedAnime, PlannedSequel } from '#lib/types/anime.js';
+import type { PlannedAnime, PlannedSequel, Sequel } from '#lib/types/anime.js';
 import type { PlanningPageData } from '#lib/types/api.js';
 
 function planned(id: number, changes: Partial<PlannedAnime> = {}): PlannedAnime {
@@ -68,6 +70,54 @@ describe('describePlanned', () => {
     [{ status: 'NOT_YET_RELEASED', episodes: null }, 'Not aired yet'],
   ] as [Partial<PlannedAnime>, string][])('describes %o as "%s"', (changes, text) => {
     expect(describePlanned(planned(1, changes))).toBe(text);
+  });
+});
+
+describe('sequelFacts', () => {
+  const sequel = (changes: Partial<Sequel> = {}): Sequel => ({
+    id: 2,
+    malId: 1002,
+    title: 'Anime 2',
+    englishTitle: null,
+    coverUrl: null,
+    isAdult: false,
+    status: 'FINISHED',
+    format: 'TV',
+    episodes: 12,
+    startDate: { year: 2024, month: 10, day: 5 },
+    planned: false,
+    ...changes,
+  });
+
+  it.each([
+    [{}, 'TV · 2024 · 12 episodes'],
+    [{ planned: true }, 'TV · 2024 · 12 episodes · On your plan list'],
+    [{ status: 'RELEASING', episodes: null, format: 'ONA' }, 'ONA · 2024 · Airing'],
+    [{ format: 'MOVIE', episodes: 1 }, 'Movie · 2024'],
+    [
+      { format: 'TV_SHORT', startDate: { year: null, month: null, day: null } },
+      'TV short · 12 episodes',
+    ],
+    [{ format: null, episodes: null }, '2024 · Finished'],
+    [{ status: 'NOT_YET_RELEASED', episodes: null }, 'TV · Starts October 5, 2024'],
+    [
+      { status: 'NOT_YET_RELEASED', startDate: { year: 2027, month: 4, day: null } },
+      'TV · Starts April 2027',
+    ],
+    [
+      { status: 'NOT_YET_RELEASED', startDate: { year: 2027, month: null, day: null } },
+      'TV · Starts 2027',
+    ],
+    [
+      {
+        status: 'NOT_YET_RELEASED',
+        format: 'MOVIE',
+        startDate: { year: null, month: null, day: null },
+      },
+      'Movie · Date not announced',
+    ],
+  ] as [Partial<Sequel>, string][])('describes %o as "%s"', (changes, text) => {
+    expect(sequelFacts(sequel(changes))).toBe(text);
   });
 });
 
@@ -267,5 +317,30 @@ describe('remembered plan lists', () => {
       expect(kept?.planned.map((anime) => anime.id)).toEqual([2]);
     }
     expect(getRememberedPlanned('1:', false, 'anilist', 'Other')?.planned).toHaveLength(1);
+  });
+
+  it('forgets a list the user added to elsewhere, whoever remembered it, and no other list', () => {
+    rememberPlanned('1:', false, 'Added', list('Added', planned(1)));
+    rememberPlanned('1:', true, 'Added', list('Added', planned(1)));
+    rememberPlanned('1:', false, 'Other', list('Other', planned(1)));
+
+    forgetPlanned('anilist', 'added');
+
+    expect(getRememberedPlanned('1:', false, 'anilist', 'Added')).toBeNull();
+    expect(getRememberedPlanned('1:', true, 'anilist', 'Added')).toBeNull();
+    expect(getRememberedPlanned('1:', false, 'anilist', 'Other')).not.toBeNull();
+  });
+
+  it('finds a sequel started elsewhere on a MyAnimeList list by its MyAnimeList id', () => {
+    const own = (malId: number) => planned(1, { id: null, malId });
+    rememberPlanned('1:', false, 'Started', {
+      ...list('Started', own(1001), own(1002)),
+      domain: 'myanimelist',
+    });
+
+    markStarted('myanimelist', 'started', { id: 1, malId: 1001 });
+
+    const kept = getRememberedPlanned('1:', false, 'myanimelist', 'Started');
+    expect(kept?.planned.map((anime) => anime.malId)).toEqual([1002]);
   });
 });

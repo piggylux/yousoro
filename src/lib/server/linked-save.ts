@@ -12,7 +12,7 @@ import { withMalToken } from '#lib/server/myanimelist-auth.js';
 import {
   copyEntry,
   MalNotFoundError,
-  startWatching,
+  moveToList,
   MalRateLimitError,
   MalTokenError,
 } from '#lib/server/myanimelist-client.js';
@@ -25,9 +25,9 @@ import { DOMAIN_NAMES, type Domain } from '#lib/types/domain.js';
  * the episode count, status and dates as the save left them, and the score when it changed. A date
  * the save left unset doesn't clear the other's. These are the entry as it now is rather than a
  * change to it, so a copy that failed is made up by the next one. A start from the plan list only
- * copies the status. A save from a MyAnimeList page that didn't know the anime's AniList id looks
- * it up first. The save itself has already succeeded, so this never throws: a failure only comes
- * back as a message for the user
+ * copies the status, as does a sequel added to the plan list. A save from a MyAnimeList page that
+ * didn't know the anime's AniList id looks it up first. The save itself has already succeeded, so
+ * this never throws: a failure only comes back as a message for the user
  */
 export async function copyToLinkedAccount(
   event: { cookies: Cookies; locals: App.Locals },
@@ -58,8 +58,8 @@ export async function copyToLinkedAccount(
           ? toMalScore(saved.score, scoreFormat)
           : undefined;
       await withMalToken<unknown>(event, (token) =>
-        changes.start
-          ? startWatching(token, malId)
+        changes.move
+          ? moveToList(token, malId, changes.move)
           : copyEntry(token, malId, {
               progress: saved.progress,
               status: saved.status,
@@ -76,8 +76,8 @@ export async function copyToLinkedAccount(
       await saveAniListEntry(
         aniListSession!.token,
         id,
-        changes.start
-          ? { status: 'CURRENT' }
+        changes.move
+          ? { status: changes.move }
           : {
               progress: saved.progress,
               status: saved.status,

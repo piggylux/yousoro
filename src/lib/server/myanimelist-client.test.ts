@@ -2,14 +2,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   copyEntry,
+  getListStatuses,
   getPlanToWatchEntries,
   getWatchingEntries,
   MalForbiddenError,
   MalNotFoundError,
   MalRateLimitError,
   MalTokenError,
+  moveToList,
   saveEntry,
-  startWatching,
   type MalEntry,
 } from '#lib/server/myanimelist-client.js';
 import { pauseMal, takeMalRequest } from '#lib/server/rate-limit.js';
@@ -384,13 +385,13 @@ describe('getPlanToWatchEntries', () => {
   });
 });
 
-describe('startWatching', () => {
+describe('moveToList', () => {
   it('moves an anime to "Watching" in one request, leaving the rest of the entry alone', async () => {
     vi.mocked(fetch).mockResolvedValue(
       Response.json({ ...entry(1, 'watching').list_status, num_episodes_watched: 0, score: 0 })
     );
 
-    expect(await startWatching('token', 52991)).toEqual({
+    expect(await moveToList('token', 52991, 'CURRENT')).toEqual({
       progress: 0,
       score: 0,
       status: 'CURRENT',
@@ -402,5 +403,51 @@ describe('startWatching', () => {
     expect(String(url)).toBe(`${API}/anime/52991/my_list_status`);
     expect(init?.method).toBe('PATCH');
     expect(String(init?.body)).toBe('status=watching');
+  });
+
+  it('plans an anime as "Plan to Watch"', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      Response.json({ ...entry(1, 'plan_to_watch').list_status, num_episodes_watched: 0 })
+    );
+
+    expect(await moveToList('token', 52991, 'PLANNING')).toMatchObject({ status: 'PLANNING' });
+    expect(String(vi.mocked(fetch).mock.calls[0][1]?.body)).toBe('status=plan_to_watch');
+  });
+});
+
+describe('getListStatuses', () => {
+  it("says where each anime is on the owner's list, in AniList's terms, leaving out unknown ones", async () => {
+    vi.mocked(fetch).mockImplementation(async (url) => {
+      const id = Number(/anime\/(\d+)/.exec(String(url))![1]);
+      if (id === 3) return new Response(null, { status: 404 });
+      return Response.json(
+        id === 1
+          ? { id, my_list_status: { status: 'plan_to_watch', is_rewatching: false } }
+          : id === 2
+            ? { id, my_list_status: { status: 'completed', is_rewatching: true } }
+            : { id }
+      );
+    });
+
+    const statuses = await getListStatuses('token', [1, 2, 3, 4]);
+
+    expect([...statuses]).toEqual([
+      [1, 'PLANNING'],
+      [2, 'REPEATING'],
+      [4, null],
+    ]);
+    expect(String(vi.mocked(fetch).mock.calls[0][0])).toBe(
+      `${API}/anime/1?fields=my_list_status{status,is_rewatching}`
+    );
+    // A user's own list status is never kept for anyone else
+    expect(vi.mocked(fetch).mock.calls[0][1]?.headers).toMatchObject({
+      Authorization: 'Bearer token',
+    });
+  });
+
+  it('fails as a whole when the token is rejected', async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response(null, { status: 401 }));
+
+    await expect(getListStatuses('token', [1])).rejects.toBeInstanceOf(MalTokenError);
   });
 });

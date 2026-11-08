@@ -9,7 +9,7 @@ import {
 } from '#lib/server/anilist-client.js';
 import type { EntryUpdate } from '#lib/server/entry-update.js';
 import { copyToLinkedAccount } from '#lib/server/linked-save.js';
-import { copyEntry, MalTokenError, startWatching } from '#lib/server/myanimelist-client.js';
+import { copyEntry, MalTokenError, moveToList } from '#lib/server/myanimelist-client.js';
 import type { MalSession, Session } from '#lib/server/session.js';
 
 vi.mock('#lib/server/anilist-client.js', async (importOriginal) => ({
@@ -20,7 +20,7 @@ vi.mock('#lib/server/anilist-client.js', async (importOriginal) => ({
 vi.mock('#lib/server/myanimelist-client.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('#lib/server/myanimelist-client.js')>()),
   copyEntry: vi.fn(),
-  startWatching: vi.fn(),
+  moveToList: vi.fn(),
 }));
 vi.mock('#lib/server/myanimelist-auth.js', () => ({
   withMalToken: (event: { locals: App.Locals }, use: (token: string) => Promise<unknown>) =>
@@ -126,7 +126,7 @@ describe('copyToLinkedAccount', () => {
     vi.mocked(getMediaByMalIds).mockResolvedValue(
       new Map([[52991, { id: 154587 } as AniListMedia]])
     );
-    const start = { malId: 52991, changes: { start: true as const } };
+    const start = { malId: 52991, changes: { move: 'CURRENT' as const } };
 
     expect(await copyToLinkedAccount(event, 'myanimelist', start, saved(0, 0))).toBeNull();
     expect(getMediaByMalIds).toHaveBeenCalledWith([52991]);
@@ -147,7 +147,7 @@ describe('copyToLinkedAccount', () => {
       await copyToLinkedAccount(
         event,
         'myanimelist',
-        { malId: 1, changes: { start: true } },
+        { malId: 1, changes: { move: 'CURRENT' } },
         saved(0, 0)
       )
     ).toEqual({ message: "Saved on MyAnimeList, but this anime isn't on AniList.", retry: false });
@@ -157,9 +157,21 @@ describe('copyToLinkedAccount', () => {
   it('copies a start to MyAnimeList as the status alone, leaving its episode count be', async () => {
     const { event } = signedIn(aniList, mal);
 
-    const start = { mediaId: 7, malId: 52991, changes: { start: true as const } };
+    const start = { mediaId: 7, malId: 52991, changes: { move: 'CURRENT' as const } };
     expect(await copyToLinkedAccount(event, 'anilist', start, saved(0, 0))).toBeNull();
-    expect(startWatching).toHaveBeenCalledWith('mal-token', 52991);
+    expect(moveToList).toHaveBeenCalledWith('mal-token', 52991, 'CURRENT');
+    expect(copyEntry).not.toHaveBeenCalled();
+  });
+
+  it('copies a sequel added to the plan list as the status alone, either way', async () => {
+    const { event } = signedIn(aniList, mal);
+    const plan = { mediaId: 7, malId: 52991, changes: { move: 'PLANNING' as const } };
+
+    expect(await copyToLinkedAccount(event, 'anilist', plan, saved(0, 0))).toBeNull();
+    expect(moveToList).toHaveBeenCalledWith('mal-token', 52991, 'PLANNING');
+
+    expect(await copyToLinkedAccount(event, 'myanimelist', plan, saved(0, 0))).toBeNull();
+    expect(saveEntry).toHaveBeenCalledWith('anilist.token.jwt', 7, { status: 'PLANNING' });
     expect(copyEntry).not.toHaveBeenCalled();
   });
 

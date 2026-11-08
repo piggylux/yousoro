@@ -38,6 +38,7 @@
   import { expireRememberedList, recordSavedEntry } from '#lib/list-data.js';
   import { nextAiringReloadDelay, planReload, reloadsOnReturn } from '#lib/live-updates.js';
   import { matchPath } from '#lib/match.js';
+  import { forgetPlanned, markStarted } from '#lib/planning.js';
   import {
     headerList,
     moreProfileLinks,
@@ -45,8 +46,8 @@
     signedInAccounts,
   } from '#lib/profile-links.js';
   import { togetherPath } from '#lib/together.js';
-  import type { Anime } from '#lib/types/anime.js';
-  import type { AnimePageData, LinkedFailure } from '#lib/types/api.js';
+  import type { Anime, Sequel } from '#lib/types/anime.js';
+  import type { AnimePageData, LinkedFailure, ListMove } from '#lib/types/api.js';
   import { animePageUrl, DOMAIN_NAMES, listPath } from '#lib/types/domain.js';
   import type { FriendWatching, FriendWatchingResult } from '#lib/types/friend-watching.js';
   import { countColumns, getVisibleRange, type VisibleRange } from '#lib/virtual-grid.js';
@@ -382,10 +383,14 @@
   /*
    * A completed anime leaves the Watching list, so its owner is asked for a score right away, while
    * the celebration plays and it can still be set here: one anime after another when several were
-   * completed. An update that already set the score isn't asked again
+   * completed. Its sequels are looked up meanwhile, to offer next. An update that already set the
+   * score isn't asked again, and is only offered its sequels, when it has any
    */
-  let toScore = $state<Anime[]>([]);
-  let scoring = $state<Anime | null>(null);
+  type Finished = { anime: Anime; askScore: boolean; sequels: Promise<Sequel[]> };
+  let toScore = $state<Finished[]>([]);
+  let scoring = $state<Finished | null>(null);
+  // A sequel was started from the prompt, so the list is read again once it's closed
+  let startedSequel = false;
 
   function celebrate(
     kind: 'caught-up' | 'completed',
@@ -393,10 +398,33 @@
     { scored }: { scored: boolean }
   ) {
     celebration = { kind, title: anime.title, key: Date.now() };
-    if (kind === 'completed' && data.canEdit && !scored) {
-      toScore = [...toScore, anime];
-      if (!scoring) askNextScore();
+    if (kind !== 'completed' || !data.canEdit) return;
+    const sequels = lookUpSequels(anime);
+    if (!scored) {
+      ask({ anime, askScore: true, sequels });
+      return;
     }
+    const list = page.url.pathname;
+    void sequels.then((found) => {
+      if (found.length && page.url.pathname === list) ask({ anime, askScore: false, sequels });
+    });
+  }
+
+  // Only ever an offer, so anything going wrong just means there's nothing to offer
+  async function lookUpSequels(anime: Anime): Promise<Sequel[]> {
+    try {
+      const response = await fetch(`/api/sequels/${data.domain}/${anime.id}`);
+      if (!response.ok) return [];
+      const body = await response.json();
+      return Array.isArray(body?.sequels) ? body.sequels : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function ask(finished: Finished) {
+    toScore = [...toScore, finished];
+    if (!scoring) askNextScore();
   }
 
   function askNextScore() {
@@ -406,6 +434,36 @@
       scoring = next;
       toScore = rest;
     }
+    if (startedSequel) {
+      startedSequel = false;
+      reload();
+    }
+  }
+
+  /*
+   * A sequel added from the prompt: a planned one only changes the plan list, while a started one
+   * leaves it for the Watching list, which is read again once the prompt is closed
+   */
+  function noteAdded(sequel: Sequel, list: ListMove, progress: number) {
+    if (list === 'PLANNING') {
+      forgetPlanned(data.domain, data.username);
+      return;
+    }
+    startedSequel = true;
+    markStarted(data.domain, data.username, sequel);
+    if (data.canEdit && friendsViewer)
+      recordOwnWatchingEntry(
+        friendsViewer,
+        {
+          id: sequel.id,
+          title: sequel.title,
+          isAdult: sequel.isAdult,
+          thumbnailUrl: sequel.coverUrl ?? '',
+          currentEpisode: progress,
+          rewatching: false,
+        },
+        'CURRENT'
+      );
   }
 
   /*
@@ -743,13 +801,16 @@
 {/if}
 
 {#if scoring}
-  {#key scoring.id}
+  {#key scoring.anime.id}
     <ScorePrompt
-      anime={scoring}
+      anime={scoring.anime}
       format={data.scoreFormat}
-      {service}
+      domain={data.domain}
+      askScore={scoring.askScore}
+      sequels={scoring.sequels}
       blurMature={data.preferences.blurMature}
       onLinkedFailure={(failure, saved) => noteLinkedFailure(failure, saved, true)}
+      onAdded={noteAdded}
       onClose={askNextScore}
     />
   {/key}

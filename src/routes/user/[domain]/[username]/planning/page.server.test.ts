@@ -10,7 +10,7 @@ import {
 import {
   copyEntry,
   getPlanToWatchEntries,
-  startWatching,
+  moveToList,
   type MalEntry,
 } from '#lib/server/myanimelist-client.js';
 import type { MalSession, Session } from '#lib/server/session.js';
@@ -34,7 +34,7 @@ vi.mock('#lib/server/anilist-client.js', async (importOriginal) => ({
 vi.mock('#lib/server/myanimelist-client.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('#lib/server/myanimelist-client.js')>()),
   getPlanToWatchEntries: vi.fn(),
-  startWatching: vi.fn(),
+  moveToList: vi.fn(),
   copyEntry: vi.fn(),
 }));
 vi.mock('#lib/server/myanimelist-auth.js', () => ({
@@ -143,7 +143,7 @@ const prequelsById = (data: { planned: { id: number; prequels: number[] }[] }) =
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(saveEntry).mockResolvedValue(started);
-  vi.mocked(startWatching).mockResolvedValue(started);
+  vi.mocked(moveToList).mockResolvedValue(started);
   vi.mocked(copyEntry).mockResolvedValue();
   vi.mocked(getPlanningEntries).mockResolvedValue({
     userId: 12,
@@ -361,7 +361,7 @@ describe('startWatching', () => {
       event('anilist', { session: aniList, malSession: mal }, { mediaId: '1', malId: '1001' })
     );
 
-    expect(startWatching).toHaveBeenCalledWith('mal-token', 1001);
+    expect(moveToList).toHaveBeenCalledWith('mal-token', 1001, 'CURRENT');
     expect(copyEntry).not.toHaveBeenCalled();
   });
 
@@ -374,7 +374,7 @@ describe('startWatching', () => {
 
     expect(result).toMatchObject({ malId: 5114, status: 'CURRENT' });
     expect(result).not.toHaveProperty('linked');
-    expect(startWatching).toHaveBeenCalledWith('mal-token', 5114);
+    expect(moveToList).toHaveBeenCalledWith('mal-token', 5114, 'CURRENT');
     expect(getMediaByMalIds).toHaveBeenCalledWith([5114]);
     expect(saveEntry).toHaveBeenCalledWith('anilist.token.jwt', 5114, { status: 'CURRENT' });
   });
@@ -390,6 +390,6 @@ describe('startWatching', () => {
       data: { message: 'Unknown anime' },
     });
     expect(saveEntry).not.toHaveBeenCalled();
-    expect(startWatching).not.toHaveBeenCalled();
+    expect(moveToList).not.toHaveBeenCalled();
   });
 });

@@ -17,6 +17,9 @@ export type UserAnimeList = {
   unmatched?: UnmatchedAnime[];
 };
 
+/** The lists an anime can be moved to on its own: "Watching" and "Planning", as AniList names them */
+export type ListMove = 'CURRENT' | 'PLANNING';
+
 /** A save that reached the list's service but not the account linked to it */
 export type LinkedFailure = {
   /** What was saved where, and why the linked account wasn't updated */

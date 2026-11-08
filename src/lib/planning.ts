@@ -1,5 +1,5 @@
 import { searchWords } from '#lib/anime.js';
-import type { PlannedAnime, PlannedSequel } from '#lib/types/anime.js';
+import type { PlannedAnime, PlannedSequel, Sequel } from '#lib/types/anime.js';
 import type { PlanningPageData } from '#lib/types/api.js';
 import type { Domain } from '#lib/types/domain.js';
 
@@ -34,6 +34,47 @@ export function describePlanned(anime: Pick<PlannedAnime, 'status' | 'episodes'>
     default:
       return anime.episodes ? episodes(anime.episodes) : 'Finished';
   }
+}
+
+const FORMATS: Record<string, string> = {
+  TV: 'TV',
+  TV_SHORT: 'TV short',
+  MOVIE: 'Movie',
+  SPECIAL: 'Special',
+  OVA: 'OVA',
+  ONA: 'ONA',
+  MUSIC: 'Music video',
+};
+
+// When an announced anime starts, as precisely as AniList knows: "Starts April 4, 2027"
+function startsOn({ year, month, day }: Sequel['startDate']): string {
+  if (!year) return 'Date not announced';
+  if (!month) return `Starts ${year}`;
+  const date = new Date(Date.UTC(year, month - 1, day ?? 1));
+  return `Starts ${date.toLocaleDateString('en', {
+    timeZone: 'UTC',
+    year: 'numeric',
+    month: 'long',
+    ...(day && { day: 'numeric' }),
+  })}`;
+}
+
+/**
+ * What a sequel is, when it aired and where it is in its run, under its title once an anime is
+ * finished: "TV · 2024 · 12 episodes · On your plan list", or "TV · Starts April 2027" for one not
+ * out yet. A film out already is simply a film
+ */
+export function sequelFacts(sequel: Sequel): string {
+  const announced = sequel.status === 'NOT_YET_RELEASED';
+  const film = sequel.format === 'MOVIE' && sequel.status === 'FINISHED';
+  return [
+    sequel.format && (FORMATS[sequel.format] ?? sequel.format),
+    announced ? startsOn(sequel.startDate) : sequel.startDate.year,
+    !announced && !film && describePlanned(sequel),
+    sequel.planned && 'On your plan list',
+  ]
+    .filter(Boolean)
+    .join(' · ');
 }
 
 /**
@@ -226,13 +267,31 @@ export function rememberPlanned(
   remembered.set(key, { data, expiresAt: Date.now() + REMEMBER_MS });
 }
 
-/** Takes an anime the user started watching off the plan lists the tab remembers */
-export function markStarted(domain: Domain, username: string, anime: PlannedAnime) {
+/**
+ * Takes an anime the user started watching off the plan lists the tab remembers, found by the id
+ * the list's own service gives it, as a sequel started elsewhere may not have the other
+ */
+export function markStarted(
+  domain: Domain,
+  username: string,
+  anime: Pick<PlannedAnime, 'id' | 'malId'>
+) {
   const suffix = `:${listKey(domain, username)}`;
-  const started = plannedKey(anime);
+  const id = domain === 'anilist' ? 'id' : 'malId';
   for (const [key, saved] of remembered) {
     if (!key.endsWith(suffix)) continue;
-    const planned = saved.data.planned.filter((other) => plannedKey(other) !== started);
+    const planned = saved.data.planned.filter(
+      (other) => anime[id] === null || other[id] !== anime[id]
+    );
     remembered.set(key, { ...saved, data: { ...saved.data, planned } });
   }
+}
+
+/**
+ * Forgets the plan lists the tab remembers for a list, as when the user added an anime to it from
+ * elsewhere, so the plan page reads it again
+ */
+export function forgetPlanned(domain: Domain, username: string) {
+  const suffix = `:${listKey(domain, username)}`;
+  for (const key of remembered.keys()) if (key.endsWith(suffix)) remembered.delete(key);
 }

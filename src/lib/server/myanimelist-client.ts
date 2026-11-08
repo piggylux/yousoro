@@ -7,6 +7,7 @@ import {
   takeMalRequest,
   type RequestPriority,
 } from '#lib/server/rate-limit.js';
+import type { ListMove } from '#lib/types/api.js';
 import type { SessionUser } from '#lib/types/session-user.js';
 
 const API_URL = 'https://api.myanimelist.net/v2';
@@ -329,12 +330,13 @@ export async function copyEntry(
 }
 
 /**
- * Moves an anime on the token owner's list to "Watching", adding it when it isn't there, in one
- * request. The episode count, score and dates stay as they are
+ * Moves an anime on the token owner's list to "Watching" or "Plan to Watch", adding it when it isn't
+ * there, in one request. The episode count, score and dates stay as they are
  */
-export async function startWatching(
+export async function moveToList(
   token: string,
-  malId: number
+  malId: number,
+  status: ListMove
 ): Promise<{
   progress: number;
   score: number;
@@ -345,7 +347,7 @@ export async function startWatching(
   const saved = await request<MalListStatusData>(`${API_URL}/anime/${malId}/my_list_status`, {
     token,
     method: 'PATCH',
-    body: new URLSearchParams({ status: 'watching' }),
+    body: new URLSearchParams({ status: toMalStatus(status).status }),
   });
   return {
     progress: saved.num_episodes_watched,
@@ -354,6 +356,35 @@ export async function startWatching(
     startedAt: saved.start_date ?? null,
     completedAt: saved.finish_date ?? null,
   };
+}
+
+/**
+ * The token owner's list status of each anime, in AniList's terms, or null for one not on their
+ * list. It takes a request per anime, so it's for a few at a time; one MyAnimeList doesn't have is
+ * left out
+ */
+export async function getListStatuses(
+  token: string,
+  malIds: number[]
+): Promise<Map<number, string | null>> {
+  const answers = await Promise.allSettled(
+    malIds.map((malId) =>
+      request<{ my_list_status?: Pick<MalListStatusData, 'status' | 'is_rewatching'> }>(
+        `${API_URL}/anime/${malId}?fields=my_list_status{status,is_rewatching}`,
+        { token, priority: 'optional' }
+      )
+    )
+  );
+  const statuses = new Map<number, string | null>();
+  answers.forEach((answer, index) => {
+    if (answer.status === 'rejected') {
+      if (answer.reason instanceof MalNotFoundError) return;
+      throw answer.reason;
+    }
+    const listStatus = answer.value.my_list_status;
+    statuses.set(malIds[index], listStatus ? toAniListStatus(listStatus) : null);
+  });
+  return statuses;
 }
 
 /**

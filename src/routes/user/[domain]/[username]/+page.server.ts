@@ -4,6 +4,7 @@ import { saveEntry } from '#lib/server/anilist-client.js';
 import { parseEntryUpdate } from '#lib/server/entry-update.js';
 import { copyToLinkedAccount } from '#lib/server/linked-save.js';
 import { loadAnimePage } from '#lib/server/list-page.js';
+import { moveToListAction } from '#lib/server/move-to-list.js';
 import { withMalToken } from '#lib/server/myanimelist-auth.js';
 import { saveEntry as saveMalEntry } from '#lib/server/myanimelist-client.js';
 import { updateOwnList } from '#lib/server/own-list.js';
@@ -48,4 +49,8 @@ export const actions: Actions = {
       return { mediaId, ...saved, ...(linked && { linked }) };
     });
   },
+  /** Starts a sequel that's out, which the score prompt offers once an anime is finished */
+  startWatching: moveToListAction('CURRENT'),
+  /** Plans a sequel that isn't out yet, which the score prompt offers too */
+  planToWatch: moveToListAction('PLANNING'),
 };

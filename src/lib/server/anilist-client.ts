@@ -8,7 +8,7 @@ import {
   takeAniListRequest,
   type RequestPriority,
 } from '#lib/server/rate-limit.js';
-import type { AiringStatus } from '#lib/types/anime.js';
+import type { AiringStatus, Sequel } from '#lib/types/anime.js';
 import type { FriendWatchingResult, SharedAnime } from '#lib/types/friend-watching.js';
 import type { TasteProfile } from '#lib/types/match.js';
 import type { ScheduleResult, ScheduledEpisode } from '#lib/types/schedule.js';
@@ -483,7 +483,8 @@ const ARC_TTL_MS = 24 * 60 * 60 * 1000;
 const UNKNOWN_LENGTH_TTL_MS = 60 * 60 * 1000;
 // Bleach: Thousand-Year Blood War has four parts; a longer chain is more likely a wrong count
 const MAX_EARLIER_PARTS = 8;
-const SERIES_FORMATS = ['TV', 'TV_SHORT', 'ONA'];
+/** The formats a series' parts come in, rather than its films and specials */
+export const SERIES_FORMATS = ['TV', 'TV_SHORT', 'ONA'];
 
 // A title's words, without the punctuation ending them: "Kokurasetai:" and "Kokurasetai?" match
 const titleWords = (title: string) =>
@@ -605,6 +606,93 @@ export async function getSeries(mediaId: number): Promise<NyaaSeries> {
     expiresAt: Date.now() + (unknownLength ? UNKNOWN_LENGTH_TTL_MS : ARC_TTL_MS),
   });
   return series;
+}
+
+/** A sequel as AniList links it, with the viewer's own list status of it: null when not listed */
+export type AniListSequel = Omit<Sequel, 'planned'> & { listStatus: string | null };
+
+/**
+ * The anime that continue an anime, as AniList links them, each once. With a token, each comes with
+ * the token owner's list status of it; anonymously, always null. Only asked as an anime is
+ * finished, so the watching list itself never carries relations
+ */
+export async function getSequels(mediaId: number, token?: string): Promise<AniListSequel[]> {
+  const data = await query<{
+    Media: {
+      relations: {
+        edges: {
+          relationType: string;
+          node: {
+            id: number;
+            idMal: number | null;
+            type: string | null;
+            format: string | null;
+            status: AiringStatus | null;
+            episodes: number | null;
+            isAdult: boolean | null;
+            /** Null where AniList sends none, which its schema allows */
+            title: { romaji: string; english: string | null } | null;
+            coverImage: { large: string | null } | null;
+            startDate: FuzzyDate | null;
+            mediaListEntry: { status: string } | null;
+          };
+        }[];
+      } | null;
+    };
+  }>(
+    `query ($id: Int) {
+      Media(id: $id) {
+        relations {
+          edges {
+            relationType
+            node {
+              id
+              idMal
+              type
+              format
+              status
+              episodes
+              isAdult
+              title { romaji english }
+              coverImage { large }
+              startDate { ${FUZZY_DATE_FIELDS} }
+              mediaListEntry { status }
+            }
+          }
+        }
+      }
+    }`,
+    { id: mediaId },
+    token,
+    { cacheTtlMs: 0, priority: 'optional' }
+  );
+  const seen = new Set<number>();
+  return (data.Media.relations?.edges ?? []).flatMap(({ relationType, node }) => {
+    // One without a title couldn't be shown
+    if (relationType !== 'SEQUEL' || node.type !== 'ANIME' || !node.title || seen.has(node.id))
+      return [];
+    seen.add(node.id);
+    return [
+      {
+        id: node.id,
+        malId: node.idMal ?? null,
+        title: node.title.romaji,
+        englishTitle: node.title.english,
+        coverUrl: node.coverImage?.large ?? null,
+        isAdult: node.isAdult ?? false,
+        // A sequel AniList gives no status for is most likely out already, as on the plan list
+        status: node.status ?? 'FINISHED',
+        format: node.format,
+        episodes: node.episodes,
+        startDate: {
+          year: node.startDate?.year ?? null,
+          month: node.startDate?.month ?? null,
+          day: node.startDate?.day ?? null,
+        },
+        listStatus: node.mediaListEntry?.status ?? null,
+      },
+    ];
+  });
 }
 
 export type AniListUser = { id: number; name: string; avatarUrl: string | null };
