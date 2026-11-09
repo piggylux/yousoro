@@ -3,24 +3,42 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   AniListRateLimitError,
+  deleteEntry as deleteAniListEntry,
+  getListEntry as getAniListEntry,
   getMediaByMalIds,
   saveEntry,
   type AniListMedia,
 } from '#lib/server/anilist-client.js';
 import type { EntryUpdate } from '#lib/server/entry-update.js';
-import { copyToLinkedAccount } from '#lib/server/linked-save.js';
-import { copyEntry, MalTokenError, moveToList } from '#lib/server/myanimelist-client.js';
+import {
+  addDecision,
+  copyToLinkedAccount,
+  holdsOnlyStatus,
+  moveOnLinkedAccount,
+  undoOnLinkedAccount,
+} from '#lib/server/linked-save.js';
+import {
+  copyEntry,
+  deleteEntry as deleteMalEntry,
+  getListEntry as getMalEntry,
+  MalTokenError,
+  moveToList,
+} from '#lib/server/myanimelist-client.js';
 import type { MalSession, Session } from '#lib/server/session.js';
 
 vi.mock('#lib/server/anilist-client.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('#lib/server/anilist-client.js')>()),
   saveEntry: vi.fn(),
   getMediaByMalIds: vi.fn(),
+  getListEntry: vi.fn(),
+  deleteEntry: vi.fn(),
 }));
 vi.mock('#lib/server/myanimelist-client.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('#lib/server/myanimelist-client.js')>()),
   copyEntry: vi.fn(),
   moveToList: vi.fn(),
+  getListEntry: vi.fn(),
+  deleteEntry: vi.fn(),
 }));
 vi.mock('#lib/server/myanimelist-auth.js', () => ({
   withMalToken: (event: { locals: App.Locals }, use: (token: string) => Promise<unknown>) =>
@@ -220,3 +238,214 @@ describe('copyToLinkedAccount', () => {
 function saved(progress: number, score: number, status = 'CURRENT') {
   return { progress, score, status };
 }
+
+describe('adding an anime found by search', () => {
+  it.each([
+    [null, 'CURRENT', 'save'],
+    [null, 'PLANNING', 'save'],
+    // Starting a planned anime, as the plan list does
+    ['PLANNING', 'CURRENT', 'save'],
+    ['PLANNING', 'PLANNING', 'already'],
+    ['CURRENT', 'CURRENT', 'already'],
+    // Planning it again would take it off the Watching list
+    ['CURRENT', 'PLANNING', 'blocked'],
+    ['REPEATING', 'CURRENT', 'blocked'],
+    ['COMPLETED', 'CURRENT', 'blocked'],
+    ['COMPLETED', 'PLANNING', 'blocked'],
+    ['PAUSED', 'CURRENT', 'blocked'],
+    ['DROPPED', 'PLANNING', 'blocked'],
+  ] as const)('on the list as %s, adding to %s does: %s', (listed, to, expected) => {
+    expect(addDecision(listed, to)).toBe(expected);
+  });
+
+  it.each([
+    // Resumed where the page saw it
+    ['PAUSED', 'PAUSED', 'save'],
+    ['DROPPED', 'DROPPED', 'save'],
+    // Moved on since the page saw it, so it stays
+    ['COMPLETED', 'PAUSED', 'blocked'],
+    ['DROPPED', 'PAUSED', 'blocked'],
+  ] as const)('on the list as %s, resuming one seen as %s does: %s', (listed, from, expected) => {
+    expect(addDecision(listed, 'CURRENT', from)).toBe(expected);
+  });
+
+  it('only resumes to the Watching list', () => {
+    expect(addDecision('PAUSED', 'PLANNING', 'PAUSED')).toBe('blocked');
+  });
+});
+
+describe('moveOnLinkedAccount', () => {
+  const ids = { mediaId: 7, malId: 52991 };
+  const held = (status: string, progress = 0) => ({ status, progress, score: 0, rewatched: 0 });
+
+  it('changes nothing without a linked account', async () => {
+    const { event } = signedIn(aniList, null);
+
+    expect(await moveOnLinkedAccount(event, 'anilist', ids, 'PLANNING')).toEqual({ linked: null });
+    expect(getMalEntry).not.toHaveBeenCalled();
+  });
+
+  it('adds one new to the linked list, saying it was new there', async () => {
+    const { event } = signedIn(aniList, mal);
+    vi.mocked(getMalEntry).mockResolvedValue(null);
+
+    expect(await moveOnLinkedAccount(event, 'anilist', ids, 'PLANNING')).toEqual({
+      linked: null,
+      linkedBefore: 'NONE',
+    });
+    expect(moveToList).toHaveBeenCalledWith('mal-token', 52991, 'PLANNING');
+  });
+
+  it('leaves one already there as it is, with nothing to undo there', async () => {
+    const { event } = signedIn(aniList, mal);
+    vi.mocked(getMalEntry).mockResolvedValue(held('PLANNING'));
+
+    expect(await moveOnLinkedAccount(event, 'anilist', ids, 'PLANNING')).toEqual({ linked: null });
+    expect(moveToList).not.toHaveBeenCalled();
+  });
+
+  it('leaves one on another list there as it is, and says so', async () => {
+    const { event } = signedIn(aniList, mal);
+    vi.mocked(getAniListEntry).mockResolvedValue({
+      id: 900,
+      status: 'COMPLETED',
+      progress: 12,
+      score: 80,
+      repeat: 0,
+    });
+
+    expect(await moveOnLinkedAccount(event, 'myanimelist', ids, 'PLANNING')).toEqual({
+      linked: {
+        message:
+          'Saved on MyAnimeList, but it’s on your Completed list on AniList, so it stays there.'.replace(
+            '’',
+            "'"
+          ),
+        retry: false,
+      },
+    });
+    expect(saveEntry).not.toHaveBeenCalled();
+  });
+
+  it('resumes one paused there too when the page saw it paused', async () => {
+    const { event } = signedIn(aniList, mal);
+    vi.mocked(getMalEntry).mockResolvedValue(held('PAUSED', 4));
+
+    expect(await moveOnLinkedAccount(event, 'anilist', ids, 'CURRENT', 'PAUSED')).toEqual({
+      linked: null,
+      linkedBefore: 'PAUSED',
+    });
+    expect(moveToList).toHaveBeenCalledWith('mal-token', 52991, 'CURRENT');
+  });
+
+  it("says when the anime isn't on the linked service, and when it's busy", async () => {
+    const { event } = signedIn(aniList, mal);
+    expect(await moveOnLinkedAccount(event, 'anilist', { mediaId: 7 }, 'PLANNING')).toMatchObject({
+      linked: { message: "Saved on AniList, but this anime isn't on MyAnimeList.", retry: false },
+    });
+
+    vi.mocked(getMalEntry).mockRejectedValueOnce(new MalTokenError('expired'));
+    const { event: expiring, deleted } = signedIn(aniList, mal);
+    expect(await moveOnLinkedAccount(expiring, 'anilist', ids, 'PLANNING')).toMatchObject({
+      linked: { retry: false },
+    });
+    expect(deleted).toEqual(['session_mal']);
+  });
+});
+
+describe('undoing an add on the linked account', () => {
+  const ids = { mediaId: 7, malId: 52991 };
+  const held = (status: string, progress = 0, score = 0) => ({
+    status,
+    progress,
+    score,
+    rewatched: 0,
+  });
+
+  it('undoes nothing without a linked account', async () => {
+    const { event } = signedIn(aniList, null);
+
+    expect(await undoOnLinkedAccount(event, 'anilist', ids, 'PLANNING', 'NONE')).toBeNull();
+    expect(getMalEntry).not.toHaveBeenCalled();
+  });
+
+  it('moves a moved anime back while it is still where the add put it', async () => {
+    const { event } = signedIn(aniList, mal);
+    vi.mocked(getMalEntry).mockResolvedValue(held('CURRENT', 4));
+
+    expect(await undoOnLinkedAccount(event, 'anilist', ids, 'CURRENT', 'PAUSED')).toBeNull();
+    expect(moveToList).toHaveBeenCalledWith('mal-token', 52991, 'PAUSED');
+  });
+
+  it('takes a new anime off while its entry holds nothing but its status', async () => {
+    const { event } = signedIn(aniList, mal);
+    vi.mocked(getMalEntry).mockResolvedValue(held('PLANNING'));
+
+    expect(await undoOnLinkedAccount(event, 'anilist', ids, 'PLANNING', 'NONE')).toBeNull();
+    expect(deleteMalEntry).toHaveBeenCalledWith('mal-token', 52991);
+  });
+
+  it('leaves one changed since, moved on or watched, and says so', async () => {
+    const { event } = signedIn(aniList, mal);
+    vi.mocked(getAniListEntry).mockResolvedValueOnce({
+      id: 900,
+      status: 'COMPLETED',
+      progress: 12,
+      score: 80,
+      repeat: 0,
+    });
+    vi.mocked(getAniListEntry).mockResolvedValueOnce({
+      id: 900,
+      status: 'PLANNING',
+      progress: 0,
+      score: 70,
+      repeat: 0,
+    });
+
+    for (let i = 0; i < 2; i++) {
+      expect(await undoOnLinkedAccount(event, 'myanimelist', ids, 'PLANNING', 'NONE')).toEqual({
+        message:
+          'Undone on MyAnimeList, but it has changed on AniList since, so it stays as it is there.',
+        retry: false,
+      });
+    }
+    expect(deleteAniListEntry).not.toHaveBeenCalled();
+    expect(saveEntry).not.toHaveBeenCalled();
+  });
+
+  it('takes an empty AniList entry off by its own id', async () => {
+    const { event } = signedIn(aniList, mal);
+    vi.mocked(getAniListEntry).mockResolvedValue({
+      id: 900,
+      status: 'CURRENT',
+      progress: 0,
+      score: 0,
+      repeat: 0,
+    });
+
+    expect(await undoOnLinkedAccount(event, 'myanimelist', ids, 'CURRENT', 'NONE')).toBeNull();
+    expect(deleteAniListEntry).toHaveBeenCalledWith('anilist.token.jwt', 900);
+  });
+
+  it('offers to try again when the linked service is busy, and never throws', async () => {
+    const { event } = signedIn(aniList, mal);
+    vi.mocked(getAniListEntry).mockRejectedValueOnce(new AniListRateLimitError(30));
+    vi.mocked(getMalEntry).mockRejectedValueOnce(new Error('unexpected'));
+
+    expect(
+      await undoOnLinkedAccount(event, 'myanimelist', ids, 'CURRENT', 'PLANNING')
+    ).toMatchObject({ retry: true });
+    expect(await undoOnLinkedAccount(event, 'anilist', ids, 'PLANNING', 'NONE')).toMatchObject({
+      message: "Undone on AniList, but MyAnimeList didn't take the update.",
+    });
+  });
+
+  it.each([
+    [{ progress: 0, score: 0, rewatched: 0 }, true],
+    [{ progress: 1, score: 0, rewatched: 0 }, false],
+    [{ progress: 0, score: 7, rewatched: 0 }, false],
+    [{ progress: 0, score: 0, rewatched: 2 }, false],
+  ])('treats %o as holding only its status: %s', (entry, empty) => {
+    expect(holdsOnlyStatus(entry)).toBe(empty);
+  });
+});

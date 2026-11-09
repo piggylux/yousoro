@@ -4,6 +4,8 @@ import { toMalScore } from '#lib/score.js';
 import {
   AniListRateLimitError,
   AniListTokenError,
+  deleteEntry as deleteAniListEntry,
+  getListEntry as getAniListEntry,
   getMediaByMalIds,
   saveEntry as saveAniListEntry,
 } from '#lib/server/anilist-client.js';
@@ -11,14 +13,16 @@ import type { EntryUpdate } from '#lib/server/entry-update.js';
 import { withMalToken } from '#lib/server/myanimelist-auth.js';
 import {
   copyEntry,
+  deleteEntry as deleteMalEntry,
+  getListEntry as getMalEntry,
   MalNotFoundError,
   moveToList,
   MalRateLimitError,
   MalTokenError,
 } from '#lib/server/myanimelist-client.js';
 import { clearMalSession, clearSession } from '#lib/server/session.js';
-import type { LinkedFailure } from '#lib/types/api.js';
-import { DOMAIN_NAMES, type Domain } from '#lib/types/domain.js';
+import type { Before, LinkedFailure, ListMove } from '#lib/types/api.js';
+import { DOMAIN_NAMES, LIST_NAMES, type Domain } from '#lib/types/domain.js';
 
 /**
  * Copies a save on one service to the user's account on the other, when they're signed in to both:
@@ -44,8 +48,7 @@ export async function copyToLinkedAccount(
   const to: Domain = from === 'anilist' ? 'myanimelist' : 'anilist';
   const aniListSession = event.locals.session;
   if (!(to === 'anilist' ? aniListSession : event.locals.malSession)) return null;
-  const service = DOMAIN_NAMES[to];
-  const failed = (reason: string, retry = true) => ({
+  const failed: Failed = (reason, retry = true) => ({
     message: `Saved on ${DOMAIN_NAMES[from]}, but ${reason}`,
     retry,
   });
@@ -90,21 +93,213 @@ export async function copyToLinkedAccount(
     }
     return null;
   } catch (err) {
-    if (err instanceof AniListRateLimitError || err instanceof MalRateLimitError) {
-      return failed(`${service} is busy right now.`);
+    return linkedError(err, event, to, failed, 'copy a save to');
+  }
+}
+
+type Failed = (reason: string, retry?: boolean) => LinkedFailure;
+
+/**
+ * What went wrong on the linked account, as a message for the user: the service busy, the anime
+ * missing there, or its sign-in expired, which signs out of that service alone
+ */
+function linkedError(
+  err: unknown,
+  event: { cookies: Cookies; locals: App.Locals },
+  to: Domain,
+  failed: Failed,
+  doing: string
+): LinkedFailure {
+  const service = DOMAIN_NAMES[to];
+  if (err instanceof AniListRateLimitError || err instanceof MalRateLimitError) {
+    return failed(`${service} is busy right now.`);
+  }
+  if (err instanceof MalNotFoundError) return failed("this anime isn't on MyAnimeList.", false);
+  if (err instanceof AniListTokenError || err instanceof MalTokenError) {
+    if (to === 'anilist') {
+      clearSession(event.cookies);
+      event.locals.session = null;
+    } else {
+      clearMalSession(event.cookies);
+      event.locals.malSession = null;
     }
-    if (err instanceof MalNotFoundError) return failed("this anime isn't on MyAnimeList.", false);
-    if (err instanceof AniListTokenError || err instanceof MalTokenError) {
-      if (to === 'anilist') {
-        clearSession(event.cookies);
-        event.locals.session = null;
-      } else {
-        clearMalSession(event.cookies);
-        event.locals.malSession = null;
-      }
-      return failed(`your ${service} sign-in expired. Link it again in settings.`, false);
+    return failed(`your ${service} sign-in expired. Link it again in settings.`, false);
+  }
+  console.error(`Could not ${doing} ${service}`, err);
+  return failed(`${service} didn't take the update.`);
+}
+
+type ListEvent = { cookies: Cookies; locals: App.Locals };
+type AnimeIds = { mediaId?: number; malId?: number };
+
+/**
+ * What adding an anime found by search does, given where it is on a list already: an anime not on
+ * it is added, a planned one can be started, and a paused or dropped one resumed when that's where
+ * the page saw it (`from`). One already where it's going stays as it is, and one on any other list
+ * is the user's to change, as moving it would lose where it was
+ */
+export function addDecision(
+  listed: string | null,
+  to: ListMove,
+  from?: Before
+): 'save' | 'already' | 'blocked' {
+  if (listed === null) return 'save';
+  if (listed === to) return 'already';
+  const resumed = from !== undefined && from !== 'NONE' && listed === from;
+  return to === 'CURRENT' && (listed === 'PLANNING' || resumed) ? 'save' : 'blocked';
+}
+
+/**
+ * Whether an entry holds nothing but its list status: no episode watched, no score, never watched
+ * again. Undoing an add only takes such an entry off a list, as one with more in it was there before,
+ * or has been watched since, and taking it off would lose that
+ */
+export function holdsOnlyStatus(entry: { progress: number; score: number; rewatched: number }) {
+  return entry.progress === 0 && entry.score === 0 && entry.rewatched === 0;
+}
+
+/** One anime on a list, in AniList's terms, with what undoing compares and deleting takes */
+type Held = { status: string; progress: number; score: number; rewatched: number; id?: number };
+
+/**
+ * The user's entry for an anime on a service's list, or null when it's not there: by AniList id on
+ * AniList and MyAnimeList id on MyAnimeList, which the caller has made sure of
+ */
+async function readEntry(event: ListEvent, domain: Domain, ids: AnimeIds): Promise<Held | null> {
+  if (domain === 'myanimelist') {
+    return withMalToken(event, (token) => getMalEntry(token, ids.malId!));
+  }
+  const entry = await getAniListEntry(event.locals.session!.token, ids.mediaId!);
+  return entry && { ...entry, rewatched: entry.repeat };
+}
+
+/** Moves an anime on a service's list, adding it when it isn't there; the rest of it stays */
+async function writeStatus(
+  event: ListEvent,
+  domain: Domain,
+  ids: AnimeIds,
+  status: ListMove | 'PAUSED' | 'DROPPED'
+) {
+  if (domain === 'myanimelist') {
+    await withMalToken(event, (token) => moveToList(token, ids.malId!, status));
+  } else {
+    await saveAniListEntry(event.locals.session!.token, ids.mediaId!, { status });
+  }
+}
+
+/**
+ * Puts an anime back where it was before an add from the search set it on `set`'s list: back on
+ * the list it came from, or off the list when it was new to it, then only while it holds nothing
+ * but its status. One changed since, moved on or watched, stays as it is: 'changed'. One no longer
+ * on the list has nothing to undo
+ */
+export async function restoreEntry(
+  event: ListEvent,
+  domain: Domain,
+  ids: AnimeIds,
+  set: ListMove,
+  before: Before
+): Promise<'done' | 'changed'> {
+  const held = await readEntry(event, domain, ids);
+  if (!held) return 'done';
+  if (held.status !== set) return 'changed';
+  if (before !== 'NONE') {
+    await writeStatus(event, domain, ids, before);
+    return 'done';
+  }
+  if (!holdsOnlyStatus(held)) return 'changed';
+  if (domain === 'myanimelist') {
+    await withMalToken(event, (token) => deleteMalEntry(token, ids.malId!));
+  } else {
+    await deleteAniListEntry(event.locals.session!.token, held.id!);
+  }
+  return 'done';
+}
+
+/**
+ * The linked service, when the user is signed in to it, and the anime's id there: its MyAnimeList
+ * id, or its AniList id, looked up by its MyAnimeList id when the page didn't know it. No id means
+ * the anime isn't on that service
+ */
+async function linkedTarget(
+  event: ListEvent,
+  from: Domain,
+  { mediaId, malId }: AnimeIds
+): Promise<{ to: Domain; ids: AnimeIds | null } | null> {
+  const to: Domain = from === 'anilist' ? 'myanimelist' : 'anilist';
+  if (!(to === 'anilist' ? event.locals.session : event.locals.malSession)) return null;
+  if (to === 'myanimelist') return { to, ids: malId === undefined ? null : { malId } };
+  const id =
+    mediaId ?? (malId === undefined ? undefined : (await getMediaByMalIds([malId])).get(malId)?.id);
+  return { to, ids: id === undefined ? null : { mediaId: id } };
+}
+
+/**
+ * Makes on the linked account the move an add from the search made on the list's own service, as
+ * the add itself decides it: checked against where the anime is there, so one already there, or on
+ * another list there, is left as it is. `linkedBefore` says where it was when it was moved, for
+ * undoing; `linked` says why it wasn't. Never throws, as the add itself has already succeeded
+ */
+export async function moveOnLinkedAccount(
+  event: ListEvent,
+  from: Domain,
+  ids: AnimeIds,
+  move: ListMove,
+  expected?: Before
+): Promise<{ linked: LinkedFailure | null; linkedBefore?: Before }> {
+  const failed: Failed = (reason, retry = true) => ({
+    message: `Saved on ${DOMAIN_NAMES[from]}, but ${reason}`,
+    retry,
+  });
+  let to: Domain = from === 'anilist' ? 'myanimelist' : 'anilist';
+  try {
+    const target = await linkedTarget(event, from, ids);
+    if (!target) return { linked: null };
+    to = target.to;
+    const service = DOMAIN_NAMES[to];
+    if (!target.ids) return { linked: failed(`this anime isn't on ${service}.`, false) };
+    const status = (await readEntry(event, to, target.ids))?.status ?? null;
+    const decision = addDecision(status, move, expected);
+    if (decision === 'already') return { linked: null };
+    if (decision === 'blocked') {
+      const list = LIST_NAMES[to][status!] ?? status;
+      return {
+        linked: failed(`it's on your ${list} list on ${service}, so it stays there.`, false),
+      };
     }
-    console.error(`Could not copy a save to ${service}`, err);
-    return failed(`${service} didn't take the update.`);
+    await writeStatus(event, to, target.ids, move);
+    return { linked: null, linkedBefore: (status as Before | null) ?? 'NONE' };
+  } catch (err) {
+    return { linked: linkedError(err, event, to, failed, 'copy an add to') };
+  }
+}
+
+/**
+ * Undoes on the linked account what an add from the search did there: puts the anime back where it
+ * was before (`linkedBefore`), unless it has changed there since. Never throws: a failure, or an
+ * entry kept, comes back as a message for the user
+ */
+export async function undoOnLinkedAccount(
+  event: ListEvent,
+  from: Domain,
+  ids: AnimeIds,
+  set: ListMove,
+  linkedBefore: Before
+): Promise<LinkedFailure | null> {
+  const failed: Failed = (reason, retry = true) => ({
+    message: `Undone on ${DOMAIN_NAMES[from]}, but ${reason}`,
+    retry,
+  });
+  let to: Domain = from === 'anilist' ? 'myanimelist' : 'anilist';
+  try {
+    const target = await linkedTarget(event, from, ids);
+    if (!target?.ids) return null;
+    to = target.to;
+    const done = await restoreEntry(event, to, target.ids, set, linkedBefore);
+    return done === 'changed'
+      ? failed(`it has changed on ${DOMAIN_NAMES[to]} since, so it stays as it is there.`, false)
+      : null;
+  } catch (err) {
+    return linkedError(err, event, to, failed, 'undo an add on');
   }
 }

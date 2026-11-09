@@ -15,16 +15,15 @@ export class AniListApi implements Api {
   /** The signed-in user's token, so their own private entries are visible to them */
   constructor(private token?: string) {}
 
+  /** With `withListed`, for the owner's own list, also the AniList ids on their other lists */
   async getUserAnimeList(
     username: string,
     enrichAirings = true,
-    priority?: RequestPriority
+    priority?: RequestPriority,
+    withListed = false
   ): Promise<UserAnimeList> {
-    const { userId, userName, avatarUrl, scoreFormat, entries } = await getWatchingEntries(
-      username,
-      this.token,
-      priority
-    );
+    const { userId, userName, avatarUrl, scoreFormat, entries, listedIds } =
+      await getWatchingEntries(username, this.token, priority, withListed);
 
     const animeList = entries.map(({ media, status, progress, score, updatedAt }) =>
       toAnime(media, {
@@ -41,6 +40,7 @@ export class AniListApi implements Api {
       avatarUrl,
       scoreFormat,
       animeList: enrichAirings ? await withRecentAirings(animeList) : animeList,
+      ...(listedIds && { listedIds }),
     };
   }
 

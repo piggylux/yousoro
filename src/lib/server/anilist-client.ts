@@ -9,6 +9,7 @@ import {
   type RequestPriority,
 } from '#lib/server/rate-limit.js';
 import type { AiringStatus, Sequel } from '#lib/types/anime.js';
+import { OTHER_LISTS, type ListedIds, type OtherList } from '#lib/types/api.js';
 import type { FriendWatchingResult, SharedAnime } from '#lib/types/friend-watching.js';
 import type { TasteProfile } from '#lib/types/match.js';
 import type { ScheduleResult, ScheduledEpisode } from '#lib/types/schedule.js';
@@ -175,14 +176,46 @@ function inPages(ids: number[]): number[][] {
   );
 }
 
+/*
+ * The ids alone of the anime on the owner's other lists, by list, read along with their own
+ * Watching list so the anime search can tell where those it finds are, without a request of its
+ * own. About 20 bytes an anime: 18 KB for a list of 1,000
+ */
+const LISTED_IDS = `
+  listed: MediaListCollection(
+    userName: $userName
+    type: ANIME
+    status_in: [${OTHER_LISTS.join(', ')}]
+  ) {
+    lists { status isCustomList entries { mediaId } }
+  }`;
+
+/**
+ * The ids on each list, each once. Custom lists repeat anime that are on a status list, and a
+ * completed list split by format is several lists of one status
+ */
+function listedIds(
+  lists: { status: string | null; isCustomList: boolean; entries: { mediaId: number }[] }[]
+): ListedIds {
+  const ids: Partial<Record<OtherList, Set<number>>> = {};
+  for (const { status, isCustomList, entries } of lists) {
+    if (isCustomList || !OTHER_LISTS.includes(status as OtherList)) continue;
+    const list = (ids[status as OtherList] ??= new Set());
+    for (const { mediaId } of entries) list.add(mediaId);
+  }
+  return Object.fromEntries(Object.entries(ids).map(([list, set]) => [list, [...set]]));
+}
+
 /**
  * Fetches a user's "Watching" and "Rewatching" lists, media details included, in one request. A
- * read for something decorative, like a badge, can give way first when AniList is busy
+ * read for something decorative, like a badge, can give way first when AniList is busy. With
+ * `withListed`, the same request also gives the AniList ids of the anime on their other lists
  */
 export async function getWatchingEntries(
   userName: string,
   token?: string,
-  priority?: RequestPriority
+  priority?: RequestPriority,
+  withListed = false
 ): Promise<{
   userId: number;
   userName: string;
@@ -190,6 +223,8 @@ export async function getWatchingEntries(
   /** How the user scores anime, which their entries' scores are in */
   scoreFormat: ScoreFormat;
   entries: AniListEntry[];
+  /** Only with `withListed` */
+  listedIds?: ListedIds;
 }> {
   const data = await query<{
     MediaListCollection: {
@@ -201,6 +236,9 @@ export async function getWatchingEntries(
       };
       lists: { isCustomList: boolean; entries: AniListEntry[] }[];
     };
+    listed?: {
+      lists: { status: string | null; isCustomList: boolean; entries: { mediaId: number }[] }[];
+    } | null;
   }>(
     `query ($userName: String) {
       MediaListCollection(userName: $userName, type: ANIME, status_in: [CURRENT, REPEATING]) {
@@ -215,7 +253,7 @@ export async function getWatchingEntries(
             media { ${MEDIA_FIELDS} }
           }
         }
-      }
+      }${withListed ? LISTED_IDS : ''}
     }`,
     { userName },
     token,
@@ -223,6 +261,7 @@ export async function getWatchingEntries(
   );
 
   return {
+    ...(withListed && { listedIds: listedIds(data.listed?.lists ?? []) }),
     userId: data.MediaListCollection.user.id,
     userName: data.MediaListCollection.user.name,
     avatarUrl: data.MediaListCollection.user.avatar?.large ?? null,
@@ -693,6 +732,48 @@ export async function getSequels(mediaId: number, token?: string): Promise<AniLi
       },
     ];
   });
+}
+
+/** One anime on the token owner's list: its list status, in AniList's terms, and what's in it */
+export type ListEntry = {
+  /** AniList's id for the entry itself, which deleting it takes */
+  id: number;
+  status: string;
+  progress: number;
+  /** Out of the owner's own score format; 0 when not scored */
+  score: number;
+  /** How many times it was watched again */
+  repeat: number;
+};
+
+/**
+ * The token owner's entry for one anime, or null when it's not on their list. Asked before adding
+ * an anime found by search, which may be on the list already, and before undoing that
+ */
+export async function getListEntry(token: string, mediaId: number): Promise<ListEntry | null> {
+  const data = await query<{ Media: { mediaListEntry: ListEntry | null } | null }>(
+    `query ($id: Int) {
+      Media(id: $id, type: ANIME) { mediaListEntry { id status progress score repeat } }
+    }`,
+    { id: mediaId },
+    token,
+    { cacheTtlMs: 0 }
+  );
+  return data.Media?.mediaListEntry ?? null;
+}
+
+/** The token owner's list status of one anime, in AniList's terms, or null when not on their list */
+export async function getListStatus(token: string, mediaId: number): Promise<string | null> {
+  return (await getListEntry(token, mediaId))?.status ?? null;
+}
+
+/** Takes an entry off the token owner's list, by the entry's own id */
+export async function deleteEntry(token: string, entryId: number): Promise<void> {
+  await query<{ DeleteMediaListEntry: { deleted: boolean } }>(
+    `mutation ($id: Int) { DeleteMediaListEntry(id: $id) { deleted } }`,
+    { id: entryId },
+    token
+  );
 }
 
 export type AniListUser = { id: number; name: string; avatarUrl: string | null };

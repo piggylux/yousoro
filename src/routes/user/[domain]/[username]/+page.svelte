@@ -7,6 +7,7 @@
   import { prefersReducedMotion } from 'svelte/motion';
   import { fade } from 'svelte/transition';
 
+  import { listedLookup } from '#lib/anime-search.js';
   import {
     countBySection,
     getListSection,
@@ -19,6 +20,7 @@
     searchWords,
     sortWatchingList,
   } from '#lib/anime.js';
+  import AddAnimeDialog from '#lib/components/AddAnimeDialog.svelte';
   import AnimeCard from '#lib/components/AnimeCard.svelte';
   import AutoReadRetry from '#lib/components/AutoReadRetry.svelte';
   import BacklogBanner from '#lib/components/BacklogBanner.svelte';
@@ -389,8 +391,28 @@
   type Finished = { anime: Anime; askScore: boolean; sequels: Promise<Sequel[]> };
   let toScore = $state<Finished[]>([]);
   let scoring = $state<Finished | null>(null);
-  // A sequel was started from the prompt, so the list is read again once it's closed
-  let startedSequel = false;
+  // A sequel or a found anime was started, so the list is read again once its dialog is closed
+  let startedAnime = false;
+  // Finding an anime to add, from the profile row of the owner's own list
+  let addingAnime = $state(false);
+  const watchingById = $derived(new Map(data.watchingList.map((anime) => [anime.id, anime])));
+  // On the owner's own AniList list, its read brings the ids on their other lists along
+  const listed = $derived(data.listedIds ? listedLookup(data.listedIds) : undefined);
+
+  /*
+   * "Show on my list" in the anime search, for an anime found that's on the list already: the
+   * search closes, and the page goes to its card, which glows. A search or a section the filters
+   * hide that would keep it out of sight is cleared first
+   */
+  async function showOnList(animeId: number) {
+    addingAnime = false;
+    const anime = sortedList.find((other) => other.id === animeId);
+    if (!anime) return;
+    if (searching && !matches(anime)) search = '';
+    const section = getListSection(anime);
+    if (hiddenSections.includes(section)) toggleSection(section);
+    await followCard(animeId, -1);
+  }
 
   function celebrate(
     kind: 'caught-up' | 'completed',
@@ -434,22 +456,42 @@
       scoring = next;
       toScore = rest;
     }
-    if (startedSequel) {
-      startedSequel = false;
-      reload();
-    }
+    readStarted();
   }
 
   /*
-   * A sequel added from the prompt: a planned one only changes the plan list, while a started one
-   * leaves it for the Watching list, which is read again once the prompt is closed
+   * Opens the anime search, already searching the words the list's own search found nothing for,
+   * as the anime may not be on the list yet
+   */
+  let addPrefill = $state('');
+  function searchAniList(words: string) {
+    addPrefill = words;
+    addingAnime = true;
+  }
+
+  function closeAddAnime() {
+    addingAnime = false;
+    addPrefill = '';
+    readStarted();
+  }
+
+  function readStarted() {
+    if (!startedAnime) return;
+    startedAnime = false;
+    reload();
+  }
+
+  /*
+   * A sequel added from the prompt, or an anime found by search: a planned one only changes the
+   * plan list, while a started one is new on the Watching list, which is read again once the dialog
+   * is closed
    */
   function noteAdded(sequel: Sequel, list: ListMove, progress: number) {
     if (list === 'PLANNING') {
       forgetPlanned(data.domain, data.username);
       return;
     }
-    startedSequel = true;
+    startedAnime = true;
     markStarted(data.domain, data.username, sequel);
     if (data.canEdit && friendsViewer)
       recordOwnWatchingEntry(
@@ -463,6 +505,30 @@
           rewatching: false,
         },
         'CURRENT'
+      );
+  }
+
+  /*
+   * An add undone in the anime search: the plan list may have changed either way, and a started
+   * anime is no longer one the owner watches with friends. The Watching list is read again once the
+   * search is closed, as after a start
+   */
+  function noteUndone(anime: Sequel, list: ListMove) {
+    forgetPlanned(data.domain, data.username);
+    if (list !== 'CURRENT') return;
+    startedAnime = true;
+    if (data.canEdit && friendsViewer)
+      recordOwnWatchingEntry(
+        friendsViewer,
+        {
+          id: anime.id,
+          title: anime.title,
+          isAdult: anime.isAdult,
+          thumbnailUrl: anime.coverUrl ?? '',
+          currentEpisode: 0,
+          rewatching: false,
+        },
+        'PLANNING'
       );
   }
 
@@ -545,8 +611,28 @@
         {/each}
         <ShareButton url={share.url} title={share.title} subject={share.subject} />
       </div>
-      {#if onAniList || moreLinks.length}
+      {#if data.canEdit || onAniList || moreLinks.length}
         <div class="profile-actions">
+          {#if data.canEdit}
+            <button
+              type="button"
+              class="tw:btn tw:btn-sm profile-action"
+              aria-haspopup="dialog"
+              onclick={() => searchAniList('')}
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width="16"
+                height="16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg
+              >
+              Add anime
+            </button>
+          {/if}
           {#if onAniList}
             <a class="tw:btn tw:btn-sm profile-action" href={matchPath(data.username)}>
               <!-- Two tastes overlapping -->
@@ -633,6 +719,8 @@
         <p>
           {#if hiddenMatches}
             {hiddenMatches} matching anime {hiddenMatches === 1 ? 'is' : 'are'} in hidden sections.
+          {:else if searching && data.canEdit}
+            Try another title, or find it on AniList to add it to your list.
           {:else if searching}
             Try another title, or clear your search to see the list.
           {:else}
@@ -640,6 +728,14 @@
           {/if}
         </p>
         <div class="empty-actions">
+          {#if searching && data.canEdit && !hiddenMatches}
+            <button
+              type="button"
+              class="tw:btn tw:btn-sm tw:btn-primary"
+              aria-haspopup="dialog"
+              onclick={() => searchAniList(search)}>Search AniList for “{search.trim()}”</button
+            >
+          {/if}
           {#if searching}
             <button
               type="button"
@@ -814,6 +910,22 @@
       onClose={askNextScore}
     />
   {/key}
+{/if}
+
+{#if data.canEdit}
+  <AddAnimeDialog
+    open={addingAnime}
+    domain={data.domain}
+    watching={watchingById}
+    {listed}
+    showMature={data.preferences.showMature}
+    blurMature={data.preferences.blurMature}
+    prefill={addPrefill}
+    onclose={closeAddAnime}
+    onAdded={noteAdded}
+    onUndone={noteUndone}
+    onShow={calendarView ? undefined : showOnList}
+  />
 {/if}
 
 <style>

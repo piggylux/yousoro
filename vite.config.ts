@@ -27,9 +27,10 @@ export default defineConfig({
           'style-src': ['self', 'unsafe-inline'],
           // Anime covers and avatars come from AniList's CDN; MyAnimeList avatars from its own
           'img-src': ['self', 'data:', 'https://s4.anilist.co', 'https://cdn.myanimelist.net'],
-          // The browser only talks to this site; AniList's and MyAnimeList's APIs are called from
-          // the server
-          'connect-src': ['self'],
+          // The browser talks to this site, which calls AniList and MyAnimeList for lists and
+          // saves. Searching for an anime to add asks AniList directly, without a token, so each
+          // search uses the viewer's own AniList allowance rather than the app's shared one
+          'connect-src': ['self', 'https://graphql.anilist.co'],
           'form-action': ['self'],
           'base-uri': ['self'],
           'object-src': ['none'],

@@ -4,7 +4,7 @@ import { saveEntry } from '#lib/server/anilist-client.js';
 import { parseEntryUpdate } from '#lib/server/entry-update.js';
 import { copyToLinkedAccount } from '#lib/server/linked-save.js';
 import { loadAnimePage } from '#lib/server/list-page.js';
-import { moveToListAction } from '#lib/server/move-to-list.js';
+import { addToListAction, moveToListAction, undoAddAction } from '#lib/server/move-to-list.js';
 import { withMalToken } from '#lib/server/myanimelist-auth.js';
 import { saveEntry as saveMalEntry } from '#lib/server/myanimelist-client.js';
 import { updateOwnList } from '#lib/server/own-list.js';
@@ -53,4 +53,8 @@ export const actions: Actions = {
   startWatching: moveToListAction('CURRENT'),
   /** Plans a sequel that isn't out yet, which the score prompt offers too */
   planToWatch: moveToListAction('PLANNING'),
+  /** Adds an anime found by search, unless it's on the list already */
+  addAnime: addToListAction(),
+  /** Undoes an add from the search: back to the list it was on, or off the list when it was new */
+  undoAdd: undoAddAction(),
 };

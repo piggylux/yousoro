@@ -1,7 +1,14 @@
 import type { ActionFailure, Cookies } from '@sveltejs/kit';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { MalTokenError, moveToList, saveEntry } from '#lib/server/myanimelist-client.js';
+import {
+  deleteEntry,
+  getListEntry,
+  getListStatuses,
+  MalTokenError,
+  moveToList,
+  saveEntry,
+} from '#lib/server/myanimelist-client.js';
 import { MyAnimeListApi } from '#lib/server/myanimelist.js';
 import type { MalSession, Session } from '#lib/server/session.js';
 import { DEFAULT_PREFERENCES } from '#lib/types/preferences.js';
@@ -17,6 +24,9 @@ vi.mock('#lib/server/myanimelist-client.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('#lib/server/myanimelist-client.js')>()),
   saveEntry: vi.fn(),
   moveToList: vi.fn(),
+  getListStatuses: vi.fn(),
+  getListEntry: vi.fn(),
+  deleteEntry: vi.fn(),
 }));
 vi.mock('#lib/server/myanimelist.js', () => ({ MyAnimeListApi: vi.fn() }));
 
@@ -146,6 +156,160 @@ describe('adding a sequel from the score prompt', () => {
       data: { message: 'Unknown anime' },
     });
     expect(moveToList).not.toHaveBeenCalled();
+  });
+});
+
+describe('adding an anime found by search', () => {
+  const add = (fields: Record<string, string>) => {
+    const action = actions.addAnime!;
+    return action(event(malSession(), fields).request as unknown as Parameters<typeof action>[0]);
+  };
+
+  it('asks where it is first, then adds one that is not on the list', async () => {
+    const saved = { progress: 0, score: 0, status: 'PLANNING', startedAt: null, completedAt: null };
+    vi.mocked(getListStatuses).mockResolvedValue(new Map([[1007, null]]));
+    vi.mocked(moveToList).mockResolvedValue(saved);
+
+    expect(await add({ mediaId: '7', malId: '1007', list: 'PLANNING' })).toEqual({
+      mediaId: 7,
+      malId: 1007,
+      ...saved,
+      // So the add can be undone
+      before: 'NONE',
+    });
+    expect(getListStatuses).toHaveBeenCalledWith('mal-token', [1007]);
+    expect(moveToList).toHaveBeenCalledWith('mal-token', 1007, 'PLANNING');
+  });
+
+  it('leaves an anime the user has seen where it is, saying so in their list names', async () => {
+    vi.mocked(getListStatuses).mockResolvedValue(new Map([[1007, 'PAUSED']]));
+
+    expect(await add({ mediaId: '7', malId: '1007', list: 'CURRENT' })).toMatchObject({
+      status: 409,
+      data: { message: 'Already on your On-Hold list' },
+    });
+    expect(moveToList).not.toHaveBeenCalled();
+  });
+
+  it('says a planned anime is planned already, without saving it again', async () => {
+    vi.mocked(getListStatuses).mockResolvedValue(new Map([[1007, 'PLANNING']]));
+
+    expect(await add({ mediaId: '7', malId: '1007', list: 'PLANNING' })).toEqual({
+      mediaId: 7,
+      malId: 1007,
+      status: 'PLANNING',
+      already: true,
+    });
+    expect(moveToList).not.toHaveBeenCalled();
+  });
+
+  it('resumes a paused one where the page saw it, but not one moved on since', async () => {
+    const saved = { progress: 4, score: 0, status: 'CURRENT', startedAt: null, completedAt: null };
+    vi.mocked(moveToList).mockResolvedValue(saved);
+    vi.mocked(getListStatuses).mockResolvedValueOnce(new Map([[1007, 'PAUSED']]));
+
+    expect(
+      await add({ mediaId: '7', malId: '1007', list: 'CURRENT', from: 'PAUSED' })
+    ).toMatchObject({ status: 'CURRENT', before: 'PAUSED' });
+
+    vi.mocked(moveToList).mockClear();
+    vi.mocked(getListStatuses).mockResolvedValueOnce(new Map([[1007, 'COMPLETED']]));
+    expect(
+      await add({ mediaId: '7', malId: '1007', list: 'CURRENT', from: 'PAUSED' })
+    ).toMatchObject({ status: 409, data: { message: 'Already on your Completed list' } });
+    expect(moveToList).not.toHaveBeenCalled();
+  });
+
+  it('only tries the linked account again when asked to, once the add is done', async () => {
+    vi.mocked(getListStatuses).mockResolvedValue(new Map([[1007, 'PLANNING']]));
+
+    expect(await add({ mediaId: '7', malId: '1007', list: 'PLANNING', retry: 'linked' })).toEqual({
+      mediaId: 7,
+      malId: 1007,
+      linkedOnly: true,
+    });
+    expect(moveToList).not.toHaveBeenCalled();
+  });
+
+  it("turns away an anime MyAnimeList doesn't have, and a list it can't add to", async () => {
+    vi.mocked(getListStatuses).mockResolvedValue(new Map());
+
+    expect(await add({ mediaId: '7', malId: '1007', list: 'CURRENT' })).toMatchObject({
+      status: 404,
+    });
+    expect(await add({ mediaId: '7', malId: '1007', list: 'COMPLETED' })).toMatchObject({
+      status: 400,
+      data: { message: 'Unknown list' },
+    });
+    expect(moveToList).not.toHaveBeenCalled();
+  });
+});
+
+describe('undoing an add from the search', () => {
+  const undo = (fields: Record<string, string>) => {
+    const action = actions.undoAdd!;
+    return action(event(malSession(), fields).request as unknown as Parameters<typeof action>[0]);
+  };
+  const entry = (status: string, progress = 0, score = 0) => ({
+    status,
+    progress,
+    score,
+    rewatched: 0,
+  });
+  const fields = (list: string, before: string) => ({ mediaId: '7', malId: '1007', list, before });
+  const changedSince = {
+    status: 409,
+    data: {
+      message: "It's changed since you added it, so it stays as it is. Change it on its card.",
+    },
+  };
+
+  it('takes a new anime off the list while it holds nothing but its status', async () => {
+    vi.mocked(getListEntry).mockResolvedValue(entry('PLANNING'));
+
+    expect(await undo(fields('PLANNING', 'NONE'))).toEqual({
+      mediaId: 7,
+      malId: 1007,
+      undone: true,
+    });
+    expect(deleteEntry).toHaveBeenCalledWith('mal-token', 1007);
+  });
+
+  it('keeps one watched or scored since, saying where to change it', async () => {
+    vi.mocked(getListEntry).mockResolvedValue(entry('CURRENT', 3));
+
+    expect(await undo(fields('CURRENT', 'NONE'))).toMatchObject(changedSince);
+    expect(deleteEntry).not.toHaveBeenCalled();
+  });
+
+  it('moves a moved anime back while it is still where the add put it', async () => {
+    vi.mocked(getListEntry).mockResolvedValue(entry('CURRENT', 4));
+    vi.mocked(moveToList).mockResolvedValue({
+      progress: 4,
+      score: 0,
+      status: 'PAUSED',
+      startedAt: null,
+      completedAt: null,
+    });
+
+    expect(await undo(fields('CURRENT', 'PAUSED'))).toMatchObject({ undone: true });
+    expect(moveToList).toHaveBeenCalledWith('mal-token', 1007, 'PAUSED');
+  });
+
+  it('leaves one moved on since, as one started and then completed', async () => {
+    vi.mocked(getListEntry).mockResolvedValue(entry('COMPLETED', 12, 8));
+
+    expect(await undo(fields('CURRENT', 'PLANNING'))).toMatchObject(changedSince);
+    expect(moveToList).not.toHaveBeenCalled();
+  });
+
+  it('turns away anything else to undo', async () => {
+    expect(await undo(fields('CURRENT', 'COMPLETED'))).toMatchObject({
+      status: 400,
+      data: { message: 'Nothing to undo' },
+    });
+    expect(await undo(fields('COMPLETED', 'NONE'))).toMatchObject({ status: 400 });
+    expect(getListEntry).not.toHaveBeenCalled();
   });
 });
 

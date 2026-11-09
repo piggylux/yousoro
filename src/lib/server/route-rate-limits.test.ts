@@ -262,3 +262,25 @@ it('preserves confirmed progress when a save uses the final upstream slot', asyn
   } as Parameters<typeof client.load>[0]);
   expect(completed?.watchingList).toEqual([]);
 });
+
+describe('the ids on your other lists, for the anime search', () => {
+  const queries = () =>
+    vi.mocked(fetch).mock.calls.map(([, init]) => JSON.parse(init!.body as string).query as string);
+
+  it('come with your own list in the same request, whatever the case of the name', async () => {
+    const request = event();
+    request.params.username = 'FIXTURE';
+
+    expect(await readPage(request)).toMatchObject({ canEdit: true, listedIds: {} });
+    expect(queries()).toHaveLength(1);
+    expect(queries()[0]).toContain('listed: MediaListCollection');
+  });
+
+  it("aren't read for someone else's list", async () => {
+    const request = event();
+    request.params.username = 'Other';
+
+    expect(await readPage(request)).not.toHaveProperty('listedIds');
+    expect(queries()[0]).not.toContain('listed:');
+  });
+});
