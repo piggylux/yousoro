@@ -2,6 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   copyEntry,
+  deleteEntry,
+  getListEntry,
+  getListedIds,
   getListStatuses,
   getPlanToWatchEntries,
   getWatchingEntries,
@@ -385,6 +388,42 @@ describe('getPlanToWatchEntries', () => {
   });
 });
 
+describe('getListedIds', () => {
+  it('reads the whole list by page, keeping the ids on each list other than Watching', async () => {
+    const next = `${API}/users/@me/animelist?offset=1000`;
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(
+        Response.json({
+          data: [
+            entry(1, 'plan_to_watch'),
+            entry(2, 'completed'),
+            entry(3, 'on_hold'),
+            entry(4, 'dropped'),
+            // On the Watching list, which the page has already
+            entry(5, 'watching'),
+            entry(6, 'completed', true),
+          ],
+          paging: { next },
+        })
+      )
+      .mockResolvedValueOnce(Response.json({ data: [entry(7, 'completed')] }));
+
+    expect(await getListedIds('token')).toEqual({
+      PLANNING: [1],
+      COMPLETED: [2, 7],
+      PAUSED: [3],
+      DROPPED: [4],
+    });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    const url = new URL(String(vi.mocked(fetch).mock.calls[0][0]));
+    expect(url.pathname).toBe('/v2/users/@me/animelist');
+    expect(url.searchParams.get('fields')).toBe('list_status');
+    expect(url.searchParams.get('limit')).toBe('1000');
+    // Only for the search, so it gives way to lists and saves
+    expect(takeMalRequest).toHaveBeenCalledWith('optional');
+  });
+});
+
 describe('moveToList', () => {
   it('moves an anime to "Watching" in one request, leaving the rest of the entry alone', async () => {
     vi.mocked(fetch).mockResolvedValue(
@@ -412,6 +451,46 @@ describe('moveToList', () => {
 
     expect(await moveToList('token', 52991, 'PLANNING')).toMatchObject({ status: 'PLANNING' });
     expect(String(vi.mocked(fetch).mock.calls[0][1]?.body)).toBe('status=plan_to_watch');
+  });
+});
+
+describe('reading and taking off one entry, for undoing an add', () => {
+  it('reads what an entry holds, in AniList terms, and none for one not on the list', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(
+        Response.json({
+          my_list_status: {
+            status: 'plan_to_watch',
+            is_rewatching: false,
+            num_episodes_watched: 0,
+            score: 0,
+          },
+        })
+      )
+      .mockResolvedValueOnce(Response.json({ id: 1 }))
+      .mockResolvedValueOnce(new Response(null, { status: 404 }));
+
+    expect(await getListEntry('token', 1)).toEqual({
+      status: 'PLANNING',
+      progress: 0,
+      score: 0,
+      rewatched: 0,
+    });
+    expect(await getListEntry('token', 1)).toBeNull();
+    expect(await getListEntry('token', 1)).toBeNull();
+  });
+
+  it('deletes an entry, which answers with nothing, and is done with one already off', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 404 }));
+
+    await deleteEntry('token', 52991);
+    await deleteEntry('token', 52991);
+
+    const [url, init] = vi.mocked(fetch).mock.calls[0];
+    expect(String(url)).toBe(`${API}/anime/52991/my_list_status`);
+    expect(init?.method).toBe('DELETE');
   });
 });
 

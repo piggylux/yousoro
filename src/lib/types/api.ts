@@ -15,10 +15,33 @@ export type UserAnimeList = {
   animeList: Anime[];
   /** Anime on a MyAnimeList list that AniList doesn't know, so they can't be shown as cards */
   unmatched?: UnmatchedAnime[];
+  /** The anime on the owner's other lists, read along with their own AniList list */
+  listedIds?: ListedIds;
 };
+
+/** The lists an anime can be on besides Watching and Rewatching, as AniList names them */
+export const OTHER_LISTS = ['PLANNING', 'COMPLETED', 'PAUSED', 'DROPPED'] as const;
+export type OtherList = (typeof OTHER_LISTS)[number];
+
+/**
+ * The anime on each of the owner's other lists, so the anime search can say where those it finds
+ * are: AniList ids on an AniList list, MyAnimeList ids on a MyAnimeList list. A list with nothing
+ * on it may be left out
+ */
+export type ListedIds = Partial<Record<OtherList, number[]>>;
 
 /** The lists an anime can be moved to on its own: "Watching" and "Planning", as AniList names them */
 export type ListMove = 'CURRENT' | 'PLANNING';
+
+/**
+ * Where an anime was before it was added from the search, which undoing the add puts it back to:
+ * not on the list, or on the plan, paused or dropped list it was moved from
+ */
+export type Before = 'NONE' | 'PLANNING' | 'PAUSED' | 'DROPPED';
+
+export function isBefore(value: unknown): value is Before {
+  return value === 'NONE' || value === 'PLANNING' || value === 'PAUSED' || value === 'DROPPED';
+}
 
 /** A save that reached the list's service but not the account linked to it */
 export type LinkedFailure = {
@@ -94,6 +117,11 @@ export type AnimePageData = {
   /** The sections of the list the viewer hides with the filters above it */
   hiddenSections: ListSection[];
   unmatched?: UnmatchedAnime[];
+  /**
+   * The anime on the owner's other lists, by AniList id, on their own AniList list only, so the
+   * anime search can say where those it finds are. A MyAnimeList list asks as the search opens
+   */
+  listedIds?: ListedIds;
   /** The viewer's display settings, from the root layout */
   preferences: Preferences;
 };

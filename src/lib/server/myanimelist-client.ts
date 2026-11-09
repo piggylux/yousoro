@@ -7,7 +7,7 @@ import {
   takeMalRequest,
   type RequestPriority,
 } from '#lib/server/rate-limit.js';
-import type { ListMove } from '#lib/types/api.js';
+import { OTHER_LISTS, type ListedIds, type ListMove, type OtherList } from '#lib/types/api.js';
 import type { SessionUser } from '#lib/types/session-user.js';
 
 const API_URL = 'https://api.myanimelist.net/v2';
@@ -144,7 +144,11 @@ async function send<T>(
     redirect: 'error',
     cache: 'no-store',
   });
-  if (response.ok) return (await response.json()) as T;
+  // A deletion answers with nothing to read
+  if (response.ok) {
+    const text = await response.text();
+    return (text ? JSON.parse(text) : null) as T;
+  }
 
   // Frees the connection now rather than once the unread body is collected
   await response.body?.cancel();
@@ -236,6 +240,65 @@ export async function getPlanToWatchEntries(userName: string, token?: string): P
     planningCache.set(key, { entries, expiresAt: Date.now() + PLANNING_TTL_MS });
   }
   return entries;
+}
+
+/**
+ * The MyAnimeList ids of the anime on each of the token owner's lists other than Watching, by
+ * AniList's names for them, and nothing else about them, so the anime search can tell where those
+ * it finds are: one request per 1,000 anime on the list. A rewatch is on the Watching list
+ */
+export async function getListedIds(token: string): Promise<ListedIds> {
+  const entries = await readPages(
+    `${API_URL}/users/@me/animelist?fields=list_status&limit=1000&nsfw=true`,
+    token,
+    { cacheMs: 0, priority: 'optional' }
+  );
+  const ids: Partial<Record<OtherList, Set<number>>> = {};
+  for (const { node, list_status } of entries) {
+    const status = toAniListStatus(list_status) as OtherList;
+    if (OTHER_LISTS.includes(status)) (ids[status] ??= new Set()).add(node.id);
+  }
+  return Object.fromEntries(Object.entries(ids).map(([list, set]) => [list, [...set]]));
+}
+
+/**
+ * The token owner's entry for one anime, in AniList's terms, or null when it's not on their list or
+ * MyAnimeList doesn't have it. Asked before undoing an add, which only takes off an empty entry
+ */
+export async function getListEntry(
+  token: string,
+  malId: number
+): Promise<{ status: string; progress: number; score: number; rewatched: number } | null> {
+  try {
+    const { my_list_status: entry } = await request<{
+      my_list_status?: Pick<
+        MalListStatusData,
+        'status' | 'is_rewatching' | 'num_episodes_watched' | 'score' | 'num_times_rewatched'
+      >;
+    }>(
+      `${API_URL}/anime/${malId}?fields=my_list_status{status,is_rewatching,num_episodes_watched,score,num_times_rewatched}`,
+      { token, cacheMs: 0 }
+    );
+    if (!entry) return null;
+    return {
+      status: toAniListStatus(entry),
+      progress: entry.num_episodes_watched,
+      score: entry.score,
+      rewatched: entry.num_times_rewatched ?? 0,
+    };
+  } catch (err) {
+    if (err instanceof MalNotFoundError) return null;
+    throw err;
+  }
+}
+
+/** Takes an anime off the token owner's list; one that isn't on it is already off */
+export async function deleteEntry(token: string, malId: number): Promise<void> {
+  try {
+    await request(`${API_URL}/anime/${malId}/my_list_status`, { token, method: 'DELETE' });
+  } catch (err) {
+    if (!(err instanceof MalNotFoundError)) throw err;
+  }
 }
 
 /** Every anime on the token owner's list, whatever its status */
@@ -331,12 +394,13 @@ export async function copyEntry(
 
 /**
  * Moves an anime on the token owner's list to "Watching" or "Plan to Watch", adding it when it isn't
- * there, in one request. The episode count, score and dates stay as they are
+ * there, in one request, or back to "On-Hold" or "Dropped" when undoing a move. The episode count,
+ * score and dates stay as they are
  */
 export async function moveToList(
   token: string,
   malId: number,
-  status: ListMove
+  status: ListMove | 'PAUSED' | 'DROPPED'
 ): Promise<{
   progress: number;
   score: number;

@@ -12,7 +12,10 @@ export function plannedKey(anime: PlannedAnime): string {
  * The English title, when it says more than the title: not when it only differs in case, spaces or
  * punctuation, as "Girls Band Cry" from "GIRLS BAND CRY"
  */
-export function distinctEnglishTitle({ title, englishTitle }: PlannedAnime): string | null {
+export function distinctEnglishTitle({
+  title,
+  englishTitle,
+}: Pick<PlannedAnime, 'title' | 'englishTitle'>): string | null {
   const squashed = (text: string) => searchWords(text).join('');
   return englishTitle && squashed(englishTitle) !== squashed(title) ? englishTitle : null;
 }
@@ -81,15 +84,21 @@ export function sequelFacts(sequel: Sequel): string {
  * A series on a plan list: the parts of it on the list, in the order to watch them. The first part
  * leads it, and it's sorted and filtered by that one, as it's the part to start
  */
-export type PlannedSeries = { parts: [PlannedAnime, ...PlannedAnime[]] };
+export type PlannedSeries = Series<PlannedAnime>;
+
+/** A series' parts, in the order to watch them */
+export type Series<T> = { parts: [T, ...T[]] };
 
 /**
  * The plan list as series, each where its first part is on the list. Parts are joined by the
  * prequels each waits on, so a series only holds the parts on this list; an anime that continues
  * nothing on it is a series of its own. Parts come after what they continue, and otherwise in
- * airing order, as a movie and a second season that both follow the first
+ * airing order, as a movie and a second season that both follow the first. Search results are
+ * grouped the same way
  */
-export function groupSeries(planned: PlannedAnime[]): PlannedSeries[] {
+export function groupSeries<T extends Pick<PlannedAnime, 'id' | 'prequels' | 'year'>>(
+  planned: T[]
+): Series<T>[] {
   const position = new Map<number, number>();
   planned.forEach((anime, index) => {
     if (anime.id !== null) position.set(anime.id, index);
@@ -133,7 +142,7 @@ export function groupSeries(planned: PlannedAnime[]): PlannedSeries[] {
   return grouped
     .sort((a, b) => a[0] - b[0])
     .map((order) => ({
-      parts: order.map((index) => planned[index]) as PlannedSeries['parts'],
+      parts: order.map((index) => planned[index]) as Series<T>['parts'],
     }));
 }
 

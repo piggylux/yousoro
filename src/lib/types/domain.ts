@@ -11,6 +11,26 @@ export const DOMAIN_NAMES: Record<Domain, string> = {
   myanimelist: 'MyAnimeList',
 };
 
+/** What each service calls the lists an anime can be on, by AniList's names for them */
+export const LIST_NAMES: Record<Domain, Record<string, string>> = {
+  anilist: {
+    CURRENT: 'Watching',
+    REPEATING: 'Rewatching',
+    COMPLETED: 'Completed',
+    PAUSED: 'Paused',
+    DROPPED: 'Dropped',
+    PLANNING: 'Planning',
+  },
+  myanimelist: {
+    CURRENT: 'Watching',
+    REPEATING: 'Rewatching',
+    COMPLETED: 'Completed',
+    PAUSED: 'On-Hold',
+    DROPPED: 'Dropped',
+    PLANNING: 'Plan to Watch',
+  },
+};
+
 /** Where someone's list is on this site */
 export function listPath(domain: Domain, username: string): string {
   return `/user/${domain}/${encodeURIComponent(username)}`;

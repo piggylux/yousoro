@@ -4,16 +4,20 @@ import {
   AniListNotFoundError,
   AniListRateLimitError,
   AniListTokenError,
+  deleteEntry,
   fromFuzzyDate,
   getAllListEntries,
   getAnimeYear,
   getFollowing,
   getLatestAirings,
+  getListEntry,
+  getListStatus,
   getPlanningEntries,
   getSequels,
   getSeries,
   getTasteProfile,
   getViewer,
+  getWatchingEntries,
   saveEntries,
   saveEntry,
 } from '#lib/server/anilist-client.js';
@@ -638,6 +642,63 @@ describe('years in anime', () => {
   });
 });
 
+describe('the ids on your other lists that come with your own Watching list', () => {
+  const answer = (listed?: unknown) =>
+    Response.json({
+      data: {
+        MediaListCollection: {
+          user: { id: 7, name: 'Owner', avatar: null, mediaListOptions: null },
+          lists: [],
+        },
+        ...(listed === undefined ? {} : { listed }),
+      },
+    });
+  const list = (status: string | null, ids: number[], isCustomList = false) => ({
+    status,
+    isCustomList,
+    entries: ids.map((mediaId) => ({ mediaId })),
+  });
+  const sent = () => JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string).query as string;
+
+  it('reads them by list in the same request, each id once', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      answer({
+        lists: [
+          list('PLANNING', [1, 2]),
+          // A completed list split by format is several lists
+          list('COMPLETED', [3]),
+          list('COMPLETED', [4, 3]),
+          list('PAUSED', [5]),
+          // Custom lists repeat anime from the status lists
+          list(null, [1, 3], true),
+        ],
+      })
+    );
+
+    const read = await getWatchingEntries('Owner', 'token', undefined, true);
+
+    expect(read.listedIds).toEqual({ PLANNING: [1, 2], COMPLETED: [3, 4], PAUSED: [5] });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(sent()).toContain('status_in: [PLANNING, COMPLETED, PAUSED, DROPPED]');
+    expect(sent()).toContain('lists { status isCustomList entries { mediaId } }');
+  });
+
+  it("leaves them out of anyone else's list", async () => {
+    vi.mocked(fetch).mockResolvedValue(answer());
+
+    const read = await getWatchingEntries('Someone', 'token');
+
+    expect(read).not.toHaveProperty('listedIds');
+    expect(sent()).not.toContain('listed:');
+  });
+
+  it('reads empty lists as no ids', async () => {
+    vi.mocked(fetch).mockResolvedValue(answer({ lists: [] }));
+
+    expect((await getWatchingEntries('Owner', 'token', undefined, true)).listedIds).toEqual({});
+  });
+});
+
 describe('planning lists', () => {
   const entry = (id: number, updatedAt = 0) => ({
     updatedAt,
@@ -762,6 +823,32 @@ describe('planning lists', () => {
     await getPlanningEntries('Private');
     expect(fetch).toHaveBeenCalledTimes(3);
     expect(vi.mocked(fetch).mock.calls[2][1]!.headers).not.toHaveProperty('Authorization');
+  });
+});
+
+describe('one entry, for adding from the search and undoing it', () => {
+  const body = () => JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string);
+
+  it("reads the owner's entry with what it holds, and none for an anime not on the list", async () => {
+    const entry = { id: 900, status: 'PLANNING', progress: 0, score: 0, repeat: 0 };
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(Response.json({ data: { Media: { mediaListEntry: entry } } }))
+      .mockResolvedValueOnce(Response.json({ data: { Media: { mediaListEntry: null } } }));
+
+    expect(await getListEntry('token', 7)).toEqual(entry);
+    expect(body().query).toContain('mediaListEntry { id status progress score repeat }');
+    expect(await getListStatus('token', 7)).toBeNull();
+  });
+
+  it('deletes an entry by its own id', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      Response.json({ data: { DeleteMediaListEntry: { deleted: true } } })
+    );
+
+    await deleteEntry('token', 900);
+
+    expect(body()).toMatchObject({ variables: { id: 900 } });
+    expect(body().query).toContain('DeleteMediaListEntry(id: $id)');
   });
 });
 

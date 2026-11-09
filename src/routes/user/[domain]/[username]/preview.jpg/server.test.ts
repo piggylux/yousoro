@@ -46,8 +46,9 @@ beforeEach(() => {
 describe('list preview image', () => {
   it('draws the public list, never with the viewer’s token, and lets it be cached', async () => {
     expect(await (await GET(event())).text()).toBe('list');
-    // At the usual priority: a shared list's preview is read rarely, unlike a badge
-    expect(getWatchingEntries).toHaveBeenCalledWith('Fixture', undefined, undefined);
+    // At the usual priority: a shared list's preview is read rarely, unlike a badge. It never
+    // brings the owner's planned ids, which only their own list page uses
+    expect(getWatchingEntries).toHaveBeenCalledWith('Fixture', undefined, undefined, false);
     expect(renderListPreview).toHaveBeenCalledWith(
       expect.objectContaining({ username: 'Fixture', animeList: [] }),
       expect.stringContaining('s-maxage=3600')

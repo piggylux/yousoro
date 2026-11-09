@@ -101,8 +101,9 @@ export async function loadAnimePage({
       retryAt: retryAfter === null ? 0 : Date.now() + retryAfter * 1000,
     };
   }
-  const { userId, username, avatarUrl, scoreFormat, animeList } = userAnimeList;
+  const { userId, username, avatarUrl, scoreFormat, animeList, listedIds } = userAnimeList;
   const viewer = domain === 'anilist' ? locals.session : locals.malSession;
+  const canEdit = userId !== null && viewer?.user.id === userId;
   const unmatched = withoutHiddenMature(
     userAnimeList.unmatched ?? [],
     locals.preferences.showMature
@@ -113,7 +114,9 @@ export async function loadAnimePage({
     domain,
     username,
     avatarUrl,
-    canEdit: userId !== null && viewer?.user.id === userId,
+    canEdit,
+    // Only the owner searches for anime to add, so only they need to know what is on their lists
+    ...(canEdit && listedIds ? { listedIds } : {}),
     // Anime AniList marks as adult are left out entirely when the viewer chose not to see them
     watchingList: withoutHiddenMature(animeList, locals.preferences.showMature),
     scoreFormat,
@@ -203,13 +206,23 @@ export async function loadPlanningPage({
   };
 }
 
+/**
+ * Reads the Watching list. The signed-in user's own AniList list also brings the ids of the anime
+ * on their other lists, in the same request, for the anime search
+ */
 function getUserAnimeList(
   domain: Domain,
   username: string,
   event: ListEvent,
   enrichAirings: boolean
 ): Promise<UserAnimeList> {
-  return readList(domain, username, event, (api) => api.getUserAnimeList(username, enrichAirings));
+  // AniList names ignore case
+  const own = event.locals.session?.user.name.toLowerCase() === username.toLowerCase();
+  return readList(domain, username, event, (api) =>
+    api instanceof AniListApi
+      ? api.getUserAnimeList(username, enrichAirings, undefined, own)
+      : api.getUserAnimeList(username, enrichAirings)
+  );
 }
 
 /** Reads one of someone's lists, as the signed-in viewer when that shows them more */
