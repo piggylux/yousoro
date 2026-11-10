@@ -53,10 +53,28 @@
 
   let formElement = $state<HTMLFormElement>();
   let status = $state('');
-  // One save at a time: overlapping saves could finish out of order and keep the older choice
+  /*
+   * One save at a time, as overlapping saves could finish out of order and keep the older choice.
+   * The settings stay usable meanwhile: a change made during a save is saved right after it, with
+   * every setting as it then is
+   */
   let saving = $state(false);
-  // Follows the switch as soon as it moves, so the blur switch greys out without waiting for the save
-  let showMature = $derived(preferences.showMature);
+  let queued = false;
+  /*
+   * What the settings show: the saved ones, and the viewer's own changes while they're saved, so
+   * the page refreshing with an earlier save doesn't undo a change made since. Once saving is done
+   * they show what's saved again, which is the last change, or what was there before a failed save
+   */
+  let choices = $state({ ...untrack(() => preferences) });
+  $effect.pre(() => {
+    const saved = { ...preferences };
+    if (!saving) choices = saved;
+  });
+
+  function save() {
+    if (saving) queued = true;
+    else formElement?.requestSubmit();
+  }
 
   // The last save's status says nothing new once the drawer is opened again, unless a save is
   // still under way
@@ -136,9 +154,8 @@
         class="choice tw:select tw:select-sm"
         form={`${id}-settings`}
         name="mainList"
-        value={preferences.mainList}
-        disabled={saving}
-        onchange={() => formElement?.requestSubmit()}
+        bind:value={choices.mainList}
+        onchange={save}
       >
         {#each accounts as { domain } (domain)}
           <option value={domain}>{DOMAIN_NAMES[domain]}</option>
@@ -175,18 +192,22 @@
     status = 'Saving…';
     return async ({ result, update }) => {
       // Stay on the current page, which refreshes with the new settings, rather than go to the
-      // settings page the form posts to
-      await update({ reset: false, navigate: false });
+      // settings page the form posts to. A change made meanwhile is saved first, so the page
+      // refreshes once, with the last one
+      if (!queued) await update({ reset: false, navigate: false });
+      if (queued) {
+        queued = false;
+        formElement?.requestSubmit();
+        return;
+      }
       saving = false;
       status = result.type === 'success' ? 'Saved' : "Couldn't save, please try again";
-      // The switch moved ahead of the save; when the save fails, it goes back to what's saved
-      if (result.type !== 'success') showMature = preferences.showMature;
     };
   }}
 >
   {#if !linked}
     <!-- Kept as it is while there's only one list to choose -->
-    <input type="hidden" name="mainList" value={preferences.mainList} />
+    <input type="hidden" name="mainList" value={choices.mainList} />
   {/if}
   <label class="setting">
     <span>
@@ -196,9 +217,8 @@
     <select
       class="choice tw:select tw:select-sm"
       name="theme"
-      value={preferences.theme}
-      disabled={saving}
-      onchange={() => formElement?.requestSubmit()}
+      bind:value={choices.theme}
+      onchange={save}
     >
       {#each Object.entries(THEME_LABELS) as [value, label] (value)}
         <option {value}>{label}</option>
@@ -217,18 +237,17 @@
       class="tw:toggle tw:toggle-primary"
       type="checkbox"
       name="showMature"
-      bind:checked={showMature}
-      disabled={saving}
-      onchange={() => formElement?.requestSubmit()}
+      bind:checked={choices.showMature}
+      onchange={save}
     />
   </label>
 
   <!-- Only matters while mature anime are shown; otherwise it's kept as it is for later -->
-  <label class="setting" class:unavailable={!showMature}>
+  <label class="setting" class:unavailable={!choices.showMature}>
     <span>
       <span class="setting-name">Blur mature covers</span>
       <span class="setting-hint">
-        {showMature
+        {choices.showMature
           ? 'Covers of anime AniList marks as adult (18+) are blurred.'
           : 'Mature anime are hidden, so there are no covers to blur.'}
       </span>
@@ -237,12 +256,12 @@
       class="tw:toggle tw:toggle-primary"
       type="checkbox"
       name="blurMature"
-      checked={preferences.blurMature}
-      disabled={saving || !showMature}
-      onchange={() => formElement?.requestSubmit()}
+      bind:checked={choices.blurMature}
+      disabled={!choices.showMature}
+      onchange={save}
     />
     <!-- A disabled switch isn't sent, so its value goes along hidden, unchanged -->
-    {#if !showMature && preferences.blurMature}
+    {#if !choices.showMature && choices.blurMature}
       <input type="hidden" name="blurMature" value="on" />
     {/if}
   </label>
@@ -255,9 +274,8 @@
     <select
       class="choice tw:select tw:select-sm"
       name="cardSize"
-      value={preferences.cardSize}
-      disabled={saving}
-      onchange={() => formElement?.requestSubmit()}
+      bind:value={choices.cardSize}
+      onchange={save}
     >
       {#each Object.entries(CARD_SIZE_LABELS) as [value, label] (value)}
         <option {value}>{label}</option>
@@ -273,9 +291,8 @@
     <select
       class="choice tw:select tw:select-sm"
       name="downloadLanguage"
-      value={preferences.downloadLanguage}
-      disabled={saving}
-      onchange={() => formElement?.requestSubmit()}
+      bind:value={choices.downloadLanguage}
+      onchange={save}
     >
       {#each Object.entries(LANGUAGE_LABELS) as [value, label] (value)}
         <option {value}>{label}</option>
@@ -294,9 +311,8 @@
     <select
       class="choice tw:select tw:select-sm"
       name="downloadVersion"
-      value={preferences.downloadVersion}
-      disabled={saving}
-      onchange={() => formElement?.requestSubmit()}
+      bind:value={choices.downloadVersion}
+      onchange={save}
     >
       {#each Object.entries(VERSION_LABELS) as [value, label] (value)}
         <option {value}>{label}</option>
