@@ -1,9 +1,6 @@
 <script lang="ts">
-  import { page } from '$app/state';
-
   import CloseButton from '#lib/components/CloseButton.svelte';
   import FriendAvatar from '#lib/components/FriendAvatar.svelte';
-  import ShareButton from '#lib/components/ShareButton.svelte';
   import { closeOnBackdrop } from '#lib/dialog.js';
   import { describeGap, describeRace } from '#lib/race.js';
   import type { FriendWatching } from '#lib/types/friend-watching.js';
@@ -44,19 +41,6 @@
           (a, b) => b.progress - a.progress || a.name.localeCompare(b.name)
         )
       : (selection?.friends ?? [])
-  );
-  // Friends behind the viewer get a nudge; ahead of them, a plea not to spoil it
-  const leading = $derived(
-    viewer ? others.some((friend) => friend.progress < viewer.progress) : false
-  );
-  const share = $derived(
-    selection && viewer
-      ? {
-          url: `${page.url.origin}/user/anilist/${encodeURIComponent(viewer.name)}`,
-          title: `I'm on episode ${viewer.progress} of ${selection.title}. ${leading ? 'Catch up with me' : 'No spoilers! Follow along'} on Yousoro`,
-          note: leading ? 'Nudge your friends to catch up' : 'Ask your friends not to spoil it',
-        }
-      : null
   );
 </script>
 
@@ -109,12 +93,6 @@
         </li>
       {/each}
     </ul>
-    {#if share && others.length}
-      <footer>
-        <span>{share.note}</span>
-        <ShareButton url={share.url} title={share.title} subject="your progress" />
-      </footer>
-    {/if}
   {/if}
 </dialog>
 
@@ -205,18 +183,6 @@
   .description strong {
     color: var(--text-heading);
     font-weight: 600;
-  }
-  footer {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: 4px 12px;
-    flex: none;
-    padding-top: 12px;
-    border-top: 1px solid var(--border-subtle);
-    color: var(--text-accent);
-    font-size: 0.8125rem;
   }
   ul {
     list-style: none;
