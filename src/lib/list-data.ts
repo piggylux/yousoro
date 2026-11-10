@@ -1,3 +1,4 @@
+import { withoutHiddenMature } from '#lib/anime.js';
 import type { Anime } from '#lib/types/anime.js';
 import type { AnimePageData } from '#lib/types/api.js';
 import type { Domain } from '#lib/types/domain.js';
@@ -14,11 +15,16 @@ const confirmedEntries = new Map<
   string,
   { revision: number; saved: Anime; status?: string; expiresAt: number }
 >();
-const freshLists = new Map<string, { data: ListData; expiresAt: number }>();
+/*
+ * Lists as read, with mature anime shown or hidden. One `fromShown` was made from the list with
+ * them shown, by leaving them out, rather than read: that list, kept alongside, is as recent, so it
+ * can show them again without a read
+ */
+const freshLists = new Map<string, { data: ListData; expiresAt: number; fromShown?: boolean }>();
 // The same name can belong to different people on different services
 const listKey = (domain: Domain, username: string) => `${domain}:${username.toLowerCase()}`;
-const keyFor = (domain: Domain, username: string) =>
-  `${listKey(domain, username)}:${matureContext}`;
+const keyFor = (domain: Domain, username: string, showMature = matureContext) =>
+  `${listKey(domain, username)}:${showMature}`;
 export const getListContext = () => `${viewerId}:${matureContext}:${contextRevision}`;
 export const getSaveRevision = () => saveRevision;
 
@@ -58,7 +64,11 @@ export function getFreshList(username: string, needAirings = true, domain: Domai
   return null;
 }
 
-export function rememberList(data: ListData, refresh = true) {
+/**
+ * Remembers a list as read with mature anime shown or hidden, the viewer's setting unless said
+ * otherwise
+ */
+export function rememberList(data: ListData, refresh = true, showMature = matureContext) {
   // The fallback is page data only; root-layout preferences must stay current.
   const {
     domain,
@@ -70,6 +80,7 @@ export function rememberList(data: ListData, refresh = true) {
     hiddenSections,
     airingsEnriched,
     unmatched,
+    listedIds,
   } = data;
   lastShown = {
     domain,
@@ -81,8 +92,10 @@ export function rememberList(data: ListData, refresh = true) {
     hiddenSections,
     airingsEnriched,
     unmatched,
+    // The owner's other lists, which the anime search tells its results apart by
+    ...(listedIds && { listedIds }),
   };
-  const key = keyFor(domain, username);
+  const key = keyFor(domain, username, showMature);
   const previous = freshLists.get(key);
   if (freshLists.size >= 10 && !previous) freshLists.delete(freshLists.keys().next().value!);
   // Do not reuse a list across a known episode's airing boundary.
@@ -94,7 +107,41 @@ export function rememberList(data: ListData, refresh = true) {
   const expiresAt = refresh
     ? Math.min(Date.now() + 60_000, nextAiring)
     : (previous?.expiresAt ?? 0);
-  freshLists.set(key, { data: lastShown, expiresAt });
+  // A save patches the list as it was kept; a read replaces it
+  const fromShown = !refresh && previous?.fromShown;
+  freshLists.set(key, { data: lastShown, expiresAt, ...(fromShown && { fromShown }) });
+}
+
+/**
+ * Keeps the list the page shows fresh for another minute as settings are saved, so the page
+ * refreshes with them at once, rather than wait for the whole list to be read again. Hiding mature
+ * anime keeps it without them, as the server would leave them out. Showing them again goes back to
+ * the list they were hidden from, while nothing was read since; otherwise the list on show doesn't
+ * have them, so it's read again. Up to the next episode's airing, like any list kept. A list
+ * expired on purpose, as after an anime was added to it, is still read again
+ */
+export function keepShownList(domain: Domain, username: string, showMature: boolean) {
+  const kept = freshLists.get(keyFor(domain, username));
+  if (!kept) return;
+  if (showMature && !matureContext) {
+    const shown = kept.fromShown && freshLists.get(keyFor(domain, username, true));
+    if (shown) rememberList(shown.data, true, true);
+    return;
+  }
+  const { watchingList, unmatched } = kept.data;
+  rememberList(
+    {
+      ...kept.data,
+      watchingList: withoutHiddenMature(watchingList, showMature),
+      ...(unmatched && { unmatched: withoutHiddenMature(unmatched, showMature) }),
+    },
+    true,
+    showMature
+  );
+  // Made from the list with mature anime shown, now or when it was first hidden
+  if (!showMature && (matureContext || kept.fromShown)) {
+    freshLists.get(keyFor(domain, username, false))!.fromShown = true;
+  }
 }
 
 export function getRememberedList(username: string, domain: Domain = 'anilist') {

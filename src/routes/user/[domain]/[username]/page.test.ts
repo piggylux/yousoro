@@ -6,6 +6,7 @@ import {
   setListContext,
   getFreshList,
   expireRememberedList,
+  keepShownList,
   recordSavedEntry,
 } from '#lib/list-data.js';
 import type { Anime } from '#lib/types/anime.js';
@@ -61,6 +62,68 @@ describe('browser list reuse', () => {
     preferences: { ...DEFAULT_PREFERENCES, showMature: true },
     user: null,
   });
+  it('keeps the list on show through a settings save, unless it was expired on purpose', async () => {
+    vi.useFakeTimers();
+    const request = () =>
+      load({
+        params: { domain: 'anilist', username: 'Fixture' },
+        data: { deferred: true, username: 'Fixture' },
+        parent,
+        fetch,
+        url: new URL('https://example.com/user/anilist/Fixture'),
+      } as unknown as Parameters<typeof load>[0]);
+    const fetch = vi.fn(async () => Response.json(getRememberedList('Fixture')));
+    // Past the minute a list is kept, a refresh would read it again
+    vi.advanceTimersByTime(61_000);
+    expect(getFreshList('Fixture')).toBeNull();
+
+    keepShownList('anilist', 'fixture', true);
+    expect((await request())?.watchingList).toHaveLength(2);
+    expect(fetch).not.toHaveBeenCalled();
+
+    expireRememberedList('Fixture');
+    keepShownList('anilist', 'Fixture', true);
+    await request();
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('hides and shows mature anime again without a read, until one was made', async () => {
+    vi.useFakeTimers();
+    const request = (showMature: boolean) =>
+      load({
+        params: { domain: 'anilist', username: 'Fixture' },
+        data: { deferred: true, username: 'Fixture' },
+        parent: async () => ({ preferences: { ...DEFAULT_PREFERENCES, showMature }, user: null }),
+        fetch,
+        url: new URL('https://example.com/user/anilist/Fixture'),
+      } as unknown as Parameters<typeof load>[0]);
+    const fetch = vi.fn(async () => Response.json(getRememberedList('Fixture')));
+    vi.advanceTimersByTime(61_000);
+
+    keepShownList('anilist', 'Fixture', false);
+    expect((await request(false))?.watchingList).toEqual([anime]);
+    keepShownList('anilist', 'Fixture', true);
+    expect((await request(true))?.watchingList).toHaveLength(2);
+    expect(fetch).not.toHaveBeenCalled();
+
+    // Once the list without them is read, the one with them is older, so it's read again too
+    keepShownList('anilist', 'Fixture', false);
+    await request(false);
+    vi.advanceTimersByTime(61_000);
+    expect((await request(false))?.watchingList).toHaveLength(1);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    keepShownList('anilist', 'Fixture', true);
+    await request(true);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the owner's other lists with a list kept", () => {
+    const listedIds = { PLANNING: [5], COMPLETED: [6] };
+    rememberList({ ...getRememberedList('Fixture')!, listedIds });
+
+    expect(getFreshList('Fixture')?.listedIds).toEqual(listedIds);
+  });
+
   it('honors Retry-After on HTTP rate limits from the list endpoint', async () => {
     vi.useFakeTimers();
     expireRememberedList('Fixture');
