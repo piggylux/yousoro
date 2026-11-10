@@ -1,11 +1,13 @@
 <script lang="ts">
   import { enhance } from '$app/forms';
+  import { invalidateAll } from '$app/navigation';
   import { page } from '$app/state';
   import { untrack } from 'svelte';
 
   import SignInButton from '#lib/components/SignInButton.svelte';
+  import { keepShownList } from '#lib/list-data.js';
   import { SYNC_ENABLED } from '#lib/sync.js';
-  import { DOMAIN_NAMES, type Domain } from '#lib/types/domain.js';
+  import { DOMAIN_NAMES, isDomain, type Domain } from '#lib/types/domain.js';
   import type {
     CardSize,
     DownloadLanguage,
@@ -60,6 +62,8 @@
    */
   let saving = $state(false);
   let queued = false;
+  // A save went through since saving started, so the page refreshes with it, even if a later fails
+  let savedSome = false;
   /*
    * What the settings show: the saved ones, and the viewer's own changes while they're saved, so
    * the page refreshing with an earlier save doesn't undo a change made since. Once saving is done
@@ -187,20 +191,35 @@
   bind:this={formElement}
   method="POST"
   action="/settings"
-  use:enhance={() => {
+  use:enhance={({ formData }) => {
     saving = true;
     status = 'Saving…';
+    // The list this page shows, if it's a list page, and whether it's to show mature anime
+    const { domain = '', username = '' } = page.params;
+    const shownList =
+      page.route.id === '/user/[domain]/[username]' && isDomain(domain) && username
+        ? { domain, username, showMature: formData.get('showMature') === 'on' }
+        : null;
     return async ({ result, update }) => {
-      // Stay on the current page, which refreshes with the new settings, rather than go to the
-      // settings page the form posts to. A change made meanwhile is saved first, so the page
-      // refreshes once, with the last one
-      if (!queued) await update({ reset: false, navigate: false });
+      /*
+       * Stay on the current page, which refreshes with the new settings, rather than go to the
+       * settings page the form posts to; it keeps its list rather than read it again, unless
+       * mature anime are now to be shown. A change made meanwhile is saved first, so the page
+       * refreshes once, with the last one. A save that failed doesn't show the error page: the
+       * page stays as it is, or refreshes with an earlier change that was saved
+       */
+      if (result.type === 'success') savedSome = true;
+      if (!queued && result.type === 'success') {
+        if (shownList) keepShownList(shownList.domain, shownList.username, shownList.showMature);
+        await update({ reset: false, navigate: false });
+      } else if (!queued && savedSome) await invalidateAll();
       if (queued) {
         queued = false;
         formElement?.requestSubmit();
         return;
       }
       saving = false;
+      savedSome = false;
       status = result.type === 'success' ? 'Saved' : "Couldn't save, please try again";
     };
   }}
