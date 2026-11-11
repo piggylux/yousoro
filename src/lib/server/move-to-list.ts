@@ -5,7 +5,12 @@ import { parseListMove } from '#lib/server/entry-update.js';
 import {
   addDecision,
   copyToLinkedAccount,
+  keptReason,
   moveOnLinkedAccount,
+  removeOnLinkedAccount,
+  removePlanned,
+  replan,
+  replanOnLinkedAccount,
   restoreEntry,
   undoOnLinkedAccount,
 } from '#lib/server/linked-save.js';
@@ -164,5 +169,52 @@ export function undoAddAction() {
         ? await undoOnLinkedAccount(event, domain, ids, set, linkedBefore)
         : null;
       return { ...ids, undone: true, ...(linked && { linked }) };
+    });
+}
+
+// "It's on your Completed list on AniList, so it stays there."
+function staysMessage(domain: Domain, status: string) {
+  const reason = keptReason(domain, status);
+  return `${reason[0].toUpperCase()}${reason.slice(1)}, so it stays there.`;
+}
+
+/**
+ * A form action taking an anime off the signed-in user's plan list, as Remove on the plan page
+ * does, then off the plan list on the linked account. Only an anime that's just planned is taken
+ * off, on either; one no longer on the list counts as removed, so trying again after the linked
+ * account missed it only changes that account. `linkedRemoved` says the linked account was changed,
+ * for undoing. Two requests on each service: one to check, one to take it off
+ */
+export function removeFromPlanAction() {
+  return (event: MoveEvent) =>
+    readMove(event, async (domain, ids) => {
+      const outcome = await removePlanned(event, domain, ids);
+      if (typeof outcome === 'object') {
+        return fail(409, { message: staysMessage(domain, outcome.kept) });
+      }
+      const { linked, linkedRemoved } = await removeOnLinkedAccount(event, domain, ids);
+      return {
+        ...ids,
+        removed: true,
+        ...(linkedRemoved && { linkedRemoved }),
+        ...(linked && { linked }),
+      };
+    });
+}
+
+/**
+ * A form action undoing Remove: back on the plan list, and on the linked account's when Remove took
+ * it off there too (`linkedRemoved`), unless it's on another list now
+ */
+export function undoRemoveAction() {
+  return (event: MoveEvent) =>
+    readMove(event, async (domain, ids, form) => {
+      const outcome = await replan(event, domain, ids);
+      if (outcome !== 'planned') return fail(409, { message: staysMessage(domain, outcome.kept) });
+      const linked =
+        form.get('linkedRemoved') === 'true'
+          ? await replanOnLinkedAccount(event, domain, ids)
+          : null;
+      return { ...ids, replanned: true, ...(linked && { linked }) };
     });
 }

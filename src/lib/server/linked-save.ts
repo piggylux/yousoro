@@ -208,12 +208,117 @@ export async function restoreEntry(
     return 'done';
   }
   if (!holdsOnlyStatus(held)) return 'changed';
+  await deleteHeld(event, domain, ids, held);
+  return 'done';
+}
+
+/** Takes an anime off a service's list: by MyAnimeList id there, by the entry's own id on AniList */
+async function deleteHeld(event: ListEvent, domain: Domain, ids: AnimeIds, held: Held) {
   if (domain === 'myanimelist') {
     await withMalToken(event, (token) => deleteMalEntry(token, ids.malId!));
   } else {
     await deleteAniListEntry(event.locals.session!.token, held.id!);
   }
-  return 'done';
+}
+
+/**
+ * Takes an anime off a service's plan list, as Remove on the plan page does, while it's only planned
+ * there: no episode watched, no score, never watched again. One no longer on the list is off it
+ * already ('absent'). One on another list now, or holding more than its status, stays, and says
+ * where it is (`kept`), as taking it off would lose that
+ */
+export async function removePlanned(
+  event: ListEvent,
+  domain: Domain,
+  ids: AnimeIds
+): Promise<'removed' | 'absent' | { kept: string }> {
+  const held = await readEntry(event, domain, ids);
+  if (!held) return 'absent';
+  if (held.status !== 'PLANNING' || !holdsOnlyStatus(held)) return { kept: held.status };
+  await deleteHeld(event, domain, ids, held);
+  return 'removed';
+}
+
+/**
+ * Puts an anime back on a service's plan list, undoing Remove: added when it isn't on the list,
+ * left as it is when it's planned again already. One on another list now stays there (`kept`)
+ */
+export async function replan(
+  event: ListEvent,
+  domain: Domain,
+  ids: AnimeIds
+): Promise<'planned' | { kept: string }> {
+  const held = await readEntry(event, domain, ids);
+  if (held && held.status !== 'PLANNING') return { kept: held.status };
+  if (!held) await writeStatus(event, domain, ids, 'PLANNING');
+  return 'planned';
+}
+
+/**
+ * Why an anime stays where it is on a service, from where it is there: "it has been watched or
+ * scored on AniList", or "it's on your Completed list on AniList"
+ */
+export function keptReason(domain: Domain, status: string): string {
+  const service = DOMAIN_NAMES[domain];
+  return status === 'PLANNING'
+    ? `it has been watched or scored on ${service}`
+    : `it's on your ${LIST_NAMES[domain][status] ?? status} list on ${service}`;
+}
+
+/**
+ * Does on the linked account what Remove did on the list's own service, under the same rule: one
+ * not only planned there stays, which `linked` says. `linkedRemoved` says it was taken off there,
+ * for undoing. Never throws, as the removal itself has already succeeded
+ */
+export async function removeOnLinkedAccount(
+  event: ListEvent,
+  from: Domain,
+  ids: AnimeIds
+): Promise<{ linked: LinkedFailure | null; linkedRemoved?: true }> {
+  const failed: Failed = (reason, retry = true) => ({
+    message: `Removed from ${DOMAIN_NAMES[from]}, but ${reason}`,
+    retry,
+  });
+  let to: Domain = from === 'anilist' ? 'myanimelist' : 'anilist';
+  try {
+    const target = await linkedTarget(event, from, ids);
+    // Not signed in there, or the anime isn't on that service: there's nothing to take off
+    if (!target?.ids) return { linked: null };
+    to = target.to;
+    const outcome = await removePlanned(event, to, target.ids);
+    if (outcome === 'removed') return { linked: null, linkedRemoved: true };
+    if (outcome === 'absent') return { linked: null };
+    return { linked: failed(`${keptReason(to, outcome.kept)}, so it stays there.`, false) };
+  } catch (err) {
+    return { linked: linkedError(err, event, to, failed, 'remove it from') };
+  }
+}
+
+/**
+ * Undoes Remove on the linked account, when it took the anime off there too: puts it back on the
+ * plan list there, unless it's on another list there now. Never throws
+ */
+export async function replanOnLinkedAccount(
+  event: ListEvent,
+  from: Domain,
+  ids: AnimeIds
+): Promise<LinkedFailure | null> {
+  const failed: Failed = (reason, retry = true) => ({
+    message: `Back on your plan list on ${DOMAIN_NAMES[from]}, but ${reason}`,
+    retry,
+  });
+  let to: Domain = from === 'anilist' ? 'myanimelist' : 'anilist';
+  try {
+    const target = await linkedTarget(event, from, ids);
+    if (!target?.ids) return null;
+    to = target.to;
+    const outcome = await replan(event, to, target.ids);
+    return outcome === 'planned'
+      ? null
+      : failed(`${keptReason(to, outcome.kept)} now, so it stays there.`, false);
+  } catch (err) {
+    return linkedError(err, event, to, failed, 'put it back on the plan list on');
+  }
 }
 
 /**
@@ -262,10 +367,7 @@ export async function moveOnLinkedAccount(
     const decision = addDecision(status, move, expected);
     if (decision === 'already') return { linked: null };
     if (decision === 'blocked') {
-      const list = LIST_NAMES[to][status!] ?? status;
-      return {
-        linked: failed(`it's on your ${list} list on ${service}, so it stays there.`, false),
-      };
+      return { linked: failed(`${keptReason(to, status!)}, so it stays there.`, false) };
     }
     await writeStatus(event, to, target.ids, move);
     return { linked: null, linkedBefore: (status as Before | null) ?? 'NONE' };

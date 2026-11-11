@@ -2,6 +2,8 @@ import type { Cookies } from '@sveltejs/kit';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  deleteEntry,
+  getListEntry,
   getMediaByMalIds,
   getPlanningEntries,
   saveEntry,
@@ -9,7 +11,10 @@ import {
 } from '#lib/server/anilist-client.js';
 import {
   copyEntry,
+  deleteEntry as deleteMalEntry,
+  getListEntry as getMalEntry,
   getPlanToWatchEntries,
+  MalRateLimitError,
   moveToList,
   type MalEntry,
 } from '#lib/server/myanimelist-client.js';
@@ -30,12 +35,16 @@ vi.mock('#lib/server/anilist-client.js', async (importOriginal) => ({
   getPlanningEntries: vi.fn(),
   getMediaByMalIds: vi.fn(),
   saveEntry: vi.fn(),
+  getListEntry: vi.fn(),
+  deleteEntry: vi.fn(),
 }));
 vi.mock('#lib/server/myanimelist-client.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('#lib/server/myanimelist-client.js')>()),
   getPlanToWatchEntries: vi.fn(),
   moveToList: vi.fn(),
   copyEntry: vi.fn(),
+  getListEntry: vi.fn(),
+  deleteEntry: vi.fn(),
 }));
 vi.mock('#lib/server/myanimelist-auth.js', () => ({
   MAL_ENABLED: true,
@@ -145,6 +154,8 @@ beforeEach(() => {
   vi.mocked(saveEntry).mockResolvedValue(started);
   vi.mocked(moveToList).mockResolvedValue(started);
   vi.mocked(copyEntry).mockResolvedValue();
+  vi.mocked(getListEntry).mockResolvedValue(null);
+  vi.mocked(getMalEntry).mockResolvedValue(null);
   vi.mocked(getPlanningEntries).mockResolvedValue({
     userId: 12,
     userName: 'Fixture',
@@ -391,5 +402,205 @@ describe('startWatching', () => {
     });
     expect(saveEntry).not.toHaveBeenCalled();
     expect(moveToList).not.toHaveBeenCalled();
+  });
+});
+
+describe('removeFromPlan', () => {
+  const remove = (request: ReturnType<typeof event>) =>
+    actions.removeFromPlan!(
+      request as unknown as Parameters<NonNullable<typeof actions.removeFromPlan>>[0]
+    );
+  const onlyPlanned = { id: 77, status: 'PLANNING', progress: 0, score: 0, repeat: 0 };
+
+  it('takes a planned anime off an AniList plan list, after checking it is only planned', async () => {
+    vi.mocked(getListEntry).mockResolvedValue(onlyPlanned);
+
+    const result = await remove(event('anilist', { session: aniList }, { mediaId: '1' }));
+
+    expect(result).toEqual({ mediaId: 1, removed: true });
+    expect(getListEntry).toHaveBeenCalledWith('anilist.token.jwt', 1);
+    // AniList deletes by the entry's own id
+    expect(deleteEntry).toHaveBeenCalledWith('anilist.token.jwt', 77);
+  });
+
+  it('keeps an anime watched or scored, or on another list since, and says why', async () => {
+    vi.mocked(getListEntry).mockResolvedValue({ ...onlyPlanned, progress: 3 });
+    expect(await remove(event('anilist', { session: aniList }, { mediaId: '1' }))).toMatchObject({
+      status: 409,
+      data: { message: 'It has been watched or scored on AniList, so it stays there.' },
+    });
+
+    vi.mocked(getListEntry).mockResolvedValue({ ...onlyPlanned, status: 'COMPLETED' });
+    expect(await remove(event('anilist', { session: aniList }, { mediaId: '1' }))).toMatchObject({
+      status: 409,
+      data: { message: "It's on your Completed list on AniList, so it stays there." },
+    });
+    expect(deleteEntry).not.toHaveBeenCalled();
+  });
+
+  it('counts an anime no longer on the list as removed, so trying again goes on', async () => {
+    expect(await remove(event('anilist', { session: aniList }, { mediaId: '1' }))).toEqual({
+      mediaId: 1,
+      removed: true,
+    });
+    expect(deleteEntry).not.toHaveBeenCalled();
+  });
+
+  it('takes it off a linked MyAnimeList plan list too, unless it holds more there', async () => {
+    vi.mocked(getListEntry).mockResolvedValue(onlyPlanned);
+    const planned = { status: 'PLANNING', progress: 0, score: 0, rewatched: 0 };
+    vi.mocked(getMalEntry).mockResolvedValue(planned);
+    const linked = event(
+      'anilist',
+      { session: aniList, malSession: mal },
+      { mediaId: '1', malId: '1001' }
+    );
+
+    expect(await remove(linked)).toEqual({
+      mediaId: 1,
+      malId: 1001,
+      removed: true,
+      linkedRemoved: true,
+    });
+    expect(deleteMalEntry).toHaveBeenCalledWith('mal-token', 1001);
+
+    vi.mocked(deleteMalEntry).mockClear();
+    vi.mocked(getMalEntry).mockResolvedValue({ ...planned, status: 'COMPLETED' });
+    expect(
+      await remove(
+        event('anilist', { session: aniList, malSession: mal }, { mediaId: '1', malId: '1001' })
+      )
+    ).toEqual({
+      mediaId: 1,
+      malId: 1001,
+      removed: true,
+      linked: {
+        message:
+          "Removed from AniList, but it's on your Completed list on MyAnimeList, so it stays there.",
+        retry: false,
+      },
+    });
+    expect(deleteMalEntry).not.toHaveBeenCalled();
+  });
+
+  it('says when the linked account was busy, and trying again only changes that one', async () => {
+    vi.mocked(getListEntry).mockResolvedValue(onlyPlanned);
+    vi.mocked(getMalEntry).mockRejectedValue(new MalRateLimitError(30));
+    const linked = () =>
+      event('anilist', { session: aniList, malSession: mal }, { mediaId: '1', malId: '1001' });
+
+    expect(await remove(linked())).toEqual({
+      mediaId: 1,
+      malId: 1001,
+      removed: true,
+      linked: { message: 'Removed from AniList, but MyAnimeList is busy right now.', retry: true },
+    });
+    expect(deleteMalEntry).not.toHaveBeenCalled();
+
+    // Off AniList now, so trying again takes it off MyAnimeList alone, which Undo then puts back
+    vi.mocked(deleteEntry).mockClear();
+    vi.mocked(getListEntry).mockResolvedValue(null);
+    vi.mocked(getMalEntry).mockResolvedValue({
+      status: 'PLANNING',
+      progress: 0,
+      score: 0,
+      rewatched: 0,
+    });
+    expect(await remove(linked())).toEqual({
+      mediaId: 1,
+      malId: 1001,
+      removed: true,
+      linkedRemoved: true,
+    });
+    expect(deleteEntry).not.toHaveBeenCalled();
+    expect(deleteMalEntry).toHaveBeenCalledWith('mal-token', 1001);
+  });
+
+  it('takes it off a MyAnimeList plan list by its MyAnimeList id', async () => {
+    vi.mocked(getMalEntry).mockResolvedValue({
+      status: 'PLANNING',
+      progress: 0,
+      score: 0,
+      rewatched: 0,
+    });
+
+    const result = await remove(event('myanimelist', { malSession: mal }, { malId: '1001' }));
+
+    expect(result).toEqual({ malId: 1001, removed: true });
+    expect(deleteMalEntry).toHaveBeenCalledWith('mal-token', 1001);
+    expect(deleteEntry).not.toHaveBeenCalled();
+  });
+});
+
+describe('undoRemove', () => {
+  const undo = (request: ReturnType<typeof event>) =>
+    actions.undoRemove!(
+      request as unknown as Parameters<NonNullable<typeof actions.undoRemove>>[0]
+    );
+
+  it('puts it back on the plan list, and on the linked one only when it was taken off there', async () => {
+    const result = await undo(
+      event(
+        'anilist',
+        { session: aniList, malSession: mal },
+        { mediaId: '1', malId: '1001', linkedRemoved: 'true' }
+      )
+    );
+
+    expect(result).toEqual({ mediaId: 1, malId: 1001, replanned: true });
+    expect(saveEntry).toHaveBeenCalledWith('anilist.token.jwt', 1, { status: 'PLANNING' });
+    expect(moveToList).toHaveBeenCalledWith('mal-token', 1001, 'PLANNING');
+
+    vi.mocked(moveToList).mockClear();
+    await undo(
+      event('anilist', { session: aniList, malSession: mal }, { mediaId: '1', malId: '1001' })
+    );
+    expect(moveToList).not.toHaveBeenCalled();
+  });
+
+  it('says when the linked account has it on another list, so it stays there', async () => {
+    vi.mocked(getMalEntry).mockResolvedValue({
+      status: 'COMPLETED',
+      progress: 12,
+      score: 8,
+      rewatched: 0,
+    });
+
+    expect(
+      await undo(
+        event(
+          'anilist',
+          { session: aniList, malSession: mal },
+          { mediaId: '1', malId: '1001', linkedRemoved: 'true' }
+        )
+      )
+    ).toEqual({
+      mediaId: 1,
+      malId: 1001,
+      replanned: true,
+      linked: {
+        message:
+          "Back on your plan list on AniList, but it's on your Completed list on MyAnimeList now, so it stays there.",
+        retry: false,
+      },
+    });
+    expect(saveEntry).toHaveBeenCalledWith('anilist.token.jwt', 1, { status: 'PLANNING' });
+    expect(moveToList).not.toHaveBeenCalled();
+  });
+
+  it('leaves an anime that went on another list meanwhile where it is', async () => {
+    vi.mocked(getListEntry).mockResolvedValue({
+      id: 77,
+      status: 'CURRENT',
+      progress: 1,
+      score: 0,
+      repeat: 0,
+    });
+
+    expect(await undo(event('anilist', { session: aniList }, { mediaId: '1' }))).toMatchObject({
+      status: 409,
+      data: { message: "It's on your Watching list on AniList, so it stays there." },
+    });
+    expect(saveEntry).not.toHaveBeenCalled();
   });
 });
