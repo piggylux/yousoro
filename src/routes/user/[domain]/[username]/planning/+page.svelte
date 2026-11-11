@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { enhance, type SubmitFunction } from '$app/forms';
+  import { enhance, type ActionResult, type SubmitFunction } from '$app/forms';
   import { tick } from 'svelte';
   import { prefersReducedMotion } from 'svelte/motion';
 
@@ -13,6 +13,7 @@
     countAnime,
     describePlanned,
     distinctEnglishTitle,
+    forgetPlanned,
     groupSeries,
     markStarted,
     pickAnother,
@@ -118,14 +119,24 @@
   }
 
   /*
-   * What happened to each anime the viewer started watching here. The answer updates its row, and
-   * the plan list isn't read again: the anime leaves it on the next visit. A started anime whose
-   * copy to the linked account failed stays started while that's tried again
+   * What happened to each anime the viewer started watching or removed here, and what's being
+   * saved (`doing`). The answer updates its row, and the plan list isn't read again: the anime leaves
+   * it on the next visit. One whose change on the linked account failed stays started, removed or
+   * put back while that's tried again; `linkedRemoved` says Remove took it off there too, for Undo
    */
   let starts = $state<
     Record<
       string,
-      { saving: boolean; started: boolean; linked?: LinkedFailure; message?: string } | undefined
+      | {
+          saving: boolean;
+          doing?: 'start' | 'remove' | 'undo';
+          started: boolean;
+          removed?: boolean;
+          linkedRemoved?: boolean;
+          linked?: LinkedFailure;
+          message?: string;
+        }
+      | undefined
     >
   >({});
   $effect(() => {
@@ -139,21 +150,26 @@
       data.planned.flatMap((anime) => (anime.id === null ? [] : [[anime.id, anime] as const]))
     )
   );
-  const isStarted = (anime: PlannedAnime) => starts[plannedKey(anime)]?.started ?? false;
+  // Started or removed here, so it's no longer one to plan
+  const isDone = (anime: PlannedAnime) => {
+    const start = starts[plannedKey(anime)];
+    return Boolean(start?.started || start?.removed);
+  };
 
   /*
    * Whether an anime can be started here: it isn't yet, and every earlier part still on the list
-   * has been. Reading `starts` keeps this live, so starting a part offers the next one
+   * has been, or was taken off it. Reading `starts` keeps this live, so starting a part offers the
+   * next one
    */
   const ready = (anime: PlannedAnime) =>
-    !isStarted(anime) &&
+    !isDone(anime) &&
     anime.prequels.every((id) => {
       const prequel = byId.get(id);
-      return !prequel || isStarted(prequel);
+      return !prequel || isDone(prequel);
     });
 
-  // The part of a series to watch next: the first one not started here
-  const nextPart = ({ parts }: PlannedSeries) => parts.find((anime) => !isStarted(anime));
+  // The part of a series to watch next: the first one not started or removed here
+  const nextPart = ({ parts }: PlannedSeries) => parts.find((anime) => !isDone(anime));
 
   /*
    * An anime picked at random to help choose what to start: the next part of one of the series
@@ -217,29 +233,43 @@
     else filters?.focusSearch();
   }
 
+  // What a failed save says in its row: the service's own reason, or that it didn't answer
+  const failedMessage = (result: ActionResult) =>
+    result.type === 'failure'
+      ? String(result.data?.message ?? 'The update failed')
+      : `${service} didn't answer, please try again`;
+
+  // Whether a save came from this form's button: focus is still on it, or was lost as it was disabled
+  const pressedIn = (form: HTMLFormElement) => {
+    const focused = document.activeElement;
+    return !focused || focused === document.body || form.contains(focused);
+  };
+
+  // Focus goes to what's there once the row has changed, without scrolling the page
+  async function focusIn(within: Element | null, selector: string) {
+    await tick();
+    within?.querySelector<HTMLElement>(selector)?.focus({ preventScroll: true });
+  }
+
   function startWatching(anime: PlannedAnime): SubmitFunction {
     const key = plannedKey(anime);
     return ({ formElement }) => {
-      const started = starts[key]?.started ?? false;
-      starts[key] = { saving: true, started, linked: starts[key]?.linked };
+      const before = starts[key];
+      const started = before?.started ?? false;
+      // Only a start's own copy to the linked account is tried again by starting again
+      const linked = started ? before?.linked : undefined;
+      starts[key] = { saving: true, doing: 'start', started, linked };
       const part = formElement.closest('.part');
       return async ({ result }) => {
+        const pressed = pressedIn(formElement);
         if (result.type === 'success') {
-          /*
-           * The button goes once the anime is started, so its focus, or the focus disabling it lost,
-           * goes to the link that takes its place, without scrolling the page
-           */
-          const focused = document.activeElement;
-          const pressed = !focused || focused === document.body || formElement.contains(focused);
+          // The button goes once the anime is started, so focus goes to the link in its place
           starts[key] = {
             saving: false,
             started: true,
             linked: result.data?.linked as LinkedFailure | undefined,
           };
-          if (pressed) {
-            await tick();
-            part?.querySelector<HTMLElement>('.started a')?.focus({ preventScroll: true });
-          }
+          if (pressed) await focusIn(part, '.started a');
           markStarted(data.domain, data.username, anime);
           // The watching list this tab remembers doesn't have it yet, nor do the friends pages
           expireRememberedList(data.username, data.domain);
@@ -259,16 +289,62 @@
             );
           }
         } else {
+          // As it was, so an Undo the linked account missed can still be tried again
+          starts[key] = { ...before, saving: false, started, message: failedMessage(result) };
+          if (pressed) await focusIn(formElement, 'button');
+        }
+      };
+    };
+  }
+
+  /*
+   * Takes an anime off the plan list, as Remove does, or puts it back, as Undo does, in its row.
+   * Focus goes to the button that takes the pressed one's place. A removed anime leaves the plan
+   * lists the tab remembers at once, as a started one does; one put back is read again with them
+   */
+  function removeOrUndo(anime: PlannedAnime, undo: boolean): SubmitFunction {
+    const key = plannedKey(anime);
+    return ({ formElement }) => {
+      const before = starts[key];
+      starts[key] = {
+        ...before,
+        saving: true,
+        doing: undo ? 'undo' : 'remove',
+        started: false,
+        message: undefined,
+      };
+      const part = formElement.closest('.part');
+      return async ({ result }) => {
+        const pressed = pressedIn(formElement);
+        if (result.type !== 'success') {
+          starts[key] = {
+            ...before,
+            saving: false,
+            started: false,
+            message: failedMessage(result),
+          };
+          if (pressed) await focusIn(formElement, 'button');
+          return;
+        }
+        if (undo) {
+          // Back on the plan list; when the linked account missed it, that's said and tried again
+          const linked = result.data?.linked as LinkedFailure | undefined;
+          starts[key] = linked
+            ? { saving: false, started: false, linked, linkedRemoved: true }
+            : { saving: false, started: false };
+          forgetPlanned(data.domain, data.username);
+        } else {
           starts[key] = {
             saving: false,
-            started,
-            linked: starts[key]?.linked,
-            message:
-              result.type === 'failure'
-                ? String(result.data?.message ?? 'The update failed')
-                : `${service} didn't answer, please try again`,
+            started: false,
+            removed: true,
+            // Trying again after the linked account missed it only changes that account
+            linkedRemoved: Boolean(result.data?.linkedRemoved || before?.linkedRemoved),
+            linked: result.data?.linked as LinkedFailure | undefined,
           };
+          markStarted(data.domain, data.username, anime);
         }
+        if (pressed) await focusIn(part, undo ? 'button.remove' : 'button.undo');
       };
     };
   }
@@ -288,17 +364,57 @@
 </script>
 
 {#snippet startForm(anime: PlannedAnime, label: string)}
-  {@const saving = starts[plannedKey(anime)]?.saving ?? false}
-  <form method="POST" action="?/startWatching" use:enhance={startWatching(anime)}>
+  {@const start = starts[plannedKey(anime)]}
+  {@const busy = Boolean(start?.saving && start.doing === 'start')}
+  <form
+    class="start-form"
+    method="POST"
+    action="?/startWatching"
+    use:enhance={startWatching(anime)}
+  >
     {#if anime.id !== null}<input type="hidden" name="mediaId" value={anime.id} />{/if}
     {#if anime.malId !== null}<input type="hidden" name="malId" value={anime.malId} />{/if}
     <button
       class="tw:btn tw:btn-primary start"
-      disabled={saving}
-      aria-busy={saving}
+      disabled={start?.saving}
+      aria-busy={busy}
       aria-label={`${label}: ${anime.title}`}
     >
-      {#if saving}<span class="tw:loading tw:loading-spinner tw:loading-xs" aria-hidden="true"
+      {#if busy}<span class="tw:loading tw:loading-spinner tw:loading-xs" aria-hidden="true"
+        ></span>{:else}{label}{/if}
+    </button>
+  </form>
+{/snippet}
+
+<!--
+  Remove, or Undo once it's removed, and each one's Try again when the linked account missed it:
+  the button's words, then what it's called for screen readers
+-->
+{#snippet removeForm(anime: PlannedAnime, mode: 'remove' | 'retry-remove' | 'undo' | 'retry-undo')}
+  {@const start = starts[plannedKey(anime)]}
+  {@const undo = mode === 'undo' || mode === 'retry-undo'}
+  {@const busy = Boolean(start?.saving && start.doing === (undo ? 'undo' : 'remove'))}
+  {@const [label, name] = {
+    remove: ['Remove', `Remove: ${anime.title}`],
+    'retry-remove': ['Try again', `Try again to remove ${anime.title}`],
+    undo: ['Undo', `Undo removing ${anime.title}`],
+    'retry-undo': ['Try again', `Try again to put back ${anime.title}`],
+  }[mode]}
+  <form
+    method="POST"
+    action={undo ? '?/undoRemove' : '?/removeFromPlan'}
+    use:enhance={removeOrUndo(anime, undo)}
+  >
+    {#if anime.id !== null}<input type="hidden" name="mediaId" value={anime.id} />{/if}
+    {#if anime.malId !== null}<input type="hidden" name="malId" value={anime.malId} />{/if}
+    {#if undo && start?.linkedRemoved}<input type="hidden" name="linkedRemoved" value="true" />{/if}
+    <button
+      class={['tw:btn', mode === 'undo' ? 'undo' : 'tw:btn-ghost remove']}
+      disabled={start?.saving}
+      aria-busy={busy}
+      aria-label={name}
+    >
+      {#if busy}<span class="tw:loading tw:loading-spinner tw:loading-xs" aria-hidden="true"
         ></span>{:else}{label}{/if}
     </button>
   </form>
@@ -368,24 +484,40 @@
         <span class="tw:sr-only">, opens in a new tab</span>
       </span>
     </a>
-    {#if data.canEdit && (start?.started || ready(anime))}
+    {#if data.canEdit}
+      <!-- Start watching, once the earlier parts are, and Remove; or what became of it here -->
       <div class="part-action">
         {#if start?.started}
           <p class="started" role="status">
             <span aria-hidden="true">✓</span> Watching ·
             <a href={listUrl}>See your list</a>
           </p>
+        {:else if start?.removed}
+          <p class="started" role="status">
+            <span aria-hidden="true">✓</span> Removed from your plan list
+          </p>
+          {@render removeForm(anime, 'undo')}
         {:else}
-          {@render startForm(anime, 'Start watching')}
+          {#if ready(anime)}{@render startForm(anime, 'Start watching')}{/if}
+          {@render removeForm(anime, 'remove')}
         {/if}
       </div>
     {/if}
-    {#if data.canEdit && ((start?.started && start.linked) || start?.message)}
+    {#if data.canEdit && (start?.linked || start?.message)}
       <!-- What went wrong, under the whole part, then its Try again button -->
       <div class="part-notes">
-        {#if start?.started && start.linked}
+        {#if start?.linked}
           <p class="tw:text-error" role="alert">{start.linked.message}</p>
-          {#if start.linked.retry}{@render startForm(anime, 'Try again')}{/if}
+          {#if start.linked.retry}
+            {#if start.removed}
+              {@render removeForm(anime, 'retry-remove')}
+            {:else if start.started}
+              {@render startForm(anime, 'Try again')}
+            {:else}
+              <!-- Only Undo leaves the linked account to try again on an anime still planned -->
+              {@render removeForm(anime, 'retry-undo')}
+            {/if}
+          {/if}
         {/if}
         {#if start?.message}
           <p class="tw:text-error" role="alert">{start.message}</p>
@@ -704,6 +836,22 @@
     font-size: 0.75rem;
   }
 
+  /* Start watching, then Remove, at the end of the row; or what became of the anime, then Undo */
+  .part-action {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  /* Quieter than Start watching, and as easy to reach */
+  .remove,
+  .undo {
+    min-height: 44px;
+    font-size: 0.85rem;
+  }
+
   /* As wide for "Try again" as for "Start watching", so the buttons line up down the list */
   .start {
     min-width: 9.75em;
@@ -768,14 +916,19 @@
     font-size: 0.875rem;
   }
 
-  /* On a narrow row the button goes under the anime, across the row */
+  /* On a narrow row the buttons go under the anime, Start watching across the row beside Remove */
   @container plan-row (max-width: 34rem) {
     .part {
       grid-template-columns: minmax(0, 1fr);
     }
 
     .part-action {
-      display: grid;
+      justify-content: flex-start;
+    }
+
+    .start-form,
+    .started {
+      flex: 1;
     }
 
     .start {
