@@ -96,5 +96,9 @@ export function moreProfileLinks({
     links.push({ href: wrappedPath(owner.name, year), label: `${year} in anime` });
     if (ownList) links.push({ href: `${path}/badge`, label: 'Profile badge' });
   }
+  if (ownList) links.push({ href: HISTORY_PATH, label: 'Recent changes' });
   return links;
 }
+
+/** The changes the signed-in user made to their lists in this tab, to revert one */
+export const HISTORY_PATH = '/history';

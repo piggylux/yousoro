@@ -4,6 +4,7 @@
   import { prefersReducedMotion } from 'svelte/motion';
 
   import { matchesSearch, searchIndex, searchWords } from '#lib/anime.js';
+  import { forgetChange, recordListChange, updateChange } from '#lib/change-history.js';
   import CloseButton from '#lib/components/CloseButton.svelte';
   import ListFilters from '#lib/components/ListFilters.svelte';
   import SharedAnimePoster from '#lib/components/SharedAnimePoster.svelte';
@@ -135,6 +136,8 @@
           linkedRemoved?: boolean;
           linked?: LinkedFailure;
           message?: string;
+          /** The start or removal in the history of recent changes, which Undo takes off it */
+          changeId?: string;
         }
       | undefined
     >
@@ -251,6 +254,15 @@
     within?.querySelector<HTMLElement>(selector)?.focus({ preventScroll: true });
   }
 
+  // An anime as the history of recent changes shows it
+  const historyAnime = (anime: PlannedAnime) => ({
+    ...(anime.id !== null && { mediaId: anime.id }),
+    ...(anime.malId !== null && { malId: anime.malId }),
+    title: anime.title,
+    coverUrl: anime.coverUrl,
+    isAdult: anime.isAdult,
+  });
+
   function startWatching(anime: PlannedAnime): SubmitFunction {
     const key = plannedKey(anime);
     return ({ formElement }) => {
@@ -263,11 +275,24 @@
       return async ({ result }) => {
         const pressed = pressedIn(formElement);
         if (result.type === 'success') {
+          const progress = Number(result.data?.progress ?? 0);
+          // Starting again only tries the linked account again: the start is in the history already
+          const changeId = started
+            ? before?.changeId
+            : (recordListChange(data.domain, data, {
+                kind: 'move',
+                anime: historyAnime(anime),
+                before: { status: 'PLANNING' },
+                after: { status: 'CURRENT', progress },
+                // The linked account copied the start, so reverting it puts it back to Planning there
+                linkedBefore: 'PLANNING',
+              }) ?? undefined);
           // The button goes once the anime is started, so focus goes to the link in its place
           starts[key] = {
             saving: false,
             started: true,
             linked: result.data?.linked as LinkedFailure | undefined,
+            changeId,
           };
           if (pressed) await focusIn(part, '.started a');
           markStarted(data.domain, data.username, anime);
@@ -282,7 +307,7 @@
                 isAdult: anime.isAdult,
                 // Plan lists have AniList's smallest covers; the friends pages show bigger posters
                 thumbnailUrl: anime.coverUrl?.replace('/cover/small/', '/cover/medium/') ?? '',
-                currentEpisode: Number(result.data?.progress ?? 0),
+                currentEpisode: progress,
                 rewatching: false,
               },
               'CURRENT'
@@ -329,18 +354,34 @@
         if (undo) {
           // Back on the plan list; when the linked account missed it, that's said and tried again
           const linked = result.data?.linked as LinkedFailure | undefined;
+          if (before?.changeId) forgetChange(before.changeId);
           starts[key] = linked
             ? { saving: false, started: false, linked, linkedRemoved: true }
             : { saving: false, started: false };
           forgetPlanned(data.domain, data.username);
         } else {
+          // Trying again after the linked account missed it only changes that account
+          const linkedRemoved = Boolean(result.data?.linkedRemoved || before?.linkedRemoved);
+          // Removing again only tries the linked account again: the removal is in the history already
+          const changeId = before?.removed
+            ? before.changeId
+            : (recordListChange(data.domain, data, {
+                kind: 'remove',
+                anime: historyAnime(anime),
+                before: { status: 'PLANNING' },
+                after: null,
+                ...(linkedRemoved && { linkedRemoved: true }),
+              }) ?? undefined);
+          if (before?.removed && changeId && linkedRemoved) {
+            updateChange(changeId, { linkedRemoved: true });
+          }
           starts[key] = {
             saving: false,
             started: false,
             removed: true,
-            // Trying again after the linked account missed it only changes that account
-            linkedRemoved: Boolean(result.data?.linkedRemoved || before?.linkedRemoved),
+            linkedRemoved,
             linked: result.data?.linked as LinkedFailure | undefined,
+            changeId,
           };
           markStarted(data.domain, data.username, anime);
         }

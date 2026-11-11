@@ -257,6 +257,42 @@ describe('AniList request protection', () => {
     expect(saved).toMatchObject({ startedAt: '2026-09-01', completedAt: '2026-10' });
   });
 
+  it('clears only the dates it is told to, and sets the rewatch count, for reverting a finish', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      Response.json({
+        data: {
+          SaveMediaListEntry: {
+            progress: 11,
+            score: 0,
+            status: 'REPEATING',
+            startedAt: { year: 2026, month: 9, day: 1 },
+            completedAt: null,
+          },
+        },
+      })
+    );
+
+    await saveEntry('owner-token', 1, {
+      progress: 11,
+      status: 'REPEATING',
+      repeat: 1,
+      startedAt: '2026-09-01',
+      completedAt: null,
+      clear: ['completedAt'],
+    });
+
+    const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string);
+    expect(body.query).toContain('repeat: $repeat');
+    expect(body.variables).toEqual({
+      mediaId: 1,
+      progress: 11,
+      status: 'REPEATING',
+      repeat: 1,
+      startedAt: { year: 2026, month: 9, day: 1 },
+      completedAt: { year: null, month: null, day: null },
+    });
+  });
+
   it.each([
     [{ year: 2026, month: 9, day: 1 }, '2026-09-01'],
     [{ year: 2026, month: 9, day: null }, '2026-09'],
@@ -830,13 +866,24 @@ describe('one entry, for adding from the search and undoing it', () => {
   const body = () => JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string);
 
   it("reads the owner's entry with what it holds, and none for an anime not on the list", async () => {
-    const entry = { id: 900, status: 'PLANNING', progress: 0, score: 0, repeat: 0 };
+    const entry = { id: 900, status: 'CURRENT', progress: 3, score: 0, repeat: 1 };
+    const dates = {
+      startedAt: { year: 2026, month: 9, day: 1 },
+      completedAt: { year: null, month: null, day: null },
+    };
     vi.mocked(fetch)
-      .mockResolvedValueOnce(Response.json({ data: { Media: { mediaListEntry: entry } } }))
+      .mockResolvedValueOnce(
+        Response.json({ data: { Media: { mediaListEntry: { ...entry, ...dates } } } })
+      )
       .mockResolvedValueOnce(Response.json({ data: { Media: { mediaListEntry: null } } }));
 
-    expect(await getListEntry('token', 7)).toEqual(entry);
-    expect(body().query).toContain('mediaListEntry { id status progress score repeat }');
+    // With its dates, so reverting a save that finished it can put them back
+    expect(await getListEntry('token', 7)).toEqual({
+      ...entry,
+      startedAt: '2026-09-01',
+      completedAt: null,
+    });
+    expect(body().query).toMatch(/id status progress score repeat\s+startedAt \{ year month day/);
     expect(await getListStatus('token', 7)).toBeNull();
   });
 

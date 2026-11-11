@@ -23,6 +23,7 @@
     toCss,
     type Rotation,
   } from '#lib/card-rotation.js';
+  import { savedChange, type SavedChange } from '#lib/change-history.js';
   import { clock } from '#lib/clock.js';
   import FriendAvatar from '#lib/components/FriendAvatar.svelte';
   import NyaaResultsDialog from '#lib/components/NyaaResultsDialog.svelte';
@@ -40,7 +41,7 @@
     type ScoreFormat,
   } from '#lib/score.js';
   import type { Anime } from '#lib/types/anime.js';
-  import type { LinkedFailure } from '#lib/types/api.js';
+  import type { BeforeFinish, LinkedFailure } from '#lib/types/api.js';
   import type { FriendWatching } from '#lib/types/friend-watching.js';
   import type { DownloadLanguage, DownloadVersion } from '#lib/types/preferences.js';
 
@@ -75,8 +76,11 @@
     scoreFormat?: ScoreFormat;
     /** Where the card is in the list, counting from 0 */
     position?: number;
-    /** Apply AniList's confirmed response to the visible list. */
-    onConfirmed: (saved: Anime, status: string) => void;
+    /**
+     * Apply AniList's confirmed response to the visible list, with what the save changed, for the
+     * history of recent changes
+     */
+    onConfirmed: (saved: Anime, status: string, change: SavedChange) => void;
     /**
      * Called when a save reached the list's service but not the account linked to it, with the
      * anime as saved; `scored` says the save set its score
@@ -761,6 +765,12 @@
     const progressBefore = anime.currentEpisode;
     const positionBefore = position;
     const scored = formData.has('score') && scoreChanged;
+    // As the save found the entry: a list read that comes in meanwhile may already hold the save
+    const before = {
+      progress: progressBefore,
+      score: anime.userScore ?? 0,
+      status: anime.rewatching ? 'REPEATING' : 'CURRENT',
+    };
 
     return async ({ result, update }) => {
       try {
@@ -790,7 +800,14 @@
               { backlog: episodesToWatch, progress: progressBefore },
               saved.currentEpisode
             );
-          onConfirmed(saved, String(result.data?.status ?? ''));
+          const status = String(result.data?.status ?? '');
+          const after = {
+            progress: saved.currentEpisode,
+            score: saved.userScore ?? 0,
+            status: status || before.status,
+          };
+          const beforeFinish = result.data?.beforeFinish as BeforeFinish | undefined;
+          onConfirmed(saved, status, savedChange(before, after, scored, beforeFinish));
           const linked = result.data?.linked as LinkedFailure | undefined;
           if (linked) onLinkedFailure?.(linked, saved, scored);
         }
@@ -1060,7 +1077,8 @@
                   name="malId"
                   value={anime.malId}
                 />{/if}
-              <!-- Spares MyAnimeList a read when this episode doesn't finish the anime -->
+              <!-- Spares MyAnimeList a read when this episode doesn't finish the anime, and lets
+                AniList read the entry before one that does, so the history can revert it -->
               {#if anime.numberEpisodes}<input
                   type="hidden"
                   name="episodes"

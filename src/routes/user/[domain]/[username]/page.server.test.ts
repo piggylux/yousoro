@@ -2,6 +2,11 @@ import type { ActionFailure, Cookies } from '@sveltejs/kit';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  getListEntry as getAniListEntry,
+  saveEntry as saveAniListEntry,
+} from '#lib/server/anilist-client.js';
+import {
+  copyEntry,
   deleteEntry,
   getListEntry,
   getListStatuses,
@@ -20,8 +25,14 @@ vi.mock('#lib/server/rate-limit.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('#lib/server/rate-limit.js')>()),
   takeClientLimit: vi.fn(async () => ({ allowed: true, retryAfter: 0 })),
 }));
+vi.mock('#lib/server/anilist-client.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('#lib/server/anilist-client.js')>()),
+  saveEntry: vi.fn(),
+  getListEntry: vi.fn(),
+}));
 vi.mock('#lib/server/myanimelist-client.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('#lib/server/myanimelist-client.js')>()),
+  copyEntry: vi.fn(),
   saveEntry: vi.fn(),
   moveToList: vi.fn(),
   getListStatuses: vi.fn(),
@@ -40,13 +51,14 @@ function malSession(expiresAt = Date.now() + 3_600_000): MalSession {
 function event(
   malSignIn: MalSession | null,
   fields: Record<string, string> = {},
-  aniListSignIn: Session | null = null
+  aniListSignIn: Session | null = null,
+  domain = 'myanimelist'
 ) {
   const deleted: string[] = [];
   const form = new FormData();
   for (const [name, value] of Object.entries(fields)) form.set(name, value);
   const request = {
-    params: { domain: 'myanimelist', username: 'Fixture' },
+    params: { domain, username: 'Fixture' },
     locals: { session: aniListSignIn, malSession: malSignIn, preferences: DEFAULT_PREFERENCES },
     cookies: {
       get: () => undefined,
@@ -255,6 +267,8 @@ describe('undoing an add from the search', () => {
     progress,
     score,
     rewatched: 0,
+    startedAt: null,
+    completedAt: null,
   });
   const fields = (list: string, before: string) => ({ mediaId: '7', malId: '1007', list, before });
   const changedSince = {
@@ -303,6 +317,28 @@ describe('undoing an add from the search', () => {
     expect(moveToList).not.toHaveBeenCalled();
   });
 
+  it('leaves one watched since a start, when the history says what the start left', async () => {
+    vi.mocked(getListEntry).mockResolvedValue(entry('CURRENT', 2));
+
+    expect(await undo({ ...fields('CURRENT', 'PLANNING'), progress: '0' })).toMatchObject(
+      changedSince
+    );
+    expect(moveToList).not.toHaveBeenCalled();
+
+    vi.mocked(getListEntry).mockResolvedValue(entry('CURRENT', 0));
+    vi.mocked(moveToList).mockResolvedValue({
+      progress: 0,
+      score: 0,
+      status: 'PLANNING',
+      startedAt: null,
+      completedAt: null,
+    });
+    expect(await undo({ ...fields('CURRENT', 'PLANNING'), progress: '0' })).toMatchObject({
+      undone: true,
+    });
+    expect(moveToList).toHaveBeenCalledWith('mal-token', 1007, 'PLANNING');
+  });
+
   it('turns away anything else to undo', async () => {
     expect(await undo(fields('CURRENT', 'COMPLETED'))).toMatchObject({
       status: 400,
@@ -332,5 +368,231 @@ describe('reading your own MyAnimeList list', () => {
 
     expect(page).toMatchObject({ canEdit: true, username: 'Fixture' });
     expect(MyAnimeListApi).toHaveBeenCalledWith({ token: 'mal-token', owner: user });
+  });
+});
+
+describe('finishing an anime on AniList', () => {
+  const finishing = { mediaId: '7', progress: '12', episodes: '12' };
+  const saved = (status: string) => ({
+    progress: 12,
+    score: 0,
+    status,
+    startedAt: '2026-10-01',
+    completedAt: '2026-11-11',
+  });
+
+  it('reads the entry first, so the history can put back what the finish changed', async () => {
+    vi.mocked(getAniListEntry).mockResolvedValue({
+      id: 900,
+      status: 'REPEATING',
+      progress: 11,
+      score: 0,
+      repeat: 1,
+      startedAt: '2025-01-02',
+      completedAt: '2025-03-04',
+    });
+    vi.mocked(saveAniListEntry).mockResolvedValue(saved('COMPLETED'));
+    const { request } = event(null, finishing, aniListSession, 'anilist');
+
+    expect(await update(request)).toEqual({
+      mediaId: 7,
+      ...saved('COMPLETED'),
+      beforeFinish: {
+        rewatched: 1,
+        startedAt: '2025-01-02',
+        completedAt: '2025-03-04',
+        added: [],
+      },
+    });
+    expect(saveAniListEntry).toHaveBeenCalledWith('anilist.token.jwt', 7, { progress: 12 });
+  });
+
+  it('says which dates the finish set, which the entry had none of', async () => {
+    vi.mocked(getAniListEntry).mockResolvedValue({
+      id: 900,
+      status: 'CURRENT',
+      progress: 11,
+      score: 0,
+      repeat: 0,
+      startedAt: '2026-10-01',
+      completedAt: null,
+    });
+    vi.mocked(saveAniListEntry).mockResolvedValue(saved('COMPLETED'));
+    const { request } = event(null, finishing, aniListSession, 'anilist');
+
+    expect(await update(request)).toMatchObject({
+      beforeFinish: { completedAt: null, added: ['completedAt'] },
+    });
+  });
+
+  it('saves the finish all the same when the read for the history fails', async () => {
+    vi.mocked(getAniListEntry).mockRejectedValue(new Error('AniList is down'));
+    vi.mocked(saveAniListEntry).mockResolvedValue(saved('COMPLETED'));
+    const { request } = event(null, finishing, aniListSession, 'anilist');
+
+    expect(await update(request)).toEqual({ mediaId: 7, ...saved('COMPLETED') });
+  });
+
+  it('saves any other episode in a single request', async () => {
+    vi.mocked(saveAniListEntry).mockResolvedValue(saved('CURRENT'));
+    const { request } = event(
+      null,
+      { mediaId: '7', progress: '11', episodes: '12' },
+      aniListSession,
+      'anilist'
+    );
+
+    expect(await update(request)).not.toHaveProperty('beforeFinish');
+    expect(getAniListEntry).not.toHaveBeenCalled();
+  });
+});
+
+describe('reverting a save from the history', () => {
+  const revert = (fields: Record<string, string>, aniListSignIn: Session | null = null) => {
+    const action = actions.revertEntry!;
+    return action(
+      event(malSession(), fields, aniListSignIn).request as unknown as Parameters<typeof action>[0]
+    );
+  };
+  const held = (progress: number, score = 0, status = 'CURRENT') => ({
+    status,
+    progress,
+    score,
+    rewatched: 0,
+    startedAt: null,
+    completedAt: null,
+  });
+  const episode = {
+    mediaId: '7',
+    malId: '1007',
+    before: JSON.stringify({ progress: 4 }),
+    after: JSON.stringify({ progress: 5 }),
+  };
+
+  it('puts the episode count back while it is what the save left', async () => {
+    vi.mocked(getListEntry).mockResolvedValue(held(5, 8));
+
+    expect(await revert(episode)).toEqual({
+      mediaId: 7,
+      malId: 1007,
+      reverted: true,
+      ...held(4, 8),
+      rewatched: undefined,
+    });
+    expect(copyEntry).toHaveBeenCalledWith(
+      'mal-token',
+      1007,
+      { status: 'CURRENT', progress: 4, score: 8, startedAt: null, completedAt: null },
+      { countRewatch: false }
+    );
+  });
+
+  it('leaves one changed since, saying so', async () => {
+    vi.mocked(getListEntry).mockResolvedValue(held(6));
+
+    expect(await revert(episode)).toMatchObject({
+      status: 409,
+      data: { message: "It's changed since, so it stays as it is." },
+    });
+    expect(copyEntry).not.toHaveBeenCalled();
+  });
+
+  it('puts a score back, in MyAnimeList’s scores whatever the form says', async () => {
+    vi.mocked(getListEntry).mockResolvedValue(held(12, 9, 'COMPLETED'));
+
+    await revert({
+      malId: '1007',
+      scoreFormat: 'POINT_100',
+      before: JSON.stringify({ score: 0 }),
+      after: JSON.stringify({ score: 9 }),
+    });
+
+    expect(copyEntry).toHaveBeenCalledWith(
+      'mal-token',
+      1007,
+      expect.objectContaining({ status: 'COMPLETED', progress: 12, score: 0 }),
+      { countRewatch: false }
+    );
+  });
+
+  it('copies the revert to the linked AniList account, as a save is copied', async () => {
+    vi.mocked(getListEntry).mockResolvedValue(held(5));
+
+    await revert(episode, aniListSession);
+
+    expect(saveAniListEntry).toHaveBeenCalledWith('anilist.token.jwt', 7, {
+      progress: 4,
+      status: 'CURRENT',
+      startedAt: null,
+      completedAt: null,
+      clear: [],
+    });
+  });
+
+  it('reverts a finish on AniList, then on the linked MyAnimeList: its dates and rewatch', async () => {
+    vi.mocked(getAniListEntry).mockResolvedValue({
+      id: 900,
+      status: 'COMPLETED',
+      progress: 12,
+      score: 0,
+      repeat: 2,
+      startedAt: '2025-01-02',
+      completedAt: '2026-11-11',
+    });
+    const restored = {
+      progress: 11,
+      score: 0,
+      status: 'REPEATING',
+      startedAt: '2025-01-02',
+      completedAt: null,
+    };
+    vi.mocked(saveAniListEntry).mockResolvedValue(restored);
+    const beforeFinish = { rewatched: 1, startedAt: '2025-01-02', completedAt: null };
+    const action = actions.revertEntry!;
+    const { request } = event(
+      malSession(),
+      {
+        mediaId: '7',
+        malId: '1007',
+        before: JSON.stringify({ status: 'REPEATING', progress: 11 }),
+        after: JSON.stringify({ status: 'COMPLETED', progress: 12 }),
+        beforeFinish: JSON.stringify({ ...beforeFinish, added: ['completedAt'] }),
+      },
+      aniListSession,
+      'anilist'
+    );
+
+    expect(await action(request as unknown as Parameters<typeof action>[0])).toEqual({
+      mediaId: 7,
+      malId: 1007,
+      reverted: true,
+      ...restored,
+    });
+    expect(saveAniListEntry).toHaveBeenCalledWith('anilist.token.jwt', 7, {
+      status: 'REPEATING',
+      progress: 11,
+      startedAt: '2025-01-02',
+      completedAt: null,
+      repeat: 1,
+      clear: ['completedAt'],
+    });
+    // Only the date the finish set is cleared there, and the rewatch its copy counted taken back
+    expect(copyEntry).toHaveBeenCalledWith(
+      'mal-token',
+      1007,
+      expect.objectContaining({ status: 'REPEATING', progress: 11, clear: ['completedAt'] }),
+      { countRewatch: false, uncountRewatch: true }
+    );
+  });
+
+  it('turns away a form that names nothing to revert, or different fields before and after', async () => {
+    expect(await revert({ malId: '1007', before: '{}', after: '{}' })).toMatchObject({
+      status: 400,
+      data: { message: 'Nothing to revert' },
+    });
+    expect(
+      await revert({ malId: '1007', before: '{"progress":4}', after: '{"score":8}' })
+    ).toMatchObject({ status: 400 });
+    expect(getListEntry).not.toHaveBeenCalled();
   });
 });

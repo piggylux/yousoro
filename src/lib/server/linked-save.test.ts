@@ -15,6 +15,7 @@ import {
   copyToLinkedAccount,
   holdsOnlyStatus,
   moveOnLinkedAccount,
+  revertSave,
   undoOnLinkedAccount,
 } from '#lib/server/linked-save.js';
 import {
@@ -276,7 +277,14 @@ describe('adding an anime found by search', () => {
 
 describe('moveOnLinkedAccount', () => {
   const ids = { mediaId: 7, malId: 52991 };
-  const held = (status: string, progress = 0) => ({ status, progress, score: 0, rewatched: 0 });
+  const held = (status: string, progress = 0) => ({
+    status,
+    progress,
+    score: 0,
+    rewatched: 0,
+    startedAt: null,
+    completedAt: null,
+  });
 
   it('changes nothing without a linked account', async () => {
     const { event } = signedIn(aniList, null);
@@ -312,6 +320,8 @@ describe('moveOnLinkedAccount', () => {
       progress: 12,
       score: 80,
       repeat: 0,
+      startedAt: null,
+      completedAt: null,
     });
 
     expect(await moveOnLinkedAccount(event, 'myanimelist', ids, 'PLANNING')).toEqual({
@@ -360,6 +370,8 @@ describe('undoing an add on the linked account', () => {
     progress,
     score,
     rewatched: 0,
+    startedAt: null,
+    completedAt: null,
   });
 
   it('undoes nothing without a linked account', async () => {
@@ -393,6 +405,8 @@ describe('undoing an add on the linked account', () => {
       progress: 12,
       score: 80,
       repeat: 0,
+      startedAt: null,
+      completedAt: null,
     });
     vi.mocked(getAniListEntry).mockResolvedValueOnce({
       id: 900,
@@ -400,6 +414,8 @@ describe('undoing an add on the linked account', () => {
       progress: 0,
       score: 70,
       repeat: 0,
+      startedAt: null,
+      completedAt: null,
     });
 
     for (let i = 0; i < 2; i++) {
@@ -421,6 +437,8 @@ describe('undoing an add on the linked account', () => {
       progress: 0,
       score: 0,
       repeat: 0,
+      startedAt: null,
+      completedAt: null,
     });
 
     expect(await undoOnLinkedAccount(event, 'myanimelist', ids, 'CURRENT', 'NONE')).toBeNull();
@@ -447,5 +465,169 @@ describe('undoing an add on the linked account', () => {
     [{ progress: 0, score: 0, rewatched: 2 }, false],
   ])('treats %o as holding only its status: %s', (entry, empty) => {
     expect(holdsOnlyStatus(entry)).toBe(empty);
+  });
+});
+
+describe('reverting a save from the history', () => {
+  const ids = { mediaId: 7, malId: 52991 };
+  const noDates = { startedAt: null, completedAt: null };
+  const aniListEntry = (status: string, progress: number, score = 0, repeat = 0) => ({
+    id: 900,
+    status,
+    progress,
+    score,
+    repeat,
+    ...noDates,
+  });
+  const malEntry = (status: string, progress: number, score = 0, rewatched = 0) => ({
+    status,
+    progress,
+    score,
+    rewatched,
+    ...noDates,
+  });
+  const episode = { before: { progress: 4 }, after: { progress: 5 } };
+
+  it('puts back the episode count alone, leaving a score changed elsewhere', async () => {
+    const { event } = signedIn(aniList, null);
+    vi.mocked(getAniListEntry).mockResolvedValue(aniListEntry('CURRENT', 5, 70));
+
+    await revertSave(event, 'anilist', ids, episode);
+
+    expect(saveEntry).toHaveBeenCalledWith('anilist.token.jwt', 7, { progress: 4 });
+  });
+
+  it('leaves one changed since, or no longer on the list', async () => {
+    const { event } = signedIn(aniList, mal);
+    vi.mocked(getAniListEntry).mockResolvedValueOnce(aniListEntry('CURRENT', 6));
+    vi.mocked(getMalEntry).mockResolvedValueOnce(null);
+
+    expect(await revertSave(event, 'anilist', ids, episode)).toBe('changed');
+    expect(await revertSave(event, 'myanimelist', ids, episode)).toBe('changed');
+    expect(saveEntry).not.toHaveBeenCalled();
+    expect(copyEntry).not.toHaveBeenCalled();
+  });
+
+  it('writes nothing for one reverted already, so trying again only reaches the linked account', async () => {
+    const { event } = signedIn(aniList, null);
+    vi.mocked(getAniListEntry).mockResolvedValue(aniListEntry('CURRENT', 4, 70));
+
+    expect(await revertSave(event, 'anilist', ids, episode)).toEqual({
+      status: 'CURRENT',
+      progress: 4,
+      score: 70,
+      ...noDates,
+    });
+    expect(saveEntry).not.toHaveBeenCalled();
+  });
+
+  it('puts back a finished rewatch on AniList: its status, count and dates', async () => {
+    const { event } = signedIn(aniList, null);
+    vi.mocked(getAniListEntry).mockResolvedValue({
+      ...aniListEntry('COMPLETED', 12, 0, 2),
+      completedAt: '2026-11-11',
+    });
+
+    await revertSave(event, 'anilist', ids, {
+      before: { status: 'REPEATING', progress: 11 },
+      after: { status: 'COMPLETED', progress: 12 },
+      // The finish wrote over the first watch's date, and set no start date
+      beforeFinish: { rewatched: 1, startedAt: null, completedAt: '2025-03-04', added: [] },
+    });
+
+    expect(saveEntry).toHaveBeenCalledWith('anilist.token.jwt', 7, {
+      status: 'REPEATING',
+      progress: 11,
+      repeat: 1,
+      startedAt: null,
+      completedAt: '2025-03-04',
+      clear: [],
+    });
+  });
+
+  it('clears only the dates the finish set, never one it left unset', async () => {
+    const { event } = signedIn(aniList, null);
+    vi.mocked(getAniListEntry).mockResolvedValue({
+      ...aniListEntry('COMPLETED', 12),
+      completedAt: '2026-11-11',
+    });
+
+    await revertSave(event, 'anilist', ids, {
+      before: { status: 'CURRENT', progress: 11 },
+      after: { status: 'COMPLETED', progress: 12 },
+      beforeFinish: { rewatched: 0, startedAt: null, completedAt: null, added: ['completedAt'] },
+    });
+
+    expect(saveEntry).toHaveBeenCalledWith(
+      'anilist.token.jwt',
+      7,
+      expect.objectContaining({ clear: ['completedAt'] })
+    );
+  });
+
+  it('puts back a finish on MyAnimeList with its rewatch, which its status alone can’t', async () => {
+    const { event } = signedIn(null, mal);
+    vi.mocked(getMalEntry).mockResolvedValue({
+      ...malEntry('COMPLETED', 12, 8, 2),
+      startedAt: '2025-01-02',
+    });
+
+    expect(
+      await revertSave(event, 'myanimelist', ids, {
+        before: { status: 'REPEATING', progress: 11 },
+        after: { status: 'COMPLETED', progress: 12 },
+        beforeFinish: {
+          rewatched: 1,
+          startedAt: '2025-01-02',
+          completedAt: null,
+          added: ['completedAt'],
+        },
+      })
+    ).toEqual({
+      status: 'REPEATING',
+      progress: 11,
+      score: 8,
+      startedAt: '2025-01-02',
+      completedAt: null,
+    });
+    expect(copyEntry).toHaveBeenCalledWith(
+      'mal-token',
+      52991,
+      {
+        status: 'REPEATING',
+        progress: 11,
+        score: 8,
+        startedAt: '2025-01-02',
+        completedAt: null,
+        rewatched: 1,
+        clear: ['completedAt'],
+      },
+      { countRewatch: false }
+    );
+  });
+
+  it('copies a reverted finish to the linked account, clearing its dates and taking back its rewatch', async () => {
+    const { event } = signedIn(aniList, mal);
+
+    expect(
+      await copyToLinkedAccount(event, 'anilist', progress, saved(11, 0, 'REPEATING'), {
+        clear: ['completedAt'],
+        uncountRewatch: true,
+      })
+    ).toBeNull();
+    expect(copyEntry).toHaveBeenCalledWith(
+      'mal-token',
+      52991,
+      expect.objectContaining({ progress: 11, status: 'REPEATING', clear: ['completedAt'] }),
+      { countRewatch: false, uncountRewatch: true }
+    );
+
+    vi.mocked(copyEntry).mockRejectedValueOnce(new Error('unexpected'));
+    expect(
+      await copyToLinkedAccount(event, 'anilist', progress, saved(11, 0, 'REPEATING'), {
+        clear: [],
+        uncountRewatch: false,
+      })
+    ).toMatchObject({ message: "Reverted on AniList, but MyAnimeList didn't take the update." });
   });
 });

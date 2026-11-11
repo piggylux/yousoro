@@ -7,7 +7,12 @@
   import SettingsDrawer from '#lib/components/SettingsDrawer.svelte';
   import SignInButton from '#lib/components/SignInButton.svelte';
   import { malSignInPath } from '#lib/myanimelist-auth.js';
-  import { accountMenuLinks, headerList, signedInAccounts } from '#lib/profile-links.js';
+  import {
+    accountMenuLinks,
+    headerList,
+    HISTORY_PATH,
+    signedInAccounts,
+  } from '#lib/profile-links.js';
   import { SYNC_ENABLED } from '#lib/sync.js';
   import { DOMAIN_NAMES, isDomain, listPath as pathOfList } from '#lib/types/domain.js';
   import type { Preferences } from '#lib/types/preferences.js';
@@ -244,6 +249,7 @@
                 <li><a href={link.href}>{link.label}</a></li>
               {/each}
             {/each}
+            <li class="history"><a href={HISTORY_PATH}>Recent changes</a></li>
             {#if SYNC_ENABLED && accounts.length > 1}
               <li class="sync"><a href="/sync">Sync lists</a></li>
             {/if}
@@ -408,25 +414,19 @@
   }
   /*
    * The menu's items come from the shared menu; its account headings and sign-out are the header's.
-   * A line goes above each group after the first: another account, then syncing and signing out
+   * A line goes above each group after the first: another account, then the recent changes, syncing
+   * and signing out
    */
   .account-name {
     padding: 10px 12px;
   }
   li + .account-name,
-  .sync,
-  .sign-out {
+  .history {
     margin-top: 4px;
     border-top: 1px solid var(--border-subtle);
   }
-  .sync,
-  .sign-out {
+  .history {
     padding-top: 4px;
-  }
-  .sync + .sign-out {
-    margin-top: 0;
-    padding-top: 0;
-    border-top: 0;
   }
   .account-name span {
     display: block;

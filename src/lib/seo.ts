@@ -72,6 +72,7 @@ export function getPageSeo(url: SeoUrl, status = 200, resolvedUsername?: string)
     title = HOME_TITLE;
     canonical = `${SITE_ORIGIN}/home`;
   } else if (path === '/settings') title = `Settings | ${SITE_NAME}`;
+  else if (path === '/history') title = `Recent Changes | ${SITE_NAME}`;
   else if (path === '/sync') title = `Sync Your Lists | ${SITE_NAME}`;
   else if (path.startsWith('/auth/')) title = `Signing in | ${SITE_NAME}`;
   else if (group) {

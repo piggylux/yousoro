@@ -82,17 +82,23 @@ describe('more profile links', () => {
     expect(labels({ ...base, calendarView: true, header })[0]).toBe('Anime list');
   });
 
-  it('offers the profile badge on your own list', () => {
+  it('offers the profile badge and the recent changes on your own list', () => {
     expect(labels({ ...base, ownList: true, header: sylux })).toEqual([
       '2026 in anime',
       'Profile badge',
+      'Recent changes',
     ]);
+    expect(moreProfileLinks({ ...base, ownList: true, header: sylux }).at(-1)).toEqual({
+      href: '/history',
+      label: 'Recent changes',
+    });
   });
 
   it('keeps AniList-only pages off MyAnimeList lists', () => {
     const owner = { domain: 'myanimelist', name: 'Xinil' } as const;
     expect(labels({ ...base, owner, header: owner })).toEqual([]);
     expect(labels({ ...base, owner, header: sylux })).toEqual(['Calendar', 'Planning']);
+    expect(labels({ ...base, owner, ownList: true, header: owner })).toEqual(['Recent changes']);
   });
 });
 

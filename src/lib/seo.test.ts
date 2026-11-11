@@ -134,8 +134,15 @@ describe('search metadata', () => {
     );
   });
 
+  it('titles the recent changes, which are only ever the viewer’s own', () => {
+    const seo = getPageSeo(new URL(`${SITE_ORIGIN}/history`));
+    expect(seo.title).toBe('Recent Changes | Yousoro');
+    expect(seo.noindex).toBe(true);
+  });
+
   it.each([
     '/settings',
+    '/history',
     '/auth/anilist/callback',
     '/api/nyaa',
     '/user/anilist/fixture/friends',

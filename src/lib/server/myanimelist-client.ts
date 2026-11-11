@@ -7,7 +7,15 @@ import {
   takeMalRequest,
   type RequestPriority,
 } from '#lib/server/rate-limit.js';
-import { OTHER_LISTS, type ListedIds, type ListMove, type OtherList } from '#lib/types/api.js';
+import {
+  addedDates,
+  OTHER_LISTS,
+  type BeforeFinish,
+  type EntryDate,
+  type ListedIds,
+  type ListMove,
+  type OtherList,
+} from '#lib/types/api.js';
 import type { SessionUser } from '#lib/types/session-user.js';
 
 const API_URL = 'https://api.myanimelist.net/v2';
@@ -261,22 +269,40 @@ export async function getListedIds(token: string): Promise<ListedIds> {
   return Object.fromEntries(Object.entries(ids).map(([list, set]) => [list, [...set]]));
 }
 
+/** A list entry's dates, YYYY-MM-DD or less when partly unknown, as AniList's are written */
+type EntryDates = Record<EntryDate, string | null>;
+
+/** MyAnimeList's name for each of an entry's dates */
+const DATE_FIELDS: Record<EntryDate, 'start_date' | 'finish_date'> = {
+  startedAt: 'start_date',
+  completedAt: 'finish_date',
+};
+
 /**
  * The token owner's entry for one anime, in AniList's terms, or null when it's not on their list or
- * MyAnimeList doesn't have it. Asked before undoing an add, which only takes off an empty entry
+ * MyAnimeList doesn't have it. Asked before undoing an add, which only takes off an empty entry,
+ * and before reverting a save
  */
 export async function getListEntry(
   token: string,
   malId: number
-): Promise<{ status: string; progress: number; score: number; rewatched: number } | null> {
+): Promise<
+  ({ status: string; progress: number; score: number; rewatched: number } & EntryDates) | null
+> {
   try {
     const { my_list_status: entry } = await request<{
       my_list_status?: Pick<
         MalListStatusData,
-        'status' | 'is_rewatching' | 'num_episodes_watched' | 'score' | 'num_times_rewatched'
+        | 'status'
+        | 'is_rewatching'
+        | 'num_episodes_watched'
+        | 'score'
+        | 'num_times_rewatched'
+        | 'start_date'
+        | 'finish_date'
       >;
     }>(
-      `${API_URL}/anime/${malId}?fields=my_list_status{status,is_rewatching,num_episodes_watched,score,num_times_rewatched}`,
+      `${API_URL}/anime/${malId}?fields=my_list_status{status,is_rewatching,num_episodes_watched,score,num_times_rewatched,start_date,finish_date}`,
       { token, cacheMs: 0 }
     );
     if (!entry) return null;
@@ -285,6 +311,8 @@ export async function getListEntry(
       progress: entry.num_episodes_watched,
       score: entry.score,
       rewatched: entry.num_times_rewatched ?? 0,
+      startedAt: entry.start_date ?? null,
+      completedAt: entry.finish_date ?? null,
     };
   } catch (err) {
     if (err instanceof MalNotFoundError) return null;
@@ -349,7 +377,11 @@ export function toMalStatus(status: string): { status: MalListStatus; is_rewatch
  * score (from 1 to 10, 0 clearing it) and dates when given. An anime not yet on the list is added. A rewatch
  * AniList just finished counts as one more time watched, as on AniList, which takes a read of the
  * entry first; a sync, which copies whole entries rather than what just happened, leaves the count
- * alone and makes a single request
+ * alone and makes a single request.
+ *
+ * Reverting a save that finished an anime puts back how many times it was watched again
+ * (`rewatched`), and clears the dates it didn't have (`clear`). Reverting a finished rewatch copied
+ * here takes back the time it counted (`uncountRewatch`), which takes a read too
  */
 export async function copyEntry(
   token: string,
@@ -358,10 +390,16 @@ export async function copyEntry(
     progress: number;
     status: string;
     score?: number;
+    rewatched?: number;
     startedAt?: string | null;
     completedAt?: string | null;
+    clear?: EntryDate[];
   },
-  { countRewatch = true, priority }: { countRewatch?: boolean; priority?: RequestPriority } = {}
+  {
+    countRewatch = true,
+    uncountRewatch = false,
+    priority,
+  }: { countRewatch?: boolean; uncountRewatch?: boolean; priority?: RequestPriority } = {}
 ): Promise<void> {
   const { status, is_rewatching } = toMalStatus(entry.status);
   const body = new URLSearchParams({
@@ -369,21 +407,29 @@ export async function copyEntry(
     status,
     is_rewatching: String(is_rewatching),
   });
-  if (countRewatch && entry.status === 'COMPLETED') {
+  const counting = countRewatch && entry.status === 'COMPLETED';
+  const uncounting = uncountRewatch && entry.status === 'REPEATING';
+  if (counting || uncounting) {
     const { my_list_status: current } = await request<{
       my_list_status?: Pick<MalListStatusData, 'is_rewatching' | 'num_times_rewatched'>;
     }>(`${API_URL}/anime/${malId}?fields=my_list_status{is_rewatching,num_times_rewatched}`, {
       token,
       priority,
     });
-    if (current?.is_rewatching) {
-      body.set('num_times_rewatched', String((current.num_times_rewatched ?? 0) + 1));
+    const times = current?.num_times_rewatched ?? 0;
+    if (counting && current?.is_rewatching) body.set('num_times_rewatched', String(times + 1));
+    // Only a rewatch finished here was counted, and it's no longer being watched again
+    if (uncounting && current && !current.is_rewatching && times > 0) {
+      body.set('num_times_rewatched', String(times - 1));
     }
   }
+  if (entry.rewatched !== undefined) body.set('num_times_rewatched', String(entry.rewatched));
   if (entry.score !== undefined) body.set('score', String(entry.score));
-  // A date is only ever set: one MyAnimeList has and the copy doesn't stays
-  if (entry.startedAt) body.set('start_date', entry.startedAt);
-  if (entry.completedAt) body.set('finish_date', entry.completedAt);
+  // A date is only ever set: one MyAnimeList has and the copy doesn't stays, unless it's cleared
+  for (const [field, name] of Object.entries(DATE_FIELDS) as [EntryDate, string][]) {
+    if (entry.clear?.includes(field)) body.set(name, '');
+    else if (entry[field]) body.set(name, entry[field]);
+  }
   await request(`${API_URL}/anime/${malId}/my_list_status`, {
     token,
     method: 'PATCH',
@@ -457,21 +503,25 @@ export async function getListStatuses(
  * finish an anime when its last episode is watched, so this does, as AniList would: a rewatch ends
  * and counts as one more time watched. An anime not yet on the list is added as watching. That takes
  * reading the entry first, which the page's own count of the anime's `episodes` saves when this
- * save can't finish it
+ * save can't finish it. A save that finishes it says what the entry held before
+ * (`beforeFinish`), so reverting it can put that back
  */
 export async function saveEntry(
   token: string,
   malId: number,
   changes: { progress?: number; score?: number },
   { episodes }: { episodes?: number } = {}
-): Promise<{
-  progress: number;
-  score: number;
-  status: string;
-  startedAt: string | null;
-  completedAt: string | null;
-}> {
+): Promise<
+  {
+    progress: number;
+    score: number;
+    status: string;
+    beforeFinish?: BeforeFinish;
+  } & EntryDates
+> {
   const body = new URLSearchParams();
+  // What the entry held before this save finished it, when it does
+  let before: Omit<BeforeFinish, 'added'> | undefined;
   if (changes.progress !== undefined) body.set('num_watched_episodes', String(changes.progress));
   // Only a new episode count can finish the anime, so only then may its details be needed. The card
   // the save comes from is on the list, so with fewer episodes than the anime has, nothing else
@@ -479,9 +529,12 @@ export async function saveEntry(
   if (changes.progress !== undefined && (!episodes || changes.progress >= episodes)) {
     const anime = await request<{
       num_episodes: number;
-      my_list_status?: Pick<MalListStatusData, 'is_rewatching' | 'num_times_rewatched'>;
+      my_list_status?: Pick<
+        MalListStatusData,
+        'status' | 'is_rewatching' | 'num_times_rewatched' | 'start_date' | 'finish_date'
+      >;
     }>(
-      `${API_URL}/anime/${malId}?fields=num_episodes,my_list_status{status,is_rewatching,num_times_rewatched}`,
+      `${API_URL}/anime/${malId}?fields=num_episodes,my_list_status{status,is_rewatching,num_times_rewatched,start_date,finish_date}`,
       { token }
     );
     const current = anime.my_list_status;
@@ -490,6 +543,13 @@ export async function saveEntry(
       if (current?.is_rewatching) {
         body.set('is_rewatching', 'false');
         body.set('num_times_rewatched', String((current.num_times_rewatched ?? 0) + 1));
+      }
+      if (current && toAniListStatus(current) !== 'COMPLETED') {
+        before = {
+          rewatched: current.num_times_rewatched ?? 0,
+          startedAt: current.start_date ?? null,
+          completedAt: current.finish_date ?? null,
+        };
       }
     } else if (!current) {
       body.set('status', 'watching');
@@ -502,11 +562,12 @@ export async function saveEntry(
     method: 'PATCH',
     body,
   });
+  const dates = { startedAt: saved.start_date ?? null, completedAt: saved.finish_date ?? null };
   return {
     progress: saved.num_episodes_watched,
     score: saved.score,
     status: toAniListStatus(saved),
-    startedAt: saved.start_date ?? null,
-    completedAt: saved.finish_date ?? null,
+    ...dates,
+    ...(before && { beforeFinish: { ...before, added: addedDates(before, dates) } }),
   };
 }
