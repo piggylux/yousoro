@@ -744,22 +744,38 @@ export type ListEntry = {
   score: number;
   /** How many times it was watched again */
   repeat: number;
-};
+} & EntryDates;
 
 /**
  * The token owner's entry for one anime, or null when it's not on their list. Asked before adding
- * an anime found by search, which may be on the list already, and before undoing that
+ * an anime found by search, which may be on the list already, before undoing that, and before a
+ * save that finishes an anime, so reverting it can put its dates and rewatch count back
  */
 export async function getListEntry(token: string, mediaId: number): Promise<ListEntry | null> {
-  const data = await query<{ Media: { mediaListEntry: ListEntry | null } | null }>(
+  type Read = Omit<ListEntry, keyof EntryDates> & {
+    startedAt: FuzzyDate | null;
+    completedAt: FuzzyDate | null;
+  };
+  const data = await query<{ Media: { mediaListEntry: Read | null } | null }>(
     `query ($id: Int) {
-      Media(id: $id, type: ANIME) { mediaListEntry { id status progress score repeat } }
+      Media(id: $id, type: ANIME) {
+        mediaListEntry {
+          id status progress score repeat
+          startedAt { ${FUZZY_DATE_FIELDS} } completedAt { ${FUZZY_DATE_FIELDS} }
+        }
+      }
     }`,
     { id: mediaId },
     token,
     { cacheTtlMs: 0 }
   );
-  return data.Media?.mediaListEntry ?? null;
+  const entry = data.Media?.mediaListEntry;
+  if (!entry) return null;
+  return {
+    ...entry,
+    startedAt: fromFuzzyDate(entry.startedAt),
+    completedAt: fromFuzzyDate(entry.completedAt),
+  };
 }
 
 /** The token owner's list status of one anime, in AniList's terms, or null when not on their list */
@@ -1329,11 +1345,16 @@ function toFuzzyDate(date: string | null | undefined): FuzzyDate | undefined {
 /** A list entry's dates, as fromFuzzyDate writes them */
 export type EntryDates = { startedAt: string | null; completedAt: string | null };
 
+/** AniList clears a date sent with no part known */
+const NO_DATE: FuzzyDate = { year: null, month: null, day: null };
+
 /**
  * Updates the token owner's own list entry: the watched episode count, the score (in their own
  * score format, 0 clearing it), or both. What isn't given is left as it is. A save copied from
  * another service also sets the status and dates, and gives the score out of 100 (`scoreRaw`),
- * whatever format the user scores in; an anime not yet on the list is added.
+ * whatever format the user scores in; an anime not yet on the list is added. Reverting a save that
+ * finished an anime also sets how many times it was watched again (`repeat`), and clears the dates
+ * it didn't have (`clear`): a date given as null is left as it is, as a copy does
  */
 export async function saveEntry(
   token: string,
@@ -1343,12 +1364,17 @@ export async function saveEntry(
     score?: number;
     status?: string;
     scoreRaw?: number;
+    repeat?: number;
     startedAt?: string | null;
     completedAt?: string | null;
+    clear?: (keyof EntryDates)[];
   },
   priority?: RequestPriority
 ): Promise<{ progress: number; score: number; status: string } & EntryDates> {
   if (!token) throw new AniListTokenError('An access token is required to update a list');
+  const { clear = [], ...fields } = changes;
+  const date = (name: keyof EntryDates) =>
+    clear.includes(name) ? NO_DATE : toFuzzyDate(fields[name]);
 
   const data = await query<{
     SaveMediaListEntry: {
@@ -1365,6 +1391,7 @@ export async function saveEntry(
       $score: Float
       $status: MediaListStatus
       $scoreRaw: Int
+      $repeat: Int
       $startedAt: FuzzyDateInput
       $completedAt: FuzzyDateInput
     ) {
@@ -1374,6 +1401,7 @@ export async function saveEntry(
         score: $score
         status: $status
         scoreRaw: $scoreRaw
+        repeat: $repeat
         startedAt: $startedAt
         completedAt: $completedAt
       ) { progress score status startedAt { ${FUZZY_DATE_FIELDS} } completedAt { ${FUZZY_DATE_FIELDS} } }
@@ -1381,9 +1409,9 @@ export async function saveEntry(
     // Left out of the JSON when undefined, so AniList keeps the current value
     {
       mediaId,
-      ...changes,
-      startedAt: toFuzzyDate(changes.startedAt),
-      completedAt: toFuzzyDate(changes.completedAt),
+      ...fields,
+      startedAt: date('startedAt'),
+      completedAt: date('completedAt'),
     },
     token,
     { priority }

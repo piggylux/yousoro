@@ -1,14 +1,20 @@
 import { error, fail } from '@sveltejs/kit';
 
-import { saveEntry } from '#lib/server/anilist-client.js';
-import { parseEntryUpdate } from '#lib/server/entry-update.js';
+import { getListEntry, saveEntry } from '#lib/server/anilist-client.js';
+import { parseEntryUpdate, type EntryUpdate } from '#lib/server/entry-update.js';
 import { copyToLinkedAccount } from '#lib/server/linked-save.js';
 import { loadAnimePage } from '#lib/server/list-page.js';
-import { addToListAction, moveToListAction, undoAddAction } from '#lib/server/move-to-list.js';
+import {
+  addToListAction,
+  moveToListAction,
+  revertEntryAction,
+  undoAddAction,
+} from '#lib/server/move-to-list.js';
 import { withMalToken } from '#lib/server/myanimelist-auth.js';
 import { saveEntry as saveMalEntry } from '#lib/server/myanimelist-client.js';
 import { updateOwnList } from '#lib/server/own-list.js';
 import { takeClientLimit } from '#lib/server/rate-limit.js';
+import { addedDates, type BeforeFinish } from '#lib/types/api.js';
 import { isDomain } from '#lib/types/domain.js';
 
 import type { Actions } from './$types';
@@ -19,6 +25,28 @@ export const load: import('./$types').PageServerLoad = async (event) => {
   if (event.isDataRequest) return { deferred: true as const, username: event.params.username };
   return loadAnimePage(event);
 };
+
+/**
+ * Saves to AniList. A save of the anime's last episode reads the entry first, as AniList then
+ * finishes it, and may change its dates and rewatch count too: `beforeFinish` says what they were,
+ * so reverting the save can put them back. Other saves take a single request. That read is only for
+ * the history, so the save goes ahead without it when it fails
+ */
+async function saveToAniList(token: string, { mediaId, changes, episodes }: EntryUpdate) {
+  const finishing =
+    changes.progress !== undefined && episodes !== undefined && changes.progress >= episodes;
+  const held = finishing ? await getListEntry(token, mediaId).catch(() => null) : null;
+  const saved = await saveEntry(token, mediaId, changes);
+  if (!held || held.status === 'COMPLETED' || saved.status !== 'COMPLETED') return saved;
+  const { repeat: rewatched, startedAt, completedAt } = held;
+  const beforeFinish: BeforeFinish = {
+    rewatched,
+    startedAt,
+    completedAt,
+    added: addedDates(held, saved),
+  };
+  return { ...saved, beforeFinish };
+}
 
 export const actions: Actions = {
   /**
@@ -41,7 +69,7 @@ export const actions: Actions = {
     return updateOwnList(event, domain, async () => {
       const saved =
         domain === 'anilist'
-          ? await saveEntry(event.locals.session!.token, mediaId, changes)
+          ? await saveToAniList(event.locals.session!.token, update)
           : await withMalToken(event, (token) =>
               saveMalEntry(token, malId!, changes, { episodes })
             );
@@ -49,6 +77,8 @@ export const actions: Actions = {
       return { mediaId, ...saved, ...(linked && { linked }) };
     });
   },
+  /** Reverts a save of an episode count or score, from the history of recent changes */
+  revertEntry: revertEntryAction(),
   /** Starts a sequel that's out, which the score prompt offers once an anime is finished */
   startWatching: moveToListAction('CURRENT'),
   /** Plans a sequel that isn't out yet, which the score prompt offers too */

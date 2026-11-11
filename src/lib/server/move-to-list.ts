@@ -1,7 +1,7 @@
 import { fail, type RequestEvent } from '@sveltejs/kit';
 
 import { getListStatus, saveEntry } from '#lib/server/anilist-client.js';
-import { parseListMove } from '#lib/server/entry-update.js';
+import { parseEntryRevert, parseListMove } from '#lib/server/entry-update.js';
 import {
   addDecision,
   copyToLinkedAccount,
@@ -12,6 +12,7 @@ import {
   replan,
   replanOnLinkedAccount,
   restoreEntry,
+  revertSave,
   undoOnLinkedAccount,
 } from '#lib/server/linked-save.js';
 import { withMalToken } from '#lib/server/myanimelist-auth.js';
@@ -147,19 +148,25 @@ export function addToListAction() {
 /**
  * A form action undoing an add from the search, sent with the list it went to (`list`) and where
  * the anime was `before`: back to the plan, paused or dropped list it was moved from, or off the
- * list when it was new to it, only while the anime is still as the add left it. The linked
- * account's change is undone the same way when there was one (`linkedBefore`). Two requests on
- * each service: one to check, one to change
+ * list when it was new to it, only while the anime is still as the add left it, and, when the form
+ * says, at the episode count the add left (`progress`). The history undoes a start or a sequel added
+ * from the score prompt this way too. The linked account's change is undone the same way when there
+ * was one (`linkedBefore`). Two requests on each service: one to check, one to change
  */
 export function undoAddAction() {
   return (event: MoveEvent) =>
     readMove(event, async (domain, ids, form) => {
       const set = form.get('list');
       const before = form.get('before');
-      if ((set !== 'CURRENT' && set !== 'PLANNING') || !isBefore(before)) {
+      const progress = form.has('progress') ? Number(form.get('progress')) : undefined;
+      if (
+        (set !== 'CURRENT' && set !== 'PLANNING') ||
+        !isBefore(before) ||
+        (progress !== undefined && !(Number.isInteger(progress) && progress >= 0))
+      ) {
         return fail(400, { message: 'Nothing to undo' });
       }
-      if ((await restoreEntry(event, domain, ids, set, before)) === 'changed') {
+      if ((await restoreEntry(event, domain, ids, set, before, progress)) === 'changed') {
         return fail(409, {
           message: "It's changed since you added it, so it stays as it is. Change it on its card.",
         });
@@ -169,6 +176,37 @@ export function undoAddAction() {
         ? await undoOnLinkedAccount(event, domain, ids, set, linkedBefore)
         : null;
       return { ...ids, undone: true, ...(linked && { linked }) };
+    });
+}
+
+/**
+ * A form action reverting a save of an episode count or score, from the history: the fields it
+ * changed go back to what they held before it, while they still hold what it left, on the list's
+ * service and then on the linked account, as a save is copied there. `parseEntryRevert` says what
+ * the form sends. Two requests on the list's service, one to check and one to change, and the copy
+ */
+export function revertEntryAction() {
+  return (event: MoveEvent) =>
+    readMove(event, async (domain, ids, form) => {
+      const revert = parseEntryRevert(form, domain);
+      if ('message' in revert) return fail(400, { message: revert.message });
+      const restored = await revertSave(event, domain, ids, revert);
+      if (restored === 'changed') {
+        return fail(409, { message: "It's changed since, so it stays as it is." });
+      }
+      const { before, scoreFormat, beforeFinish } = revert;
+      const linked = await copyToLinkedAccount(
+        event,
+        domain,
+        { ...ids, changes: before, ...(scoreFormat && { scoreFormat }) },
+        restored,
+        {
+          clear: beforeFinish?.added ?? [],
+          // Only a rewatch finished on the linked account was counted there
+          uncountRewatch: Boolean(beforeFinish) && before.status === 'REPEATING',
+        }
+      );
+      return { ...ids, reverted: true, ...restored, ...(linked && { linked }) };
     });
 }
 

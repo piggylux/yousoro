@@ -8,8 +8,9 @@ import {
   getListEntry as getAniListEntry,
   getMediaByMalIds,
   saveEntry as saveAniListEntry,
+  type EntryDates,
 } from '#lib/server/anilist-client.js';
-import type { EntryUpdate } from '#lib/server/entry-update.js';
+import type { EntryFields, EntryRevert, EntryUpdate } from '#lib/server/entry-update.js';
 import { withMalToken } from '#lib/server/myanimelist-auth.js';
 import {
   copyEntry,
@@ -25,13 +26,23 @@ import type { Before, LinkedFailure, ListMove } from '#lib/types/api.js';
 import { DOMAIN_NAMES, LIST_NAMES, type Domain } from '#lib/types/domain.js';
 
 /**
+ * The dates a revert clears, those the finish it reverts set, and whether it takes back a rewatch
+ * the copy of that finish counted
+ */
+export type LinkedRevert = { clear: (keyof EntryDates)[]; uncountRewatch: boolean };
+
+/**
  * Copies a save on one service to the user's account on the other, when they're signed in to both:
  * the episode count, status and dates as the save left them, and the score when it changed. A date
  * the save left unset doesn't clear the other's. These are the entry as it now is rather than a
  * change to it, so a copy that failed is made up by the next one. A start from the plan list only
  * copies the status, as does a sequel added to the plan list. A save from a MyAnimeList page that
  * didn't know the anime's AniList id looks it up first. The save itself has already succeeded, so
- * this never throws: a failure only comes back as a message for the user
+ * this never throws: a failure only comes back as a message for the user.
+ *
+ * A reverted save is copied the same way (`revert`). Reverting one that finished the anime also
+ * clears the dates the entry didn't have before, and on MyAnimeList takes back the rewatch the copy
+ * of the finish counted
  */
 export async function copyToLinkedAccount(
   event: { cookies: Cookies; locals: App.Locals },
@@ -43,13 +54,14 @@ export async function copyToLinkedAccount(
     status: string;
     startedAt?: string | null;
     completedAt?: string | null;
-  }
+  },
+  revert?: LinkedRevert
 ): Promise<LinkedFailure | null> {
   const to: Domain = from === 'anilist' ? 'myanimelist' : 'anilist';
   const aniListSession = event.locals.session;
   if (!(to === 'anilist' ? aniListSession : event.locals.malSession)) return null;
   const failed: Failed = (reason, retry = true) => ({
-    message: `Saved on ${DOMAIN_NAMES[from]}, but ${reason}`,
+    message: `${revert ? 'Reverted' : 'Saved'} on ${DOMAIN_NAMES[from]}, but ${reason}`,
     retry,
   });
 
@@ -60,17 +72,23 @@ export async function copyToLinkedAccount(
         changes.score !== undefined && scoreFormat
           ? toMalScore(saved.score, scoreFormat)
           : undefined;
-      await withMalToken<unknown>(event, (token) =>
-        changes.move
-          ? moveToList(token, malId, changes.move)
-          : copyEntry(token, malId, {
-              progress: saved.progress,
-              status: saved.status,
-              score,
-              startedAt: saved.startedAt,
-              completedAt: saved.completedAt,
-            })
-      );
+      const entry = {
+        progress: saved.progress,
+        status: saved.status,
+        score,
+        startedAt: saved.startedAt,
+        completedAt: saved.completedAt,
+      };
+      await withMalToken<unknown>(event, (token) => {
+        if (changes.move) return moveToList(token, malId, changes.move);
+        if (!revert) return copyEntry(token, malId, entry);
+        return copyEntry(
+          token,
+          malId,
+          { ...entry, clear: revert.clear },
+          { countRewatch: false, uncountRewatch: revert.uncountRewatch }
+        );
+      });
     } else {
       const id =
         mediaId ??
@@ -86,6 +104,7 @@ export async function copyToLinkedAccount(
               status: saved.status,
               startedAt: saved.startedAt,
               completedAt: saved.completedAt,
+              ...(revert && { clear: revert.clear }),
               // A MyAnimeList score out of 10 is exact out of 100, in whatever format AniList shows it
               ...(changes.score !== undefined && { scoreRaw: saved.score * 10 }),
             }
@@ -159,7 +178,13 @@ export function holdsOnlyStatus(entry: { progress: number; score: number; rewatc
 }
 
 /** One anime on a list, in AniList's terms, with what undoing compares and deleting takes */
-type Held = { status: string; progress: number; score: number; rewatched: number; id?: number };
+type Held = {
+  status: string;
+  progress: number;
+  score: number;
+  rewatched: number;
+  id?: number;
+} & EntryDates;
 
 /**
  * The user's entry for an anime on a service's list, or null when it's not there: by AniList id on
@@ -190,7 +215,8 @@ async function writeStatus(
 /**
  * Puts an anime back where it was before an add from the search set it on `set`'s list: back on
  * the list it came from, or off the list when it was new to it, then only while it holds nothing
- * but its status. One changed since, moved on or watched, stays as it is: 'changed'. One no longer
+ * but its status. One changed since, moved on or watched, stays as it is: 'changed', as does one
+ * whose episode count is no longer what the add left (`progress`), when that's known. One no longer
  * on the list has nothing to undo
  */
 export async function restoreEntry(
@@ -198,11 +224,13 @@ export async function restoreEntry(
   domain: Domain,
   ids: AnimeIds,
   set: ListMove,
-  before: Before
+  before: Before,
+  progress?: number
 ): Promise<'done' | 'changed'> {
   const held = await readEntry(event, domain, ids);
   if (!held) return 'done';
   if (held.status !== set) return 'changed';
+  if (progress !== undefined && held.progress !== progress) return 'changed';
   if (before !== 'NONE') {
     await writeStatus(event, domain, ids, before);
     return 'done';
@@ -210,6 +238,57 @@ export async function restoreEntry(
   if (!holdsOnlyStatus(held)) return 'changed';
   await deleteHeld(event, domain, ids, held);
   return 'done';
+}
+
+/** Whether an entry holds what a save found or left, in the fields it changed */
+function holds(held: Held, fields: EntryFields) {
+  return (Object.keys(fields) as (keyof EntryFields)[]).every(
+    (name) => held[name] === fields[name]
+  );
+}
+
+/**
+ * Reverts a save of an episode count or score on a service's list, from the history: puts back what
+ * the fields the save changed held `before` it, while they still hold what it left (`after`). Other
+ * fields stay as they are, so a change made elsewhere since is kept. Reverting a save that finished
+ * the anime also puts back how many times it was watched again and its dates. One that changed
+ * since, or is no longer on the list, stays as it is: 'changed'. One reverted already is left as it
+ * is, so trying again only copies it to the linked account. Returns the entry as it now is
+ */
+export async function revertSave(
+  event: ListEvent,
+  domain: Domain,
+  ids: AnimeIds,
+  { before, after, beforeFinish }: EntryRevert
+): Promise<'changed' | ({ progress: number; score: number; status: string } & EntryDates)> {
+  const held = await readEntry(event, domain, ids);
+  if (!held) return 'changed';
+  const { status, progress, score, startedAt, completedAt } = held;
+  if (holds(held, before)) return { status, progress, score, startedAt, completedAt };
+  if (!holds(held, after)) return 'changed';
+
+  // A finish also changed the dates and the rewatch count, which go back with it
+  const dates = beforeFinish
+    ? { startedAt: beforeFinish.startedAt, completedAt: beforeFinish.completedAt }
+    : { startedAt, completedAt };
+  const finish = beforeFinish && { rewatched: beforeFinish.rewatched, clear: beforeFinish.added };
+  if (domain === 'anilist') {
+    return saveAniListEntry(event.locals.session!.token, ids.mediaId!, {
+      ...before,
+      ...(finish && { ...dates, repeat: finish.rewatched, clear: finish.clear }),
+    });
+  }
+  // MyAnimeList's own update can't put a rewatch back, as it only sets the status
+  const restored = {
+    status: before.status ?? status,
+    progress: before.progress ?? progress,
+    score: before.score ?? score,
+    ...dates,
+  };
+  await withMalToken(event, (token) =>
+    copyEntry(token, ids.malId!, { ...restored, ...finish }, { countRewatch: false })
+  );
+  return restored;
 }
 
 /** Takes an anime off a service's list: by MyAnimeList id there, by the entry's own id on AniList */

@@ -410,7 +410,15 @@ describe('removeFromPlan', () => {
     actions.removeFromPlan!(
       request as unknown as Parameters<NonNullable<typeof actions.removeFromPlan>>[0]
     );
-  const onlyPlanned = { id: 77, status: 'PLANNING', progress: 0, score: 0, repeat: 0 };
+  const onlyPlanned = {
+    id: 77,
+    status: 'PLANNING',
+    progress: 0,
+    score: 0,
+    repeat: 0,
+    startedAt: null,
+    completedAt: null,
+  };
 
   it('takes a planned anime off an AniList plan list, after checking it is only planned', async () => {
     vi.mocked(getListEntry).mockResolvedValue(onlyPlanned);
@@ -448,7 +456,14 @@ describe('removeFromPlan', () => {
 
   it('takes it off a linked MyAnimeList plan list too, unless it holds more there', async () => {
     vi.mocked(getListEntry).mockResolvedValue(onlyPlanned);
-    const planned = { status: 'PLANNING', progress: 0, score: 0, rewatched: 0 };
+    const planned = {
+      status: 'PLANNING',
+      progress: 0,
+      score: 0,
+      rewatched: 0,
+      startedAt: null,
+      completedAt: null,
+    };
     vi.mocked(getMalEntry).mockResolvedValue(planned);
     const linked = event(
       'anilist',
@@ -505,6 +520,8 @@ describe('removeFromPlan', () => {
       progress: 0,
       score: 0,
       rewatched: 0,
+      startedAt: null,
+      completedAt: null,
     });
     expect(await remove(linked())).toEqual({
       mediaId: 1,
@@ -522,6 +539,8 @@ describe('removeFromPlan', () => {
       progress: 0,
       score: 0,
       rewatched: 0,
+      startedAt: null,
+      completedAt: null,
     });
 
     const result = await remove(event('myanimelist', { malSession: mal }, { malId: '1001' }));
@@ -564,6 +583,8 @@ describe('undoRemove', () => {
       progress: 12,
       score: 8,
       rewatched: 0,
+      startedAt: null,
+      completedAt: null,
     });
 
     expect(
@@ -595,6 +616,8 @@ describe('undoRemove', () => {
       progress: 1,
       score: 0,
       repeat: 0,
+      startedAt: null,
+      completedAt: null,
     });
 
     expect(await undo(event('anilist', { session: aniList }, { mediaId: '1' }))).toMatchObject({

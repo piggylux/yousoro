@@ -20,6 +20,7 @@
     searchWords,
     sortWatchingList,
   } from '#lib/anime.js';
+  import { recordListChange, type SavedChange } from '#lib/change-history.js';
   import AddAnimeDialog from '#lib/components/AddAnimeDialog.svelte';
   import AnimeCard from '#lib/components/AnimeCard.svelte';
   import AutoReadRetry from '#lib/components/AutoReadRetry.svelte';
@@ -113,11 +114,25 @@
     friendMatches = null;
   });
 
-  function confirmSaved(saved: Anime, status: string) {
+  function confirmSaved(saved: Anime, status: string, change: SavedChange) {
     // A newer save of the anime makes its last failure notice out of date, and its Try again would
     // save the older episode count over it
     if (linkedNote?.animeId === saved.id) linkedNote = null;
     if (data.canEdit && friendsViewer) recordOwnWatchingEntry(friendsViewer, saved, status);
+    if (data.canEdit) {
+      recordListChange(data.domain, page.data, {
+        kind: 'entry',
+        anime: {
+          mediaId: saved.id,
+          ...(saved.malId !== null && { malId: saved.malId }),
+          title: saved.title,
+          coverUrl: saved.thumbnailUrl,
+          isAdult: saved.isAdult,
+        },
+        ...(change.after.score !== undefined && { scoreFormat: data.scoreFormat }),
+        ...change,
+      });
+    }
     data = recordSavedEntry(data, saved, status);
   }
 

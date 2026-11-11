@@ -43,6 +43,31 @@ export function isBefore(value: unknown): value is Before {
   return value === 'NONE' || value === 'PLANNING' || value === 'PAUSED' || value === 'DROPPED';
 }
 
+/** A list entry's dates, by AniList's names for them */
+export type EntryDate = 'startedAt' | 'completedAt';
+
+/**
+ * What an entry held before a save finished the anime, which reverting the save puts back: how many
+ * times it was watched again, and its dates, YYYY-MM-DD or less when partly unknown. `added` are
+ * the dates the finish set that the entry didn't have, which reverting clears, there and on the
+ * linked account the finish was copied to. Any other date was left as it was by the copy, so it
+ * stays
+ */
+export type BeforeFinish = {
+  rewatched: number;
+  startedAt: string | null;
+  completedAt: string | null;
+  added: EntryDate[];
+};
+
+/** The dates a save set that an entry didn't have before it */
+export function addedDates(
+  before: Record<EntryDate, string | null>,
+  after: Record<EntryDate, string | null>
+): EntryDate[] {
+  return (['startedAt', 'completedAt'] as const).filter((date) => !before[date] && after[date]);
+}
+
 /** A save that reached the list's service but not the account linked to it */
 export type LinkedFailure = {
   /** What was saved where, and why the linked account wasn't updated */

@@ -237,6 +237,56 @@ describe('saveEntry', () => {
     });
   });
 
+  it('says what a finished entry held before, so the finish can be reverted', async () => {
+    answer({
+      num_episodes: 12,
+      my_list_status: {
+        status: 'completed',
+        is_rewatching: true,
+        num_times_rewatched: 1,
+        start_date: '2025-01-02',
+        finish_date: '2025-03-04',
+      },
+    });
+
+    expect(await saveEntry('token', 1, { progress: 12 })).toMatchObject({
+      status: 'COMPLETED',
+      beforeFinish: {
+        rewatched: 1,
+        startedAt: '2025-01-02',
+        completedAt: '2025-03-04',
+        added: [],
+      },
+    });
+
+    // An episode that doesn't finish it has nothing to put back
+    answer({ num_episodes: 12, my_list_status: { status: 'watching', is_rewatching: false } });
+    expect(await saveEntry('token', 1, { progress: 11 })).not.toHaveProperty('beforeFinish');
+  });
+
+  it('says which dates a finish set, so reverting clears those alone', async () => {
+    vi.mocked(fetch).mockImplementation(async (_, init) =>
+      init?.method === 'PATCH'
+        ? Response.json({
+            ...entry(1, 'completed').list_status,
+            num_episodes_watched: 12,
+            start_date: '2026-10-01',
+            finish_date: '2026-11-11',
+          })
+        : Response.json({
+            num_episodes: 12,
+            my_list_status: { status: 'watching', is_rewatching: false, start_date: '2026-10-01' },
+          })
+    );
+
+    expect((await saveEntry('token', 1, { progress: 12 })).beforeFinish).toEqual({
+      rewatched: 0,
+      startedAt: '2026-10-01',
+      completedAt: null,
+      added: ['completedAt'],
+    });
+  });
+
   it('saves a score alone without reading the anime first', async () => {
     answer({});
 
@@ -336,6 +386,54 @@ describe('copyEntry', () => {
       is_rewatching: 'false',
       num_times_rewatched: '3',
     });
+  });
+
+  it('puts back a rewatch count and clears the dates a reverted finish set', async () => {
+    await copyEntry(
+      'token',
+      1,
+      {
+        progress: 11,
+        status: 'REPEATING',
+        rewatched: 1,
+        startedAt: '2025-01-02',
+        completedAt: null,
+        clear: ['completedAt'],
+      },
+      { countRewatch: false }
+    );
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(patched()).toEqual({
+      num_watched_episodes: '11',
+      status: 'completed',
+      is_rewatching: 'true',
+      num_times_rewatched: '1',
+      start_date: '2025-01-02',
+      finish_date: '',
+    });
+  });
+
+  it('takes back the rewatch a copied finish counted, only once it is no longer rewatched', async () => {
+    vi.mocked(fetch).mockImplementation(async (_, init) =>
+      init?.method === 'PATCH'
+        ? Response.json({})
+        : Response.json({ my_list_status: { is_rewatching: false, num_times_rewatched: 2 } })
+    );
+    const revert = { countRewatch: false, uncountRewatch: true };
+
+    await copyEntry('token', 1, { progress: 11, status: 'REPEATING' }, revert);
+    expect(patched()).toMatchObject({ is_rewatching: 'true', num_times_rewatched: '1' });
+
+    // Still being watched again there: the copy of the finish didn't reach it, so there's no count
+    vi.mocked(fetch).mockClear();
+    vi.mocked(fetch).mockImplementation(async (_, init) =>
+      init?.method === 'PATCH'
+        ? Response.json({})
+        : Response.json({ my_list_status: { is_rewatching: true, num_times_rewatched: 2 } })
+    );
+    await copyEntry('token', 1, { progress: 11, status: 'REPEATING' }, revert);
+    expect(patched()).not.toHaveProperty('num_times_rewatched');
   });
 });
 
@@ -475,9 +573,38 @@ describe('reading and taking off one entry, for undoing an add', () => {
       progress: 0,
       score: 0,
       rewatched: 0,
+      startedAt: null,
+      completedAt: null,
     });
     expect(await getListEntry('token', 1)).toBeNull();
     expect(await getListEntry('token', 1)).toBeNull();
+  });
+
+  it('reads the dates too, so a revert can put them back', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      Response.json({
+        my_list_status: {
+          status: 'completed',
+          is_rewatching: true,
+          num_episodes_watched: 4,
+          score: 8,
+          num_times_rewatched: 1,
+          start_date: '2025-01-02',
+          finish_date: '2025-03',
+        },
+      })
+    );
+
+    expect(await getListEntry('token', 1)).toEqual({
+      status: 'REPEATING',
+      progress: 4,
+      score: 8,
+      rewatched: 1,
+      startedAt: '2025-01-02',
+      completedAt: '2025-03',
+    });
+    const [url] = vi.mocked(fetch).mock.calls[0];
+    expect(String(url)).toContain('start_date,finish_date}');
   });
 
   it('deletes an entry, which answers with nothing, and is done with one already off', async () => {

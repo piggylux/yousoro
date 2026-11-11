@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { pruneChanges } from '#lib/change-history.js';
   import BackToTop from '#lib/components/BackToTop.svelte';
   import Seo from '#lib/components/Seo.svelte';
   import { setFriendsViewer } from '#lib/friend-watching.js';
@@ -15,6 +16,11 @@
   $effect(() => {
     setFriendsViewer(data.user?.id ?? null);
     setListContext(viewerKey(data.user, data.malUser), data.preferences.showMature);
+    // The history of recent changes is the signed-in accounts' alone: signing out drops its own
+    pruneChanges([
+      ...(data.user ? [{ domain: 'anilist' as const, id: data.user.id }] : []),
+      ...(data.malUser ? [{ domain: 'myanimelist' as const, id: data.malUser.id }] : []),
+    ]);
   });
 
   $effect(() => {

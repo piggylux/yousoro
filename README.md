@@ -18,6 +18,9 @@ shows you're actively watching come first. Once you've watched an episode, mark 
   let Yousoro pick one. Start watching in one click.
 - **Keep both lists in step**: link your AniList and MyAnimeList accounts in the settings, and every
   episode and score you save goes to both.
+- **Put a change back**: Recent changes lists what you've saved in this tab, newest first, with a
+  Revert for each: an episode, a score, a finished anime, a start or a removal. It's reverted on
+  both linked lists, unless it has changed since.
 - **Plan your next watch**: see next-episode countdowns and browse four weeks of airing dates in
   your local time zone.
 - **Keep up with rewatches**: track rewatch progress alongside your current shows.

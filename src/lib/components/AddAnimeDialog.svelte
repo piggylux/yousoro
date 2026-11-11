@@ -1,5 +1,6 @@
 <script lang="ts">
   import { enhance, type SubmitFunction } from '$app/forms';
+  import { page } from '$app/state';
   import { tick, untrack } from 'svelte';
   import type { Attachment } from 'svelte/attachments';
 
@@ -34,6 +35,7 @@
     type FoundAnime,
     type WatchedAnime,
   } from '#lib/anime-search.js';
+  import { forgetChange, recordListChange, updateChange } from '#lib/change-history.js';
   import CloseButton from '#lib/components/CloseButton.svelte';
   import SharedAnimePoster from '#lib/components/SharedAnimePoster.svelte';
   import { closeOnBackdrop } from '#lib/dialog.js';
@@ -422,6 +424,8 @@
     linkedBefore?: Before;
     /** Being undone, which its Undo button shows */
     undoing?: boolean;
+    /** The add in the history of recent changes, which undoing it here takes off there */
+    changeId?: string;
     linked?: LinkedFailure;
     message?: string;
   };
@@ -522,17 +526,37 @@
               linked,
               linkedBefore: linkedBefore ?? previous?.linkedBefore,
             };
+            if (linkedBefore && previous?.changeId)
+              updateChange(previous.changeId, { linkedBefore });
             if (!linked) announcement = `Saved on both lists: ${anime.title}`;
           } else {
             const already = data.already === true;
+            const before = already ? undefined : isBefore(data.before) ? data.before : from;
+            const changeId =
+              already || previous?.added === list
+                ? previous?.changeId
+                : (recordListChange(domain, page.data, {
+                    kind: 'move',
+                    anime: {
+                      mediaId: anime.id,
+                      ...(anime.malId !== null && { malId: anime.malId }),
+                      title: anime.title,
+                      coverUrl: anime.coverUrl,
+                      isAdult: anime.isAdult,
+                    },
+                    before: !before || before === 'NONE' ? null : { status: before },
+                    after: { status: list, progress: Number(data.progress ?? 0) },
+                    ...(linkedBefore && { linkedBefore }),
+                  }) ?? undefined);
             adds[anime.id] = {
               saving: false,
               added: list,
               already,
               moved: moved || (previous?.moved ?? false),
-              before: already ? undefined : isBefore(data.before) ? data.before : from,
+              before,
               linkedBefore,
               linked,
+              changeId,
             };
             announcement = `${addedText(adds[anime.id])}: ${anime.title}`;
             if (!already && previous?.added !== list)
@@ -573,6 +597,7 @@
           const linked = result.data?.linked as LinkedFailure | undefined;
           if (linked) adds[anime.id] = { saving: false, message: linked.message };
           else delete adds[anime.id];
+          if (previous.changeId) forgetChange(previous.changeId);
           announcement = `Undone: ${anime.title}`;
           onUndone?.(anime, previous.added!);
           await tick();

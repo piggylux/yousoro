@@ -1,7 +1,9 @@
 <script lang="ts">
   import { enhance, type SubmitFunction } from '$app/forms';
+  import { page } from '$app/state';
   import { onMount, tick } from 'svelte';
 
+  import { recordListChange } from '#lib/change-history.js';
   import CloseButton from '#lib/components/CloseButton.svelte';
   import ScoreInput from '#lib/components/ScoreInput.svelte';
   import SharedAnimePoster from '#lib/components/SharedAnimePoster.svelte';
@@ -124,8 +126,26 @@
             linked: result.data?.linked as LinkedFailure | undefined,
           };
           const list = announced(sequel) ? 'PLANNING' : 'CURRENT';
+          const progress = Number(result.data?.progress ?? 0);
           announcement = `${addedText(sequel)}: ${sequel.title}`;
-          if (!added) onAdded?.(sequel, list, Number(result.data?.progress ?? 0));
+          if (!added) {
+            onAdded?.(sequel, list, progress);
+            // Only offered when it's not on the list, or only planned there
+            recordListChange(domain, page.data, {
+              kind: 'move',
+              anime: {
+                mediaId: sequel.id,
+                ...(sequel.malId !== null && { malId: sequel.malId }),
+                title: sequel.title,
+                coverUrl: sequel.coverUrl,
+                isAdult: sequel.isAdult,
+              },
+              before: sequel.planned ? { status: 'PLANNING' } : null,
+              after: { status: list, progress },
+              // The linked account copied the move: a planned one goes back to Planning there too
+              ...(sequel.planned && { linkedBefore: 'PLANNING' as const }),
+            });
+          }
           // The button that had focus is gone; closing is what's left to do
           await tick();
           dialog?.querySelector<HTMLElement>('.done')?.focus();
@@ -222,6 +242,21 @@
                 ...anime,
                 userScore: Number(result.data?.score) || null,
               });
+            if (result.type === 'success') {
+              recordListChange(domain, page.data, {
+                kind: 'entry',
+                anime: {
+                  mediaId: anime.id,
+                  ...(anime.malId !== null && { malId: anime.malId }),
+                  title: anime.title,
+                  coverUrl: anime.thumbnailUrl,
+                  isAdult: anime.isAdult,
+                },
+                scoreFormat: format,
+                before: { score: anime.userScore ?? 0 },
+                after: { score: Number(result.data?.score ?? 0) },
+              });
+            }
             await update({ reset: false, refreshAll: result.type !== 'success' });
             await showNext();
             saving = false;

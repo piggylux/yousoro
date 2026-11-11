@@ -1,5 +1,5 @@
 import { isScoreFormat, parseScore, type ScoreFormat } from '#lib/score.js';
-import type { ListMove } from '#lib/types/api.js';
+import type { BeforeFinish, EntryDate, ListMove } from '#lib/types/api.js';
 import { DOMAIN_NAMES, type Domain } from '#lib/types/domain.js';
 
 export type EntryChanges = {
@@ -72,6 +72,99 @@ export function parseEntryUpdate(
     return { message: 'Nothing to update' };
   }
   return update;
+}
+
+/** An entry's fields a save changed, in AniList's terms and the owner's score format */
+export type EntryFields = { status?: string; progress?: number; score?: number };
+
+export type EntryRevert = {
+  /** What the fields the save changed held before it, which reverting puts back */
+  before: EntryFields;
+  /** What the save left in them, which they must still hold, or the entry changed since */
+  after: EntryFields;
+  /** The score format both scores are in, when the save changed the score */
+  scoreFormat?: ScoreFormat;
+  /** What the entry held before the save finished the anime, when it did */
+  beforeFinish?: BeforeFinish;
+};
+
+const STATUSES = new Set(['CURRENT', 'REPEATING', 'COMPLETED', 'PAUSED', 'DROPPED', 'PLANNING']);
+// As fromFuzzyDate writes them, and MyAnimeList too: YYYY-MM-DD, or YYYY-MM or YYYY
+const DATE = /^\d{4}(-\d{2}(-\d{2})?)?$/;
+
+function readJson(value: FormDataEntryValue | null): Record<string, unknown> | null {
+  if (typeof value !== 'string') return null;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function readFields(value: FormDataEntryValue | null, format?: ScoreFormat): EntryFields | null {
+  const raw = readJson(value);
+  if (!raw) return null;
+  const fields: EntryFields = {};
+  for (const [name, field] of Object.entries(raw)) {
+    if (name === 'status' && typeof field === 'string' && STATUSES.has(field)) {
+      fields.status = field;
+    } else if (name === 'progress' && Number.isInteger(field) && (field as number) >= 0) {
+      fields.progress = field as number;
+    } else if (name === 'score' && format && typeof field === 'number') {
+      const score = parseScore(String(field), format);
+      if (score === null) return null;
+      fields.score = score;
+    } else return null;
+  }
+  return fields;
+}
+
+const ENTRY_DATES: readonly unknown[] = ['startedAt', 'completedAt'] satisfies EntryDate[];
+
+function readBeforeFinish(value: FormDataEntryValue | null): BeforeFinish | null {
+  const raw = readJson(value);
+  const date = (field: unknown) =>
+    field === null || (typeof field === 'string' && DATE.test(field));
+  if (!raw || !Number.isInteger(raw.rewatched) || (raw.rewatched as number) < 0) return null;
+  if (!date(raw.startedAt) || !date(raw.completedAt)) return null;
+  const { added } = raw;
+  if (!Array.isArray(added) || !added.every((name) => ENTRY_DATES.includes(name))) return null;
+  return {
+    rewatched: raw.rewatched as number,
+    startedAt: raw.startedAt as string | null,
+    completedAt: raw.completedAt as string | null,
+    added: added as EntryDate[],
+  };
+}
+
+/**
+ * What a form reverting a save asks: the fields the save changed, as they were `before` it and as it
+ * left them (`after`), sent as JSON, with the score format the scores are in, and what the entry held
+ * before the save finished the anime, when it did. Both name the same fields, at least one. Returns a
+ * message for the user when something doesn't fit
+ */
+export function parseEntryRevert(
+  form: FormData,
+  domain: Domain
+): EntryRevert | { message: string } {
+  const format = FIXED_SCORE_FORMATS[domain] ?? form.get('scoreFormat');
+  const scoreFormat = isScoreFormat(format) ? format : undefined;
+  const before = readFields(form.get('before'), scoreFormat);
+  const after = readFields(form.get('after'), scoreFormat);
+  const names = (fields: EntryFields) => Object.keys(fields).sort().join();
+  if (!before || !after || !names(before) || names(before) !== names(after)) {
+    return { message: 'Nothing to revert' };
+  }
+  const revert: EntryRevert = { before, after, ...(scoreFormat && { scoreFormat }) };
+  if (form.has('beforeFinish')) {
+    const beforeFinish = readBeforeFinish(form.get('beforeFinish'));
+    if (!beforeFinish) return { message: 'Nothing to revert' };
+    revert.beforeFinish = beforeFinish;
+  }
+  return revert;
 }
 
 /**

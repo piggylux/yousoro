@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseEntryUpdate } from '#lib/server/entry-update.js';
+import { parseEntryRevert, parseEntryUpdate } from '#lib/server/entry-update.js';
 
 function form(fields: Record<string, string>) {
   const data = new FormData();
@@ -90,5 +90,78 @@ describe('parseEntryUpdate', () => {
         message: "That score doesn't fit your MyAnimeList scoring system",
       });
     });
+  });
+});
+
+describe('parseEntryRevert', () => {
+  const json = (value: unknown) => JSON.stringify(value);
+
+  it('reads the fields a save changed, before and after it', () => {
+    expect(
+      parseEntryRevert(
+        form({
+          before: json({ progress: 4, score: 0 }),
+          after: json({ progress: 5, score: 8.5 }),
+          scoreFormat: 'POINT_10_DECIMAL',
+        }),
+        'anilist'
+      )
+    ).toEqual({
+      before: { progress: 4, score: 0 },
+      after: { progress: 5, score: 8.5 },
+      scoreFormat: 'POINT_10_DECIMAL',
+    });
+  });
+
+  it('reads what a finish changed, so it can be put back', () => {
+    const beforeFinish = {
+      rewatched: 1,
+      startedAt: '2025-01-02',
+      completedAt: null,
+      added: ['completedAt'],
+    };
+
+    expect(
+      parseEntryRevert(
+        form({
+          before: json({ status: 'REPEATING', progress: 11 }),
+          after: json({ status: 'COMPLETED', progress: 12 }),
+          beforeFinish: json(beforeFinish),
+        }),
+        'myanimelist'
+      )
+    ).toMatchObject({ before: { status: 'REPEATING' }, beforeFinish });
+  });
+
+  it.each([
+    ['nothing', {}],
+    ['no fields', { before: '{}', after: '{}' }],
+    ['different fields', { before: json({ progress: 4 }), after: json({ score: 8 }) }],
+    ['a field it never changes', { before: json({ notes: 'a' }), after: json({ notes: 'b' }) }],
+    ['an unknown list', { before: json({ status: 'GONE' }), after: json({ status: 'CURRENT' }) }],
+    ['a score with no format', { before: json({ score: 0 }), after: json({ score: 8 }) }],
+    [
+      'a score that does not fit',
+      { before: json({ score: 0 }), after: json({ score: 8.5 }), scoreFormat: 'POINT_10' },
+    ],
+    ['text', { before: 'four', after: json({ progress: 5 }) }],
+    [
+      'a broken finish',
+      {
+        before: json({ progress: 11 }),
+        after: json({ progress: 12 }),
+        beforeFinish: json({ rewatched: -1, startedAt: null, completedAt: null, added: [] }),
+      },
+    ],
+    [
+      'a finish that would clear something other than a date',
+      {
+        before: json({ progress: 11 }),
+        after: json({ progress: 12 }),
+        beforeFinish: json({ rewatched: 0, startedAt: null, completedAt: null, added: ['score'] }),
+      },
+    ],
+  ])('turns away %s', (_, fields) => {
+    expect(parseEntryRevert(form(fields), 'anilist')).toEqual({ message: 'Nothing to revert' });
   });
 });
