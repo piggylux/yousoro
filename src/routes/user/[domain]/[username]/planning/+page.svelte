@@ -185,6 +185,30 @@
     pickPanel?.querySelector<HTMLElement>('.part-link')?.focus({ preventScroll: true });
   }
 
+  /*
+   * Keeps the pick's row as tall as the tallest pick it showed since it opened, so picking another
+   * doesn't move the list below each time, as titles, English titles and genres take more or fewer
+   * lines. At a new width it starts again from the pick it shows, as they wrap differently
+   */
+  let pickRow = $state<HTMLElement>();
+  let windowWidth = $state(0);
+  let tallestPick = { width: 0, height: 0 };
+  $effect(() => {
+    void pickedAnime;
+    void windowWidth;
+    if (!pickRow) {
+      tallestPick = { width: 0, height: 0 };
+      return;
+    }
+    pickRow.style.minHeight = '';
+    const { offsetWidth: width, offsetHeight: height } = pickRow;
+    tallestPick = {
+      width,
+      height: width === tallestPick.width ? Math.max(tallestPick.height, height) : height,
+    };
+    pickRow.style.minHeight = `${tallestPick.height}px`;
+  });
+
   // Focus goes back to "Pick for me", or to the search when there's nothing left to pick
   async function closePick() {
     picked = null;
@@ -371,6 +395,8 @@
   </div>
 {/snippet}
 
+<svelte:window bind:innerWidth={windowWidth} />
+
 <section class="planning-page">
   <header class="planning-header">
     <div class="heading-copy">
@@ -451,7 +477,10 @@
           </button>
           <CloseButton label="Close the pick" onclick={closePick} />
         </header>
-        {@render part(pickedAnime, true)}
+        <div class="pick-row" bind:this={pickRow}>
+          <!-- Built again for each pick, as its forms are set up once for the anime they're for -->
+          {#key picked}{@render part(pickedAnime, true)}{/key}
+        </div>
       </section>
     {/if}
     <!-- Tells screen readers how many anime match as the viewer narrows the list, which changes silently -->
@@ -619,7 +648,13 @@
     font-size: 0.85rem;
   }
 
+  /* The row fills the height kept for the tallest pick, its anime and button centered in it */
+  .pick-row {
+    display: grid;
+  }
+
   .pick-panel .part {
+    align-content: center;
     border-radius: 0 0 var(--radius-panel) var(--radius-panel);
   }
 
