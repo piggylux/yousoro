@@ -335,12 +335,18 @@
 
   /*
    * After a save, the list re-sorts and the card may move far away, especially in a long list. The
-   * page follows it there, scrolling only if it's not already in view, and it glows for a moment
+   * page follows it there, scrolling only if it's not already in view, and it glows for a moment.
+   * Not when the save caught up on the anime: its card goes down among the caught-up ones, the
+   * celebration says which anime it was, and the page stays on what's left to watch
    */
   let highlightId = $state<number | null>(null);
   let highlightTimer: ReturnType<typeof setTimeout> | undefined;
 
-  async function followCard(animeId: number, positionBefore: number) {
+  async function followCard(
+    animeId: number,
+    positionBefore: number,
+    { saved = false }: { saved?: boolean } = {}
+  ) {
     await tick();
     const index = animeList.findIndex((anime) => anime.id === animeId);
     if (index === -1) {
@@ -350,6 +356,7 @@
       return;
     }
     if (index === positionBefore) return;
+    if (saved && getListSection(animeList[index]) === 'caught-up') return;
 
     // Off for a moment first, so a card saved again before the glow ends glows anew
     clearTimeout(highlightTimer);
@@ -819,7 +826,8 @@
             position={range.start + i}
             onConfirmed={confirmSaved}
             onLinkedFailure={noteLinkedFailure}
-            onSaved={followCard}
+            onSaved={(animeId, positionBefore) =>
+              followCard(animeId, positionBefore, { saved: true })}
             highlighted={highlightId === anime.id}
           />
         </div>
