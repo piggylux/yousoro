@@ -15,8 +15,8 @@ shows you're actively watching come first. Once you've watched an episode, mark 
 - **Pick what's next**: browse your planning list by genre, length or score, with each series in
   the order to watch it, or let Yousoro pick one for you.
 - **Find what to watch this season**: see the current or next season's series ranked for your
-  taste, with new seasons of shows you watched first. Each says why it's there, and you can plan or
-  start it in one click.
+  taste, with new seasons of shows you watched first. Each says why it's there, you can watch its
+  trailer, and you can plan or start it in one click.
 - **Keep both lists in step**: link your AniList and MyAnimeList accounts, and every episode and
   score you save goes to both.
 - **Put a change back**: undo recent changes to your list, like an episode, a score or a finished

@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { FoundState } from '#lib/anime-search.js';
   import AddToListActions from '#lib/components/AddToListActions.svelte';
+  import AnimeTrailer from '#lib/components/AnimeTrailer.svelte';
   import CloseButton from '#lib/components/CloseButton.svelte';
   import SharedAnimePoster from '#lib/components/SharedAnimePoster.svelte';
   import { closeOnBackdrop } from '#lib/dialog.js';
@@ -11,7 +12,8 @@
 
   /*
    * One anime of a season, in full: what it is, where it is on the owner's lists, why it's picked
-   * for them, what it's about, and the one thing to do with it. The season's tiles stay the same
+   * for them, its trailer, what it's about, and the one thing to do with it. Closing it stops the
+   * trailer, as the player goes with the rest of its content. The season's tiles stay the same
    * size whatever they hold, so all of this is here instead
    */
   type Props = {
@@ -136,6 +138,20 @@
               {#each pick.reasons as reason (reason)}<li>{reason}</li>{/each}
             </ul>
           {/if}
+        </section>
+      {/if}
+
+      {#if anime.trailer}
+        <section aria-labelledby={`${heading}-trailer`}>
+          <h3 id={`${heading}-trailer`}>Trailer</h3>
+          <!-- Another anime's details start with its trailer not playing -->
+          {#key anime.id}
+            <AnimeTrailer
+              video={anime.trailer}
+              title={anime.title}
+              blurred={anime.isAdult && blurMature}
+            />
+          {/key}
         </section>
       {/if}
 

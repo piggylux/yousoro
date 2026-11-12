@@ -25,8 +25,17 @@ export default defineConfig({
           'script-src': ['self'],
           // Svelte writes inline styles for transitions and the progress bar widths
           'style-src': ['self', 'unsafe-inline'],
-          // Anime covers and avatars come from AniList's CDN; MyAnimeList avatars from its own
-          'img-src': ['self', 'data:', 'https://s4.anilist.co', 'https://cdn.myanimelist.net'],
+          // Anime covers and avatars come from AniList's CDN; MyAnimeList avatars from its own.
+          // A season anime's trailer shows YouTube's still of it until it's played
+          'img-src': [
+            'self',
+            'data:',
+            'https://s4.anilist.co',
+            'https://cdn.myanimelist.net',
+            'https://i.ytimg.com',
+          ],
+          // Trailers play in YouTube's privacy-enhanced player, framed only once asked to play
+          'frame-src': ['https://www.youtube-nocookie.com'],
           // The browser talks to this site, which calls AniList and MyAnimeList for lists and
           // saves. Searching for an anime to add asks AniList directly, without a token, so each
           // search uses the viewer's own AniList allowance rather than the app's shared one
