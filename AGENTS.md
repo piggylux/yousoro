@@ -3,6 +3,11 @@
 These instructions apply throughout this repository. Keep contributor rules and design conventions
 here; keep `README.md` focused on the product and getting started.
 
+In the README's Features list, describe each feature by what people can do with it, in a sentence
+or two. Leave out how it works: request counts, where data comes from, ranking methods, and
+implementation details. Put those in code comments, commit messages, or the README's technical
+sections.
+
 ## Engineering approach
 
 - Challenge architecture choices when there is a concrete production concern. Explain the tradeoff
