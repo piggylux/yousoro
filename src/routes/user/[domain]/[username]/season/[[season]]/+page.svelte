@@ -328,6 +328,22 @@
     [...(note ? [note] : []), ...reasons].slice(0, 2);
 
   /*
+   * What the picks are ranked by. AniList only takes recommendations once a season airs, so an
+   * announced season goes by themes, studios and genres alone
+   */
+  const picksNote = $derived.by(() => {
+    const verb = (plural: string, singular: string) => (canEdit ? plural : singular);
+    if (ranked?.byScores) {
+      return ranked.byRecommendations
+        ? `New to ${you}. Each is ranked by how ${you} scored the anime its fans recommend, and how ${you} ${verb('score', 'scores')} its themes, studios and genres.`
+        : `New to ${you}, ranked by how ${you} ${verb('score', 'scores')} their themes, studios and genres.`;
+    }
+    return ranked?.byRecommendations
+      ? `New to ${you}. Each is ranked by whether ${you} ${verb('have', 'has')} watched the anime its fans recommend, and by the themes, studios and genres ${you} ${verb('watch', 'watches')} most.`
+      : `New to ${you}, ranked by the themes, studios and genres ${you} ${verb('watch', 'watches')} most.`;
+  });
+
+  /*
    * The anime whose details are open. Closing them returns focus to its tile, as a native dialog
    * does; another season or list closes them
    */
@@ -516,11 +532,7 @@
     {#if ranked.picks.length}
       <section class="season-section" aria-labelledby="picks-heading">
         <h2 id="picks-heading">Picked for {you}</h2>
-        <p class="section-note">
-          {ranked.byScores
-            ? `New to ${you}, ranked by how ${you} ${canEdit ? 'score' : 'scores'} their genres, themes and studios.`
-            : `New to ${you}, ranked by the genres, themes and studios ${you} ${canEdit ? 'watch' : 'watches'} most.`}
-        </p>
+        <p class="section-note">{picksNote}</p>
         <ul class="tile-grid">
           {#each ranked.picks as pick (pick.anime.id)}{@render tile(pick, 'picks')}{/each}
         </ul>

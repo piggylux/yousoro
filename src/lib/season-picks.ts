@@ -1,12 +1,13 @@
-import type { RelatedAnime, SeasonAnime } from '#lib/anime-search.js';
+import type { RecommendedAnime, RelatedAnime, SeasonAnime } from '#lib/anime-search.js';
 import type { Domain } from '#lib/types/domain.js';
 import type { SeasonTaste, TasteTrait, TraitKind } from '#lib/types/season.js';
 
 /**
- * Ranking a season's anime for one person: by how they score anime of the same genres, themes and
- * studios, whether it continues something they've watched, and how popular and well rated it is
- * across AniList, which settles the rest. Worked out in the browser, from the season's lineup and
- * one read of their list
+ * Ranking a season's anime for one person: by whether they've seen and liked the anime AniList
+ * users recommend to its fans, once it airs; by how they score anime of the same themes, studios
+ * and genres; by whether it continues something they've watched; and by how popular and well rated
+ * it is across AniList, which settles the rest. Worked out in the browser, from the season's lineup
+ * and one read of their list
  */
 
 /** An anime of the season, with how well it fits and why it's where it is */
@@ -37,6 +38,11 @@ export type RankedSeason = {
    * genre, theme and studio comes up on their list
    */
   byScores: boolean;
+  /**
+   * Whether recommendations by AniList users moved any of the picks: some are recommended to fans
+   * of anime on their lists. Never before a season airs, as AniList only takes them then
+   */
+  byRecommendations: boolean;
 };
 
 /** How many new anime "Picked for you" shows */
@@ -48,11 +54,18 @@ export const MIN_WATCHED = 10;
 
 // How much each part of the fit counts. Taste counts most; sequels decide what continues and what
 // can wait; popularity and AniList's score settle the rest
-const TASTE_WEIGHT = 2;
+const TASTE_WEIGHT = 1.5;
 const SHRINK = 3;
 const FAMILIARITY = 0.3;
-const PRIOR = 2;
-const TAG_WEIGHT = 0.8;
+// As if every anime also had this much weight of traits they're indifferent to, so one known by a
+// trait or two stays near the middle rather than rising on one strong trait
+const PRIOR = 6;
+// AniList has 18 genres and most anime have three or four, so a genre says less of an anime than a
+// theme it's tagged with or the studio that made it, and counts for half as much
+const GENRE_WEIGHT = 0.5;
+const STUDIO_WEIGHT = 1;
+// A theme counts by how central it is to the anime: fully at AniList's rank of 100
+const TAG_WEIGHT = 1;
 const MIN_TAG_RANK = 50;
 const CONTINUES = 1.5;
 const CONTINUES_LOVED = 0.5;
@@ -61,11 +74,26 @@ const DROPPED = -1;
 const UNSEEN_START = -0.6;
 const POPULARITY_WEIGHT = 0.4;
 const SCORE_WEIGHT = 0.2;
+// The anime AniList users recommend to its fans: how much of that they've seen, and how they rated
+// what they saw, trusted more the more they've seen. Once a season airs, this says more of what
+// they'll watch and like than its themes and genres do
+const RECOMMENDED_SEEN = 0.5;
+const RECOMMENDED_RATING = 0.25;
+const RECOMMENDED_PRIOR = 1;
+// Ratings, in standard deviations of their scores: as far as one counts either way, and what
+// dropping or pausing an anime without scoring it says
+const MAX_RATING = 2.5;
+const DROPPED_RATING = -1.5;
+const PAUSED_RATING = -0.3;
+// Half a point on a 10-point scale: scores that spread less than this would make a point's
+// difference look like the gap between a favourite and a dud
+const MIN_DEVIATION = 5;
 // What makes a trait worth naming as a reason: a clear lift, over enough anime
 const REASON_LIFT = 0.2;
 const REASON_COUNT = 3;
-// Scores this far above their own average, out of 100, count as loved
+// Scores this far above their own average, out of 100, count as loved, and as liked
 const LOVED_ABOVE = 10;
+const LIKED_ABOVE = 5;
 // The share of a season's anime the "most popular" are
 const MOST_POPULAR = 0.1;
 const WELL_RATED = 75;
@@ -102,6 +130,24 @@ export function rankSeason(
   const tasteKnown = scoredEnough || (taste?.watched ?? 0) >= MIN_WATCHED;
   const watched = Math.max(1, taste?.watched ?? 0);
   const mean = taste?.mean100 ?? null;
+  const deviation = Math.max(MIN_DEVIATION, deviationOf(taste?.scores ?? []));
+
+  /**
+   * How much someone liked an anime they've seen, in standard deviations of their scores from
+   * their average, so it means the same whatever their score format. Unscored, only dropping or
+   * pausing it says anything; anime they haven't seen, or only plan to, are null
+   */
+  const ratingOf = (key: number | null) => {
+    const status = key === null ? undefined : lists.get(key);
+    if (status === undefined || status === 'PLANNING') return null;
+    const score = scores.get(key!) ?? 0;
+    if (scoredEnough && score > 0 && mean !== null) {
+      const rating = (score - mean) / deviation;
+      return { status, score, rating: Math.max(-MAX_RATING, Math.min(MAX_RATING, rating)) };
+    }
+    const rating = status === 'DROPPED' ? DROPPED_RATING : status === 'PAUSED' ? PAUSED_RATING : 0;
+    return { status, score, rating };
+  };
 
   /** How much someone likes a trait: its lift, shrunk when few anime have it, and how common it is */
   const affinity = (trait: TasteTrait | undefined) => {
@@ -124,10 +170,47 @@ export function rankSeason(
     lineup.length > 1 ? (below.get(anime.popularity) ?? 0) / (lineup.length - 1) : 1;
 
   const ranked = lineup.map((anime) => {
-    const reasons: { text: string; strength: number }[] = [];
+    // Reasons go by tier, then strength: what it continues, then whose fans it's recommended to,
+    // then the themes, studios and genres they score highly, then how it does across AniList
+    const reasons: { text: string; tier: number; strength: number }[] = [];
     let note: string | null = null;
     let fit = 0;
     let continuing = false;
+
+    // The anime AniList users recommend to its fans: how much of that they've seen, and how they
+    // rated what they saw, the most agreed-with recommendations counting most. The one named is
+    // the one they liked best, the most agreed with among equals. Its own earlier parts, which a
+    // sequel is often recommended with, are left to what it continues, which counts them already
+    const ownParts = new Set([...anime.prequelLinks, ...anime.parentLinks].map(({ id }) => id));
+    let recommendedWeight = 0;
+    let seenWeight = 0;
+    let seenRating = 0;
+    let fanOf: { link: RecommendedAnime; liked: Liked; weight: number } | null = null;
+    for (const link of tasteKnown ? anime.recommendations : []) {
+      if (ownParts.has(link.id)) continue;
+      const weight = Math.log1p(link.rating);
+      recommendedWeight += weight;
+      const seen = ratingOf(keyOf(link));
+      if (!seen) continue;
+      seenWeight += weight;
+      seenRating += weight * seen.rating;
+      const liked = likedOf(seen, mean);
+      if (!liked) continue;
+      const order = LIKING[liked] - (fanOf ? LIKING[fanOf.liked] : -1);
+      if (order > 0 || (order === 0 && weight > fanOf!.weight)) fanOf = { link, liked, weight };
+    }
+    if (recommendedWeight) {
+      fit +=
+        (RECOMMENDED_SEEN * seenWeight) / recommendedWeight +
+        (RECOMMENDED_RATING * seenRating) / (seenWeight + RECOMMENDED_PRIOR);
+    }
+    if (fanOf) {
+      reasons.push({
+        text: recommendedReason(fanOf.link, fanOf.liked, voice),
+        tier: 1,
+        strength: 0,
+      });
+    }
 
     // Taste: the average affinity of its traits, each weighed by how much it says of the anime
     const weighed = traitsOf(anime).map(({ kind, name, weight }) => {
@@ -152,11 +235,12 @@ export function rankSeason(
     const dropped = prequels.find(({ status }) => status === 'DROPPED');
     if (seen) {
       continuing = true;
-      const loved = seen.score > 0 && seen.score >= (mean ?? 75) + LOVED_ABOVE;
+      const loved = likedOf({ status: seen.status!, score: seen.score }, mean) === 'loved';
       fit += CONTINUES + (loved ? CONTINUES_LOVED : 0);
       reasons.push({
         text: continuesReason(seen.link, seen.status!, loved, voice),
-        strength: Infinity,
+        tier: 0,
+        strength: 0,
       });
     } else if (dropped) {
       fit += DROPPED;
@@ -178,7 +262,8 @@ export function rankSeason(
         fit += SIDE_STORY;
         reasons.push({
           text: `A side story of ${parent.title}, which ${subject(voice)} watched`,
-          strength: Infinity,
+          tier: 0,
+          strength: 0,
         });
       }
     }
@@ -200,6 +285,7 @@ export function rankSeason(
       if (!pick) continue;
       reasons.push({
         text: traitReason(pick.kind, pick.name, voice),
+        tier: 2,
         strength: pick.weight * pick.affinity,
       });
     }
@@ -212,9 +298,9 @@ export function rankSeason(
     }
     if (reasons.length < 2) {
       if (popularity >= 1 - MOST_POPULAR) {
-        reasons.push({ text: "One of the season's most popular", strength: 0 });
+        reasons.push({ text: "One of the season's most popular", tier: 3, strength: 0 });
       } else if ((anime.averageScore ?? 0) >= WELL_RATED) {
-        reasons.push({ text: `AniList average ${anime.averageScore}%`, strength: 0 });
+        reasons.push({ text: `AniList average ${anime.averageScore}%`, tier: 3, strength: 0 });
       }
     }
 
@@ -222,34 +308,82 @@ export function rankSeason(
       anime,
       fit,
       reasons: reasons
-        .sort((a, b) => b.strength - a.strength)
+        .sort((a, b) => a.tier - b.tier || b.strength - a.strength)
         .slice(0, 2)
         .map(({ text }) => text),
       note,
     };
     const key = keyOf(anime);
-    return { pick, continuing, listed: key !== null && lists.has(key) };
+    return {
+      pick,
+      continuing,
+      listed: key !== null && lists.has(key),
+      recommended: seenWeight > 0,
+    };
   });
 
   const byFit = (a: (typeof ranked)[number], b: (typeof ranked)[number]) =>
     b.pick.fit - a.pick.fit || b.pick.anime.popularity - a.pick.anime.popularity;
   ranked.sort(byFit);
+  const picks = tasteKnown
+    ? ranked
+        .filter(({ continuing, listed, pick }) => !continuing && !listed && pick.note === null)
+        .slice(0, PICKS)
+    : [];
   return {
     continuing: ranked.filter(({ continuing }) => continuing).map(({ pick }) => pick),
-    picks: tasteKnown
-      ? ranked
-          .filter(({ continuing, listed, pick }) => !continuing && !listed && pick.note === null)
-          .slice(0, PICKS)
-          .map(({ pick }) => pick)
-      : [],
+    picks: picks.map(({ pick }) => pick),
     all: ranked.map(({ pick }) => pick),
     tasteKnown,
     byScores: scoredEnough,
+    byRecommendations: picks.some(({ recommended }) => recommended),
   };
 }
 
 /** Lists that mean they've seen at least some of an anime */
 const WATCHED = new Set(['COMPLETED', 'CURRENT', 'REPEATING', 'PAUSED']);
+
+/** The standard deviation of someone's scores out of 100; 0 with fewer than two */
+function deviationOf(scores: SeasonTaste['scores']): number {
+  if (scores.length < 2) return 0;
+  const mean = scores.reduce((total, [, score]) => total + score, 0) / scores.length;
+  return Math.sqrt(
+    scores.reduce((total, [, score]) => total + (score - mean) ** 2, 0) / scores.length
+  );
+}
+
+/** What someone made of an anime, as a reason says it, and which is the better to name */
+type Liked = 'loved' | 'liked' | 'finished' | 'watching';
+const LIKING: Record<Liked, number> = { loved: 2, liked: 1, finished: 0, watching: 0 };
+
+/**
+ * What someone made of an anime they've seen, when it's worth naming: loved or liked by their
+ * score, or else finished or being watched, unless they scored it below their average; null for
+ * one they dropped, paused or didn't like
+ */
+function likedOf(
+  { status, score }: { status: string; score: number },
+  mean: number | null
+): Liked | null {
+  if (score > 0 && mean !== null) {
+    if (score >= mean + LOVED_ABOVE) return 'loved';
+    if (score >= mean + LIKED_ABOVE) return 'liked';
+    if (score < mean) return null;
+  }
+  if (status === 'COMPLETED' || status === 'REPEATING') return 'finished';
+  return status === 'CURRENT' ? 'watching' : null;
+}
+
+/** What someone did with an anime, as a reason says it: "you loved", "Alice is watching" */
+function didWith(what: Liked | 'paused', voice: Voice): string {
+  const who = subject(voice);
+  return what === 'watching' ? `${who} ${verb(voice, 'are', 'is')} watching` : `${who} ${what}`;
+}
+
+/** Why an anime fits its fans: "For fans of Mushishi, which you loved" */
+function recommendedReason(link: RelatedAnime, liked: Liked, voice: Voice): string {
+  return `For fans of ${link.title}, which ${didWith(liked, voice)}`;
+}
 
 /** The list each anime is on, by AniList's names for lists */
 function listsOf(taste: SeasonTaste | null): Map<number, string> {
@@ -266,25 +400,24 @@ function listsOf(taste: SeasonTaste | null): Map<number, string> {
 /** An anime's traits, each with how much it says of the anime */
 function traitsOf(anime: SeasonAnime): { kind: TraitKind; name: string; weight: number }[] {
   return [
-    ...anime.genres.map((name) => ({ kind: 'genre' as const, name, weight: 1 })),
+    ...anime.genres.map((name) => ({ kind: 'genre' as const, name, weight: GENRE_WEIGHT })),
     ...anime.tags
       .filter(({ rank }) => rank >= MIN_TAG_RANK)
       .map(({ name, rank }) => ({ kind: 'tag' as const, name, weight: (rank / 100) * TAG_WEIGHT })),
-    ...anime.studios.map((name) => ({ kind: 'studio' as const, name, weight: 1 })),
+    ...anime.studios.map((name) => ({ kind: 'studio' as const, name, weight: STUDIO_WEIGHT })),
   ];
 }
 
 /** Why a new part of something watched is here: "Continues Dandadan, which you loved" */
 function continuesReason(link: RelatedAnime, status: string, loved: boolean, voice: Voice): string {
-  const who = subject(voice);
   const what = loved
-    ? `${who} loved`
+    ? 'loved'
     : status === 'COMPLETED'
-      ? `${who} finished`
+      ? 'finished'
       : status === 'PAUSED'
-        ? `${who} paused`
-        : `${who} ${verb(voice, 'are', 'is')} watching`;
-  return `Continues ${link.title}, which ${what}`;
+        ? 'paused'
+        : 'watching';
+  return `Continues ${link.title}, which ${didWith(what, voice)}`;
 }
 
 /** Why a trait makes an anime fit: "From MAPPA, a studio you score highly" */

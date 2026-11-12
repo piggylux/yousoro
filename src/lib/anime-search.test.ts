@@ -12,6 +12,7 @@ import {
   foundState,
   hidesListed,
   LINEUP_PAGES,
+  LINEUP_RECOMMENDATIONS,
   lineupRequestBody,
   MAX_PAGES,
   middleEllipsis,
@@ -816,6 +817,21 @@ describe("a season's whole lineup", () => {
         },
       ],
     },
+    recommendations: {
+      nodes: [
+        {
+          rating: 120,
+          mediaRecommendation: { id: 20, idMal: 2020, title: { romaji: 'Mushishi' } },
+        },
+        { rating: 3, mediaRecommendation: { id: 21, idMal: null, title: { romaji: 'Odd' } } },
+        // More disagreed with than agreed, as many as either, without a title, or gone from AniList
+        { rating: -2, mediaRecommendation: { id: 22, idMal: 22, title: { romaji: 'Disputed' } } },
+        { rating: 0, mediaRecommendation: { id: 23, idMal: 23, title: { romaji: 'Even' } } },
+        { rating: 4, mediaRecommendation: { id: 24, idMal: 24, title: { romaji: null } } },
+        { rating: 5, mediaRecommendation: null },
+        null,
+      ],
+    },
     ...overrides,
   });
   const page = (media: unknown[], hasNextPage: boolean) =>
@@ -828,6 +844,9 @@ describe("a season's whole lineup", () => {
     expect(query).toContain('sort: POPULARITY_DESC');
     expect(query).toContain('format_in: [TV, TV_SHORT, ONA]');
     expect(query).toContain('node { id idMal type');
+    expect(query).toContain(
+      `recommendations(perPage: ${LINEUP_RECOMMENDATIONS}, sort: RATING_DESC)`
+    );
     expect(JSON.parse(lineupRequestBody(fall, true)).variables).not.toHaveProperty('isAdult');
     // Searches don't pay for what ranking a season needs
     expect(JSON.parse(searchRequestBody('frieren', false)).query).not.toContain('genres');
@@ -847,6 +866,10 @@ describe("a season's whole lineup", () => {
       prequels: [9],
       prequelLinks: [{ id: 9, malId: 1009, title: 'Season 1' }],
       parentLinks: [{ id: 8, malId: null, title: 'Main' }],
+      recommendations: [
+        { id: 20, malId: 2020, title: 'Mushishi', rating: 120 },
+        { id: 21, malId: null, title: 'Odd', rating: 3 },
+      ],
     });
   });
 
