@@ -11,24 +11,17 @@ shows you're actively watching come first. Once you've watched an episode, mark 
 - **Sign in with AniList or MyAnimeList**: use your existing account to get started.
 - **See what to watch**: check your unwatched episodes at a glance, with active shows first.
 - **Track your progress**: mark episodes as watched in one click and save updates to your list.
-- **Add new anime**: search AniList by title from your list and start watching or plan it. The
-  search goes from your browser straight to AniList, so it doesn't use the app's AniList requests.
-- **Pick what's next**: sort and filter your planning list by genre, length or score, with each
-  series under the part to watch first and its sequels shown even when they aren't planned yet. Or
-  let Yousoro pick one. Start watching in one click.
-- **Find what to watch this season**: see the current or next season's series ranked for you, by
-  how you score their themes, studios and genres and, once a series airs, how you scored the anime
-  its fans recommend on AniList, with new seasons of shows you watched first. Each says why it's
-  there, and you can plan or start it in one click. The season comes from your browser straight to
-  AniList. Reading your taste takes one AniList request, or one MyAnimeList request per 1,000 anime
-  on your list.
-- **Keep both lists in step**: link your AniList and MyAnimeList accounts in the settings, and every
-  episode and score you save goes to both.
-- **Put a change back**: Recent changes lists what you've saved in this tab, newest first, with a
-  Revert for each: an episode, a score, a finished anime, a start or a removal. It's reverted on
-  both linked lists, unless it has changed since.
-- **Plan your next watch**: see next-episode countdowns and browse four weeks of airing dates in
-  your local time zone.
+- **Add new anime**: search by title from your list and start watching or plan it.
+- **Pick what's next**: browse your planning list by genre, length or score, with each series in
+  the order to watch it, or let Yousoro pick one for you.
+- **Find what to watch this season**: see the current or next season's series ranked for your
+  taste, with new seasons of shows you watched first. Each says why it's there, and you can plan or
+  start it in one click.
+- **Keep both lists in step**: link your AniList and MyAnimeList accounts, and every episode and
+  score you save goes to both.
+- **Put a change back**: undo recent changes to your list, like an episode, a score or a finished
+  anime.
+- **Plan your next watch**: see next-episode countdowns and upcoming airing dates in your time zone.
 - **Keep up with rewatches**: track rewatch progress alongside your current shows.
 - **Share and discover**: browse friends' lists, share yours, and see which anime you're watching
   together.
