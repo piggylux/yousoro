@@ -14,8 +14,7 @@
   import CloseButton from '#lib/components/CloseButton.svelte';
   import SharedAnimePoster from '#lib/components/SharedAnimePoster.svelte';
   import { recordOwnWatchingEntry } from '#lib/friend-watching.js';
-  import { expireRememberedList } from '#lib/list-data.js';
-  import { forgetPlanned } from '#lib/planning.js';
+  import { forgetRememberedLists } from '#lib/list-moves.js';
   import type { LinkedFailure } from '#lib/types/api.js';
   import { DOMAIN_NAMES, type Domain } from '#lib/types/domain.js';
 
@@ -81,14 +80,13 @@
   }
 
   /**
-   * Once a change is reverted, the lists the tab remembers are read again, so the list and plan
-   * pages show it as it now is: a finished anime reverted is back among the cards. The friends
+   * Once a change is reverted, the lists the tab remembers are read again, so the list, plan and
+   * season pages show it as it now is: a finished anime reverted is back among the cards. The friends
    * pages are told what the viewer is watching now, as a save tells them
    */
   function refreshAfter(change: ListChange, entry: { progress?: unknown; status?: unknown }) {
     const { account, anime, before } = change;
-    expireRememberedList(account.name, account.domain);
-    forgetPlanned(account.domain, account.name);
+    forgetRememberedLists(account.domain, account.name);
     if (account.domain !== 'anilist' || !data.user || anime.mediaId === undefined) return;
     const status = String(entry.status ?? before?.status ?? 'NONE');
     recordOwnWatchingEntry(

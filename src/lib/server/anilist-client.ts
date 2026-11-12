@@ -8,11 +8,13 @@ import {
   takeAniListRequest,
   type RequestPriority,
 } from '#lib/server/rate-limit.js';
+import { fromAniListStatistics, type AniListStatistics } from '#lib/server/season-taste.js';
 import type { AiringStatus, Sequel } from '#lib/types/anime.js';
 import { OTHER_LISTS, type ListedIds, type OtherList } from '#lib/types/api.js';
 import type { FriendWatchingResult, SharedAnime } from '#lib/types/friend-watching.js';
 import type { TasteProfile } from '#lib/types/match.js';
 import type { ScheduleResult, ScheduledEpisode } from '#lib/types/schedule.js';
+import type { SeasonTaste } from '#lib/types/season.js';
 import type { AnimeYear } from '#lib/types/wrapped.js';
 
 const ANILIST_URL = 'https://graphql.anilist.co';
@@ -412,6 +414,107 @@ export async function getPlanningEntries(userName: string, token?: string): Prom
     if (planningCache.size >= MAX_PLANNING_LISTS)
       planningCache.delete(planningCache.keys().next().value!);
     planningCache.set(key, { list, expiresAt: Date.now() + PLANNING_TTL_MS });
+  }
+  return list;
+}
+
+/** Someone's taste and lists, as the season page reads them, with whose they are */
+export type TasteList = { userId: number; userName: string; taste: SeasonTaste };
+
+/*
+ * Taste changes slowly, so anonymous reads are kept a while, trimmed and apart from the public
+ * cache, as plan lists are
+ */
+const seasonTasteCache = new Map<string, { list: TasteList; expiresAt: number }>();
+const SEASON_TASTE_TTL_MS = 10 * 60 * 1000;
+const MAX_SEASON_TASTES = 20;
+
+/**
+ * Someone's taste, for ranking a season's anime for them, in one request: AniList's statistics of
+ * their list by genre, tag and studio, and the ids alone of the anime on each of their lists, with
+ * their progress and scores out of 100. About 30 bytes an anime. With a token, as the signed-in
+ * viewer, which shows them their own private entries and lists they're allowed to see; anonymous
+ * reads are kept for ten minutes. It gives way to watching lists and saves when AniList is busy
+ */
+export async function getSeasonTaste(userName: string, token?: string): Promise<TasteList> {
+  // Anyone can ask for any name, and a name that can't exist would still spend a request
+  if (!isUserName(userName)) throw new AniListNotFoundError(`No AniList user named ${userName}`);
+  // AniList ignores case in names, so every spelling shares one read
+  const key = userName.toLowerCase();
+  if (!token) {
+    const cached = seasonTasteCache.get(key);
+    if (cached && cached.expiresAt > Date.now()) return cached.list;
+  }
+
+  const { User, MediaListCollection } = await query<{
+    User: { id: number; name: string; statistics: { anime: AniListStatistics } };
+    MediaListCollection: {
+      lists: {
+        isCustomList: boolean;
+        entries: {
+          mediaId: number;
+          status: string;
+          progress: number | null;
+          score: number | null;
+          updatedAt: number;
+        }[];
+      }[];
+    };
+  }>(
+    `query ($userName: String) {
+      User(name: $userName) {
+        id
+        name
+        statistics {
+          anime {
+            count
+            meanScore
+            standardDeviation
+            genres(sort: COUNT_DESC) { genre count meanScore }
+            tags(limit: 100, sort: COUNT_DESC) { tag { name isAdult } count meanScore }
+            studios(limit: 50, sort: COUNT_DESC) {
+              studio { name isAnimationStudio }
+              count
+              meanScore
+            }
+          }
+        }
+      }
+      MediaListCollection(userName: $userName, type: ANIME) {
+        lists {
+          isCustomList
+          entries { mediaId status progress score(format: POINT_100) updatedAt }
+        }
+      }
+    }`,
+    // One spelling, so simultaneous reads of the list share one request
+    { userName: key },
+    token,
+    { cacheTtlMs: 0, priority: 'optional' }
+  );
+
+  // Custom lists repeat entries that already appear in the status list
+  const entries = onePerAnime(
+    MediaListCollection.lists
+      .filter((list) => !list.isCustomList)
+      .flatMap((list) => list.entries)
+      .map((entry) => ({ ...entry, media: { id: entry.mediaId } }))
+  ).map(({ mediaId, status, progress, score }) => ({
+    id: mediaId,
+    status,
+    progress: progress ?? 0,
+    score100: score ?? 0,
+  }));
+  const list: TasteList = {
+    userId: User.id,
+    userName: User.name,
+    taste: fromAniListStatistics(User.statistics.anime, entries),
+  };
+  if (!token) {
+    seasonTasteCache.delete(key);
+    if (seasonTasteCache.size >= MAX_SEASON_TASTES)
+      seasonTasteCache.delete(seasonTasteCache.keys().next().value!);
+    seasonTasteCache.set(key, { list, expiresAt: Date.now() + SEASON_TASTE_TTL_MS });
   }
   return list;
 }

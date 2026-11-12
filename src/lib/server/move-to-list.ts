@@ -16,7 +16,7 @@ import {
   undoOnLinkedAccount,
 } from '#lib/server/linked-save.js';
 import { withMalToken } from '#lib/server/myanimelist-auth.js';
-import { getListStatuses, moveToList } from '#lib/server/myanimelist-client.js';
+import { getListStatuses, MalNotFoundError, moveToList } from '#lib/server/myanimelist-client.js';
 import { updateOwnList } from '#lib/server/own-list.js';
 import { takeClientLimit } from '#lib/server/rate-limit.js';
 import { isBefore, type Before, type ListMove } from '#lib/types/api.js';
@@ -90,7 +90,14 @@ export function moveToListAction(status: ListMove) {
  * account's before the move is made there: two requests to add one, and as many on the linked
  * account. `already` says it was there already. `before` and `linkedBefore` say where it was, for
  * undoing; `linked`, why the linked account wasn't changed. With `retry=linked`, after the linked
- * account missed an add, only the linked account is changed
+ * account missed an add, only the linked account is changed.
+ *
+ * A page that read the user's own list itself, as the season page does, sends `known` with `from`
+ * for where it saw the anime (`NONE` when on no list), and the list's service isn't asked again:
+ * one request to add it there. A change made elsewhere since the page read the list can then be
+ * overwritten, as a start from the plan list can. The linked account is still asked first, as the
+ * page doesn't know where the anime is there, and a retry for it always asks, as it relies on the
+ * add having stuck
  */
 export function addToListAction() {
   return (event: MoveEvent) =>
@@ -99,8 +106,12 @@ export function addToListAction() {
       if (to !== 'CURRENT' && to !== 'PLANNING') return fail(400, { message: 'Unknown list' });
       const from = form.get('from');
       const expected = isBefore(from) ? from : undefined;
+      const known =
+        form.get('known') === '1' && expected !== undefined && form.get('retry') !== 'linked';
       let listed: string | null;
-      if (domain === 'anilist') {
+      if (known) {
+        listed = expected === 'NONE' ? null : expected!;
+      } else if (domain === 'anilist') {
         listed = await getListStatus(event.locals.session!.token, ids.mediaId!);
       } else {
         const statuses = await withMalToken(event, (token) => getListStatuses(token, [ids.malId!]));
@@ -130,10 +141,19 @@ export function addToListAction() {
           ...(linked && { linked }),
         };
       }
-      const saved =
-        domain === 'anilist'
-          ? await saveEntry(event.locals.session!.token, ids.mediaId!, { status: to })
-          : await withMalToken(event, (token) => moveToList(token, ids.malId!, to));
+      let saved;
+      try {
+        saved =
+          domain === 'anilist'
+            ? await saveEntry(event.locals.session!.token, ids.mediaId!, { status: to })
+            : await withMalToken(event, (token) => moveToList(token, ids.malId!, to));
+      } catch (err) {
+        // Unread, as the page vouched for it, an anime MyAnimeList doesn't have shows in the save
+        if (err instanceof MalNotFoundError) {
+          return fail(404, { message: "MyAnimeList doesn't have this anime" });
+        }
+        throw err;
+      }
       const { linked, linkedBefore } = await moveOnLinkedAccount(event, domain, ids, to, expected);
       return {
         ...ids,

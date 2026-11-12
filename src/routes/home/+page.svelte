@@ -48,8 +48,10 @@
           <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
         </svg>
       </span>
-      <h2>Plan your week</h2>
-      <p>See upcoming episodes in your local time zone.</p>
+      <h2>Plan your week and season</h2>
+      <p>
+        See upcoming episodes in your local time zone, and each new season ranked for your taste.
+      </p>
     </article>
     <article>
       <span class="feature-icon" aria-hidden="true">

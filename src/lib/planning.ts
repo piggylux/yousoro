@@ -49,17 +49,27 @@ const FORMATS: Record<string, string> = {
   MUSIC: 'Music video',
 };
 
-// When an announced anime starts, as precisely as AniList knows: "Starts April 4, 2027"
-function startsOn({ year, month, day }: Sequel['startDate']): string {
-  if (!year) return 'Date not announced';
-  if (!month) return `Starts ${year}`;
-  const date = new Date(Date.UTC(year, month - 1, day ?? 1));
-  return `Starts ${date.toLocaleDateString('en', {
+/**
+ * The day an anime starts, as precisely as AniList knows, which it gives as a calendar date rather
+ * than a time: "April 4, 2027", or "Apr 4" short and without the year. Null until its month is known
+ */
+export function formatStartDate(
+  { year, month, day }: Sequel['startDate'],
+  { short = false, withYear = true }: { short?: boolean; withYear?: boolean } = {}
+): string | null {
+  if (!year || !month) return null;
+  return new Date(Date.UTC(year, month - 1, day ?? 1)).toLocaleDateString('en', {
     timeZone: 'UTC',
-    year: 'numeric',
-    month: 'long',
-    ...(day && { day: 'numeric' }),
-  })}`;
+    ...(withYear && { year: 'numeric' as const }),
+    month: short ? 'short' : 'long',
+    ...(day && { day: 'numeric' as const }),
+  });
+}
+
+// When an announced anime starts, as precisely as AniList knows: "Starts April 4, 2027"
+function startsOn(startDate: Sequel['startDate']): string {
+  if (!startDate.year) return 'Date not announced';
+  return `Starts ${formatStartDate(startDate) ?? startDate.year}`;
 }
 
 /**

@@ -2,13 +2,15 @@ import { getMediaByMalIds } from '#lib/server/anilist-client.js';
 import { toAnime, withRecentAirings } from '#lib/server/anilist.js';
 import {
   getPlanToWatchEntries,
+  getSeasonTasteEntries,
   getWatchingEntries,
   type MalAiringStatus,
   type MalEntry,
 } from '#lib/server/myanimelist-client.js';
 import type { RequestPriority } from '#lib/server/rate-limit.js';
+import { fromMalEntries } from '#lib/server/season-taste.js';
 import type { AiringStatus, Anime } from '#lib/types/anime.js';
-import type { Api, PlannedList, UnmatchedAnime, UserAnimeList } from '#lib/types/api.js';
+import type { Api, PlannedList, TasteRead, UnmatchedAnime, UserAnimeList } from '#lib/types/api.js';
 import type { SessionUser } from '#lib/types/session-user.js';
 
 /**
@@ -78,6 +80,17 @@ export class MyAnimeListApi implements Api {
       userId: owner?.id ?? null,
       username: owner?.name ?? username,
       planned: entries.map(toPlannedAnime),
+    };
+  }
+
+  /** The whole list, with each anime's genres and studios, which MyAnimeList keeps no totals of */
+  async getSeasonTaste(username: string): Promise<TasteRead> {
+    const entries = await getSeasonTasteEntries(username, this.signedIn?.token);
+    const owner = this.signedIn?.owner;
+    return {
+      userId: owner?.id ?? null,
+      username: owner?.name ?? username,
+      taste: fromMalEntries(entries),
     };
   }
 }

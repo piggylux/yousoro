@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   getPageSeo,
@@ -241,5 +241,25 @@ describe('year in anime metadata', () => {
     const seo = getPageSeo(new URL(`${SITE_ORIGIN}/user/anilist/Alice/wrapped/2026`));
     expect(seo.title).toBe("Alice's 2026 in Anime | Yousoro");
     expect(seo.image.url).toBe(`${SITE_ORIGIN}/user/anilist/Alice/wrapped/2026/preview.jpg`);
+  });
+});
+
+describe('season metadata', () => {
+  it('names the season and whose picks they are, and stays out of search results', () => {
+    const seo = getPageSeo(new URL(`${SITE_ORIGIN}/user/myanimelist/Alice/season/winter-2027`));
+    expect(seo.title).toBe('Winter 2027 Anime Picked for Alice | Yousoro');
+    expect(seo.description).toContain('Winter 2027');
+    expect(seo.noindex).toBe(true);
+  });
+
+  it('names the season worth looking at now when the address names none', () => {
+    vi.useFakeTimers({ now: new Date(2026, 10, 12), toFake: ['Date'] });
+    try {
+      expect(getPageSeo(new URL(`${SITE_ORIGIN}/user/anilist/Alice/season`)).title).toBe(
+        'Fall 2026 Anime Picked for Alice | Yousoro'
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

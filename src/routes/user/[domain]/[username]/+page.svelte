@@ -7,7 +7,7 @@
   import { prefersReducedMotion } from 'svelte/motion';
   import { fade } from 'svelte/transition';
 
-  import { listedLookup } from '#lib/anime-search.js';
+  import { defaultSeason, listedLookup, seasonName } from '#lib/anime-search.js';
   import {
     countBySection,
     getListSection,
@@ -39,9 +39,9 @@
   import { recordOwnWatchingEntry, seedOwnAnime, withoutListOwner } from '#lib/friend-watching.js';
   import { hiddenSectionsCookie, toggleHidden } from '#lib/hidden-sections.js';
   import { expireRememberedList, recordSavedEntry } from '#lib/list-data.js';
+  import { noteListMove } from '#lib/list-moves.js';
   import { nextAiringReloadDelay, planReload, reloadsOnReturn } from '#lib/live-updates.js';
   import { matchPath } from '#lib/match.js';
-  import { forgetPlanned, markStarted } from '#lib/planning.js';
   import {
     headerList,
     moreProfileLinks,
@@ -509,25 +509,8 @@
    * is closed
    */
   function noteAdded(sequel: Sequel, list: ListMove, progress: number) {
-    if (list === 'PLANNING') {
-      forgetPlanned(data.domain, data.username);
-      return;
-    }
-    startedAnime = true;
-    markStarted(data.domain, data.username, sequel);
-    if (data.canEdit && friendsViewer)
-      recordOwnWatchingEntry(
-        friendsViewer,
-        {
-          id: sequel.id,
-          title: sequel.title,
-          isAdult: sequel.isAdult,
-          thumbnailUrl: sequel.coverUrl ?? '',
-          currentEpisode: progress,
-          rewatching: false,
-        },
-        'CURRENT'
-      );
+    noteListMove(moveContext(), sequel, { list, progress });
+    if (list === 'CURRENT') startedAnime = true;
   }
 
   /*
@@ -536,23 +519,19 @@
    * search is closed, as after a start
    */
   function noteUndone(anime: Sequel, list: ListMove) {
-    forgetPlanned(data.domain, data.username);
-    if (list !== 'CURRENT') return;
-    startedAnime = true;
-    if (data.canEdit && friendsViewer)
-      recordOwnWatchingEntry(
-        friendsViewer,
-        {
-          id: anime.id,
-          title: anime.title,
-          isAdult: anime.isAdult,
-          thumbnailUrl: anime.coverUrl ?? '',
-          currentEpisode: 0,
-          rewatching: false,
-        },
-        'PLANNING'
-      );
+    noteListMove(moveContext(), anime, { list, undone: true });
+    if (list === 'CURRENT') startedAnime = true;
   }
+
+  // The season page, on the season worth looking at now; named for it
+  const seasonPath = $derived(`${listPath(data.domain, data.username)}/season`);
+  const seasonLabel = $derived(`${seasonName(defaultSeason())} picks`);
+
+  const moveContext = () => ({
+    domain: data.domain,
+    username: data.username,
+    friendsViewer: data.canEdit ? (friendsViewer ?? null) : null,
+  });
 
   /*
    * Live updates: the list reloads when an episode on it airs, so a caught-up anime moves up with
@@ -633,71 +612,88 @@
         {/each}
         <ShareButton url={share.url} title={share.title} subject={share.subject} />
       </div>
-      {#if data.canEdit || onAniList || moreLinks.length}
-        <div class="profile-actions">
-          {#if data.canEdit}
-            <button
-              type="button"
-              class="tw:btn tw:btn-sm profile-action"
-              aria-haspopup="dialog"
-              onclick={() => searchAniList('')}
+      <div class="profile-actions">
+        {#if data.canEdit}
+          <button
+            type="button"
+            class="tw:btn tw:btn-sm profile-action"
+            aria-haspopup="dialog"
+            onclick={() => searchAniList('')}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              width="16"
+              height="16"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg
             >
-              <svg
-                viewBox="0 0 24 24"
-                width="16"
-                height="16"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.8"
-                stroke-linecap="round"
-                aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg
-              >
-              Add anime
-            </button>
-          {/if}
-          {#if onAniList}
-            <a class="tw:btn tw:btn-sm profile-action" href={matchPath(data.username)}>
-              <!-- Two tastes overlapping -->
-              <svg
-                viewBox="0 0 24 24"
-                width="16"
-                height="16"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.8"
-                aria-hidden="true"
-                ><circle cx="9" cy="12" r="6" /><circle cx="15" cy="12" r="6" /></svg
-              >
-              Taste match
-            </a>
-            <a class="tw:btn tw:btn-sm profile-action" href={togetherPath(data.username)}>
-              <!-- A screen to share -->
-              <svg
-                viewBox="0 0 24 24"
-                width="16"
-                height="16"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.8"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                aria-hidden="true"
-                ><rect x="3" y="4" width="18" height="13" rx="2" /><path
-                  d="M8 21h8m-5.5-12.5 4 2-4 2Z"
-                /></svg
-              >
-              Watch together
-            </a>
-          {/if}
-          {#if moreLinks.length}
-            <MoreMenu label={`More from ${data.username}`}>
-              {#each moreLinks as link (link.href)}
-                <li><a href={link.href}>{link.label}</a></li>
-              {/each}
-            </MoreMenu>
-          {/if}
-        </div>
-      {/if}
+            Add anime
+          </button>
+        {/if}
+        <a class="tw:btn tw:btn-sm profile-action" href={seasonPath}>
+          <!-- A sparkle, for what's new this season -->
+          <svg
+            viewBox="0 0 24 24"
+            width="16"
+            height="16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linejoin="round"
+            aria-hidden="true"
+            ><path
+              d="M10 3c.6 4.2 2.8 6.4 7 7-4.2.6-6.4 2.8-7 7-.6-4.2-2.8-6.4-7-7 4.2-.6 6.4-2.8 7-7Z"
+            /><path
+              d="M18.5 14.5c.2 1.5 1 2.3 2.5 2.5-1.5.2-2.3 1-2.5 2.5-.2-1.5-1-2.3-2.5-2.5 1.5-.2 2.3-1 2.5-2.5Z"
+            /></svg
+          >
+          {seasonLabel}
+        </a>
+        {#if onAniList}
+          <a class="tw:btn tw:btn-sm profile-action" href={matchPath(data.username)}>
+            <!-- Two tastes overlapping -->
+            <svg
+              viewBox="0 0 24 24"
+              width="16"
+              height="16"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              aria-hidden="true"
+              ><circle cx="9" cy="12" r="6" /><circle cx="15" cy="12" r="6" /></svg
+            >
+            Taste match
+          </a>
+          <a class="tw:btn tw:btn-sm profile-action" href={togetherPath(data.username)}>
+            <!-- A screen to share -->
+            <svg
+              viewBox="0 0 24 24"
+              width="16"
+              height="16"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+              ><rect x="3" y="4" width="18" height="13" rx="2" /><path
+                d="M8 21h8m-5.5-12.5 4 2-4 2Z"
+              /></svg
+            >
+            Watch together
+          </a>
+        {/if}
+        {#if moreLinks.length}
+          <MoreMenu label={`More from ${data.username}`}>
+            {#each moreLinks as link (link.href)}
+              <li><a href={link.href}>{link.label}</a></li>
+            {/each}
+          </MoreMenu>
+        {/if}
+      </div>
     </div>
 
     <!-- Updates with every progress change, since the list reloads after each one -->
@@ -948,6 +944,7 @@
     onAdded={noteAdded}
     onUndone={noteUndone}
     onShow={calendarView ? undefined : showOnList}
+    {seasonPath}
   />
 {/if}
 

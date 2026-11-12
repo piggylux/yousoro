@@ -13,6 +13,7 @@ import {
   getListEntry,
   getListStatus,
   getPlanningEntries,
+  getSeasonTaste,
   getSequels,
   getSeries,
   getTasteProfile,
@@ -982,5 +983,103 @@ describe('sequels', () => {
     vi.mocked(fetch).mockResolvedValue(Response.json({ data: { Media: { relations: null } } }));
 
     expect(await getSequels(9)).toEqual([]);
+  });
+});
+
+describe('tastes for the season page', () => {
+  const answer = (name: string) =>
+    Response.json({
+      data: {
+        User: {
+          id: 7,
+          name,
+          statistics: {
+            anime: {
+              count: 3,
+              meanScore: 70,
+              standardDeviation: 10,
+              genres: [{ genre: 'Drama', count: 2, meanScore: 80 }],
+              tags: [],
+              studios: [],
+            },
+          },
+        },
+        MediaListCollection: {
+          lists: [
+            {
+              isCustomList: false,
+              entries: [
+                { mediaId: 1, status: 'COMPLETED', progress: 12, score: 80, updatedAt: 10 },
+                { mediaId: 2, status: 'PLANNING', progress: null, score: null, updatedAt: 10 },
+                // Imported twice: the entry changed last stands for it
+                { mediaId: 3, status: 'DROPPED', progress: 1, score: 0, updatedAt: 10 },
+                { mediaId: 3, status: 'COMPLETED', progress: 12, score: 60, updatedAt: 20 },
+              ],
+            },
+            // A custom list repeats anime on a status list
+            {
+              isCustomList: true,
+              entries: [
+                { mediaId: 1, status: 'COMPLETED', progress: 12, score: 80, updatedAt: 10 },
+              ],
+            },
+          ],
+        },
+      },
+    });
+
+  it('reads the statistics and the lists in one request, giving way when AniList is busy', async () => {
+    vi.mocked(fetch).mockImplementation(async () => answer('Taster'));
+
+    const { userId, userName, taste } = await getSeasonTaste('Taster');
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(takeAniListRequest).toHaveBeenCalledWith('optional');
+    const { query } = JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string);
+    expect(query).toContain('statistics');
+    expect(query).toContain('score(format: POINT_100)');
+    expect({ userId, userName }).toEqual({ userId: 7, userName: 'Taster' });
+    expect(taste).toMatchObject({
+      traits: [{ kind: 'genre', name: 'Drama', count: 2, lift: 1 }],
+      listedIds: { COMPLETED: [1, 3], PLANNING: [2] },
+      scores: [
+        [1, 80],
+        [3, 60],
+      ],
+      watched: 2,
+    });
+  });
+
+  it("asks nothing for a name that can't be anyone's", async () => {
+    await expect(getSeasonTaste('not a name!')).rejects.toBeInstanceOf(AniListNotFoundError);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('keeps an anonymous read for ten minutes, for every spelling of the name', async () => {
+    vi.mocked(fetch).mockImplementation(async () => answer('Kept'));
+    const now = Date.now();
+    vi.spyOn(Date, 'now').mockReturnValue(now);
+    await Promise.all([getSeasonTaste('Kept'), getSeasonTaste('KEPT')]);
+    vi.spyOn(Date, 'now').mockReturnValue(now + 9 * 60 * 1000);
+    await getSeasonTaste('kept');
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    vi.spyOn(Date, 'now').mockReturnValue(now + 10 * 60 * 1000);
+    await getSeasonTaste('kept');
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("reads with the viewer's token every time, and never keeps what it shows them", async () => {
+    vi.mocked(fetch).mockImplementation(async () => answer('Hidden'));
+    await getSeasonTaste('Hidden', 'viewer-token');
+    await getSeasonTaste('Hidden', 'viewer-token');
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(fetch).mock.calls[0][1]!.headers).toMatchObject({
+      Authorization: 'Bearer viewer-token',
+    });
+
+    await getSeasonTaste('Hidden');
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(vi.mocked(fetch).mock.calls[2][1]!.headers).not.toHaveProperty('Authorization');
   });
 });

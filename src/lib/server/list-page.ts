@@ -21,6 +21,7 @@ import { takeClientLimit } from '#lib/server/rate-limit.js';
 import { clearMalSession, clearSession } from '#lib/server/session.js';
 import type { PlanningPageData, UserAnimeList } from '#lib/types/api.js';
 import { DOMAIN_NAMES, isDomain, type Domain } from '#lib/types/domain.js';
+import type { SeasonTastePageData } from '#lib/types/season.js';
 
 type ListEvent = { locals: App.Locals; cookies: Cookies };
 
@@ -203,6 +204,44 @@ export async function loadPlanningPage({
       domain === 'anilist'
         ? `https://anilist.co/user/${name}/animelist/Planning`
         : `https://myanimelist.net/animelist/${name}?status=6`,
+  };
+}
+
+/**
+ * What the season page needs to rank a season's anime for a list's owner: their taste, and where
+ * the anime on their lists are. Like the plan list, it's read whole and at once, with no earlier
+ * copy to fall back on, so a busy service is an error the page shows and retries
+ */
+export async function loadSeasonTaste({
+  params,
+  locals,
+  cookies,
+  getClientAddress,
+}: {
+  params: { username: string; domain: string };
+  locals: App.Locals;
+  cookies: Cookies;
+  getClientAddress: () => string;
+}): Promise<SeasonTastePageData> {
+  const domain = listDomain(params.domain);
+  const { username } = params;
+  let read;
+  try {
+    const limit = await takeClientLimit(getClientAddress(), 'read');
+    if (!limit.allowed) throw new AniListRateLimitError(limit.retryAfter);
+    read = await readList(domain, username, { locals, cookies }, (api) =>
+      api.getSeasonTaste(username)
+    );
+  } catch (err) {
+    checkReadError(err, domain, username, locals, true);
+    throw err;
+  }
+  const viewer = domain === 'anilist' ? locals.session : locals.malSession;
+  return {
+    ...read.taste,
+    domain,
+    username: read.username,
+    canEdit: read.userId !== null && viewer?.user.id === read.userId,
   };
 }
 

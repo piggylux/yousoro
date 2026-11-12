@@ -12,6 +12,7 @@ import {
   PLAN_FILTERS,
   type PlannedSeries,
   rememberPlanned,
+  formatStartDate,
   sequelFacts,
   seriesGenres,
   seriesSteps,
@@ -118,6 +119,16 @@ describe('sequelFacts', () => {
     ],
   ] as [Partial<Sequel>, string][])('describes %o as "%s"', (changes, text) => {
     expect(sequelFacts(sequel(changes))).toBe(text);
+  });
+});
+
+describe('formatStartDate', () => {
+  it('says the day an anime starts as precisely as AniList knows it', () => {
+    const date = { year: 2027, month: 1, day: 8 };
+    expect(formatStartDate(date)).toBe('January 8, 2027');
+    expect(formatStartDate(date, { short: true, withYear: false })).toBe('Jan 8');
+    expect(formatStartDate({ ...date, day: null }, { withYear: false })).toBe('January');
+    expect(formatStartDate({ year: 2027, month: null, day: null })).toBeNull();
   });
 });
 
