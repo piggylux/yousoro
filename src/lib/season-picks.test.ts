@@ -28,6 +28,7 @@ function anime(id: number, overrides: Partial<SeasonAnime> = {}): SeasonAnime {
     averageScore: null,
     popularity: 1000,
     synopsis: null,
+    trailer: null,
     prequelLinks: [],
     parentLinks: [],
     recommendations: [],

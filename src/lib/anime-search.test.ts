@@ -44,6 +44,7 @@ import {
   shortTitle,
   TITLE_LENGTH,
   titlesFor,
+  youtubeTrailer,
 } from '#lib/anime-search.js';
 import type { ListedIds } from '#lib/types/api.js';
 
@@ -801,6 +802,7 @@ describe("a season's whole lineup", () => {
     averageScore: 88,
     popularity: 4200,
     description: 'An elf mage&#039;s journey.<br><br>After the <i>hero</i> dies&hellip;',
+    trailer: { id: 'qgQBiFmZ-Z4', site: 'youtube' },
     relations: {
       edges: [
         {
@@ -844,12 +846,15 @@ describe("a season's whole lineup", () => {
     expect(query).toContain('sort: POPULARITY_DESC');
     expect(query).toContain('format_in: [TV, TV_SHORT, ONA]');
     expect(query).toContain('node { id idMal type');
+    expect(query).toContain('trailer { id site }');
     expect(query).toContain(
       `recommendations(perPage: ${LINEUP_RECOMMENDATIONS}, sort: RATING_DESC)`
     );
     expect(JSON.parse(lineupRequestBody(fall, true)).variables).not.toHaveProperty('isAdult');
-    // Searches don't pay for what ranking a season needs
-    expect(JSON.parse(searchRequestBody('frieren', false)).query).not.toContain('genres');
+    // Searches don't pay for what ranking a season needs, or describing an anime
+    const searchQuery = JSON.parse(searchRequestBody('frieren', false)).query;
+    expect(searchQuery).not.toContain('genres');
+    expect(searchQuery).not.toContain('trailer');
   });
 
   it('reads what ranking and describing an anime need, without spoilers or adult tags', () => {
@@ -863,6 +868,7 @@ describe("a season's whole lineup", () => {
       averageScore: 88,
       popularity: 4200,
       synopsis: "An elf mage's journey.\n\nAfter the hero dies…",
+      trailer: 'qgQBiFmZ-Z4',
       prequels: [9],
       prequelLinks: [{ id: 9, malId: 1009, title: 'Season 1' }],
       parentLinks: [{ id: 8, malId: null, title: 'Main' }],
@@ -871,6 +877,27 @@ describe("a season's whole lineup", () => {
         { id: 21, malId: null, title: 'Odd', rating: 3 },
       ],
     });
+  });
+
+  it('reads a trailer only when it names a video on YouTube', () => {
+    const [none, elsewhere] = parseLineup({
+      data: {
+        Page: {
+          media: [
+            lineupAnime(1, { trailer: null }),
+            lineupAnime(2, { trailer: { id: 'x8abc12', site: 'dailymotion' } }),
+          ],
+        },
+      },
+    });
+
+    expect(none.trailer).toBeNull();
+    expect(elsewhere.trailer).toBeNull();
+    expect(youtubeTrailer({ id: 'qgQBiFmZ-Z4', site: 'youtube' })).toBe('qgQBiFmZ-Z4');
+    // Only ever one video's id, so the player's address can't be steered anywhere else
+    expect(youtubeTrailer({ id: '../watch?v=x', site: 'youtube' })).toBeNull();
+    expect(youtubeTrailer({ id: null, site: 'youtube' })).toBeNull();
+    expect(youtubeTrailer(undefined)).toBeNull();
   });
 
   it('reads a description as plain text', () => {

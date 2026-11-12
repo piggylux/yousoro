@@ -218,6 +218,7 @@ const LINEUP_QUERY = `query (
       averageScore
       popularity
       description(asHtml: false)
+      trailer { id site }
       recommendations(perPage: ${LINEUP_RECOMMENDATIONS}, sort: RATING_DESC) {
         nodes { rating mediaRecommendation { id idMal title { romaji } } }
       }
@@ -264,6 +265,11 @@ export type SeasonAnime = FoundAnime & {
   popularity: number;
   /** AniList's description, as plain text; null when it has none */
   synopsis: string | null;
+  /**
+   * The YouTube id of its trailer, as AniList links it; null when it has none on YouTube, the site
+   * nearly all of AniList's trailers are on
+   */
+  trailer: string | null;
   /** The anime it continues, with their MyAnimeList ids, which MyAnimeList lists go by */
   prequelLinks: RelatedAnime[];
   /** The anime it's a side story or spin-off of, likewise */
@@ -291,6 +297,7 @@ type LineupMedia = SearchMedia & {
   averageScore: number | null;
   popularity: number | null;
   description: string | null;
+  trailer: { id: string | null; site: string | null } | null;
   recommendations: {
     nodes:
       | ({
@@ -340,6 +347,16 @@ export function plainSynopsis(description: string | null | undefined): string | 
   return text || null;
 }
 
+/**
+ * The YouTube id of an anime's trailer, or null when it's on another site or isn't an id, so it can
+ * only ever name a video on the one embed host the Content-Security-Policy lets the page frame
+ */
+export function youtubeTrailer(trailer: LineupMedia['trailer'] | undefined): string | null {
+  return trailer?.site === 'youtube' && trailer.id && /^[\w-]+$/.test(trailer.id)
+    ? trailer.id
+    : null;
+}
+
 /** The anime of a page of a season's lineup, in AniList's order; one without a title is left out */
 export function parseLineup(body: unknown): SeasonAnime[] {
   const media = (body as { data?: { Page?: { media?: (LineupMedia | null)[] } } } | null)?.data
@@ -372,6 +389,7 @@ export function parseLineup(body: unknown): SeasonAnime[] {
         averageScore: node.averageScore ?? null,
         popularity: node.popularity ?? 0,
         synopsis: plainSynopsis(node.description),
+        trailer: youtubeTrailer(node.trailer),
         prequelLinks: links('PREQUEL'),
         parentLinks: links('PARENT'),
         recommendations: (node.recommendations?.nodes ?? []).flatMap((recommendation) => {
