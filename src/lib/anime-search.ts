@@ -187,6 +187,11 @@ export function seasonRequestBody(season: AnimeSeason, showMature: boolean, page
  */
 export const LINEUP_PAGE_SIZE = 50;
 export const LINEUP_PAGES = 3;
+/**
+ * How many of each anime's recommendations by AniList users the lineup reads, the most agreed with
+ * first: past the first ten, few have more than a vote or two
+ */
+export const LINEUP_RECOMMENDATIONS = 10;
 
 // As the season's popular anime, with what ranking them for a viewer and telling them apart needs.
 // Kept apart from the search's fields, which every search would otherwise pay for
@@ -213,6 +218,9 @@ const LINEUP_QUERY = `query (
       averageScore
       popularity
       description(asHtml: false)
+      recommendations(perPage: ${LINEUP_RECOMMENDATIONS}, sort: RATING_DESC) {
+        nodes { rating mediaRecommendation { id idMal title { romaji } } }
+      }
     }
   }
 }`;
@@ -232,6 +240,12 @@ export function lineupRequestBody(season: AnimeSeason, showMature: boolean, page
 
 /** An anime another one continues or is a side story of, as a season's lineup names it */
 export type RelatedAnime = { id: number; malId: number | null; title: string };
+
+/**
+ * An anime AniList users recommend to fans of another, with how many more of them agreed with the
+ * recommendation than disagreed
+ */
+export type RecommendedAnime = RelatedAnime & { rating: number };
 
 /** An anime of a season's lineup, with what ranking it for a viewer and describing it needs */
 export type SeasonAnime = FoundAnime & {
@@ -254,6 +268,12 @@ export type SeasonAnime = FoundAnime & {
   prequelLinks: RelatedAnime[];
   /** The anime it's a side story or spin-off of, likewise */
   parentLinks: RelatedAnime[];
+  /**
+   * Anime AniList users say its fans would like, and so whose fans it suits, the most agreed with
+   * first; those no more agreed with than disagreed, or without a romaji title to name them by, are
+   * left out. None until it has started airing, as AniList only takes recommendations then
+   */
+  recommendations: RecommendedAnime[];
 };
 
 type LineupMedia = SearchMedia & {
@@ -271,6 +291,18 @@ type LineupMedia = SearchMedia & {
   averageScore: number | null;
   popularity: number | null;
   description: string | null;
+  recommendations: {
+    nodes:
+      | ({
+          rating: number | null;
+          mediaRecommendation: {
+            id: number;
+            idMal: number | null;
+            title: { romaji: string | null } | null;
+          } | null;
+        } | null)[]
+      | null;
+  } | null;
 };
 
 const ENTITIES: Record<string, string> = {
@@ -342,6 +374,14 @@ export function parseLineup(body: unknown): SeasonAnime[] {
         synopsis: plainSynopsis(node.description),
         prequelLinks: links('PREQUEL'),
         parentLinks: links('PARENT'),
+        recommendations: (node.recommendations?.nodes ?? []).flatMap((recommendation) => {
+          const recommended = recommendation?.mediaRecommendation;
+          const title = recommended?.title?.romaji;
+          const rating = recommendation?.rating ?? 0;
+          return recommended && title && rating > 0
+            ? [{ id: recommended.id, malId: recommended.idMal ?? null, title, rating }]
+            : [];
+        }),
       },
     ];
   });

@@ -121,7 +121,7 @@ export function getPageSeo(url: SeoUrl, status = 200, resolvedUsername?: string)
     const season = seasonPage[3] ? parseSeasonSlug(seasonPage[3]) : defaultSeason();
     const shown = season ? seasonName(season) : 'This Season';
     title = `${shown} Anime Picked for ${name} | ${SITE_NAME}`;
-    description = `The ${shown} anime lineup, ranked for ${name} by how they score genres, themes and studios, with sequels to what they've watched first.`;
+    description = `The ${shown} anime lineup, ranked for ${name} by the anime they loved and the themes and studios they score highly, with sequels to what they've watched first.`;
   } else if (badge) {
     title = `${names[0]}'s Profile Badge | ${SITE_NAME}`;
     description = `Show what ${names[0]} is watching on an AniList profile, in a README, or anywhere that shows images.`;

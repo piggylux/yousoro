@@ -17,10 +17,11 @@ shows you're actively watching come first. Once you've watched an episode, mark 
   series under the part to watch first and its sequels shown even when they aren't planned yet. Or
   let Yousoro pick one. Start watching in one click.
 - **Find what to watch this season**: see the current or next season's series ranked for you, by
-  how you score their genres, themes and studios, with new seasons of shows you watched first. Each
-  says why it's there, and you can plan or start it in one click. The season comes from your browser
-  straight to AniList. Reading your taste takes one AniList request, or one MyAnimeList request per
-  1,000 anime on your list.
+  how you score their themes, studios and genres and, once a series airs, how you scored the anime
+  its fans recommend on AniList, with new seasons of shows you watched first. Each says why it's
+  there, and you can plan or start it in one click. The season comes from your browser straight to
+  AniList. Reading your taste takes one AniList request, or one MyAnimeList request per 1,000 anime
+  on your list.
 - **Keep both lists in step**: link your AniList and MyAnimeList accounts in the settings, and every
   episode and score you save goes to both.
 - **Put a change back**: Recent changes lists what you've saved in this tab, newest first, with a
