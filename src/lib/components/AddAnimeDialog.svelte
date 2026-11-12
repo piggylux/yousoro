@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { enhance, type SubmitFunction } from '$app/forms';
   import { page } from '$app/state';
   import { tick, untrack } from 'svelte';
   import type { Attachment } from 'svelte/attachments';
@@ -7,8 +6,6 @@
   import {
     continuesUnseen,
     currentSeason,
-    describeListed,
-    describeWatching,
     forgetRecentSearches,
     foundState,
     hasSearch,
@@ -26,6 +23,7 @@
     searchText,
     seasonAnime,
     seasonName,
+    seasonSlug,
     SEARCH_DELAY_MS,
     shortTitle,
     sideNotes,
@@ -35,18 +33,13 @@
     type FoundAnime,
     type WatchedAnime,
   } from '#lib/anime-search.js';
-  import { forgetChange, recordListChange, updateChange } from '#lib/change-history.js';
+  import AddToListActions from '#lib/components/AddToListActions.svelte';
   import CloseButton from '#lib/components/CloseButton.svelte';
   import SharedAnimePoster from '#lib/components/SharedAnimePoster.svelte';
   import { closeOnBackdrop } from '#lib/dialog.js';
+  import { ListAdds } from '#lib/list-adds.svelte.js';
   import { sequelFacts } from '#lib/planning.js';
-  import {
-    isBefore,
-    type Before,
-    type LinkedFailure,
-    type ListMove,
-    type OtherList,
-  } from '#lib/types/api.js';
+  import type { ListMove, OtherList } from '#lib/types/api.js';
   import { animePageUrl, DOMAIN_NAMES, type Domain } from '#lib/types/domain.js';
 
   type Props = {
@@ -72,6 +65,8 @@
     onShow?: (animeId: number) => void;
     /** Called when an add was undone, with the list the anime had gone to */
     onUndone?: (anime: FoundAnime, list: ListMove) => void;
+    /** The list's season page, to see the whole of the season shown, picked for its owner */
+    seasonPath?: string;
   };
 
   let {
@@ -86,6 +81,7 @@
     onAdded,
     onShow,
     onUndone,
+    seasonPath,
   }: Props = $props();
   const service = $derived(DOMAIN_NAMES[domain]);
   const id = $props.id();
@@ -201,7 +197,7 @@
   let hideListed = $state(false);
   const onLists = (anime: FoundAnime) => {
     const { kind } = stateOf(anime);
-    return (kind === 'watching' || kind === 'listed') && !adds[anime.id]?.added;
+    return (kind === 'watching' || kind === 'listed') && !adds.isAdded(anime.id);
   };
   // What's shown: the season's popular anime while the search is empty, what it found otherwise
   const source = $derived(idle ? seasonal : results);
@@ -411,29 +407,15 @@
     else (links[index - 1] ?? input)?.focus();
   }
 
-  type Add = {
-    saving: boolean;
-    /** The list it went to, or already was on */
-    added?: ListMove;
-    already?: boolean;
-    /** Moved from another of the lists, rather than added */
-    moved?: boolean;
-    /** Where it was before, which undoing puts it back to; unknown when it was there already */
-    before?: Before;
-    /** Where it was on the linked account, when the add changed it there too */
-    linkedBefore?: Before;
-    /** Being undone, which its Undo button shows */
-    undoing?: boolean;
-    /** The add in the history of recent changes, which undoing it here takes off there */
-    changeId?: string;
-    linked?: LinkedFailure;
-    message?: string;
-  };
-  let adds = $state<Record<number, Add>>({});
   // Said by a live region that's there from the start, as one added along with its words often isn't
   let announcement = $state('');
-
-  const announced = (anime: FoundAnime) => anime.status === 'NOT_YET_RELEASED';
+  const adds = new ListAdds({
+    domain: () => domain,
+    signedIn: () => page.data,
+    announce: (text) => (announcement = text),
+    onAdded: (anime, list, progress) => onAdded(anime, list, progress),
+    onUndone: (anime, list) => onUndone?.(anime, list),
+  });
 
   /*
    * Each title takes one line, cut in its middle to the width it has: the width of each title is
@@ -481,215 +463,7 @@
     if (!width || !letterWidth) return TITLE_LENGTH;
     return Math.max(12, Math.floor(width / letterWidth) - 2);
   }
-
-  /**
-   * The one thing to do with a found anime, if any: start a planned one, resume a paused or dropped
-   * one, go to the card of one being watched, plan one not out yet, or start or plan a new one. A
-   * completed one, or one just started, has nothing left to do here
-   */
-  function actionFor(
-    anime: FoundAnime,
-    entry: Add | undefined,
-    where: ReturnType<typeof stateOf>
-  ): 'start' | 'resume' | 'show' | 'plan' | 'add' | null {
-    const out = !announced(anime);
-    if (entry?.added === 'CURRENT') return null;
-    if (entry?.added === 'PLANNING' || (where.kind === 'listed' && where.list === 'PLANNING'))
-      return out ? 'start' : null;
-    if (where.kind === 'listed') return where.list !== 'COMPLETED' && out ? 'resume' : null;
-    if (where.kind === 'watching') return onShow ? 'show' : null;
-    if (where.kind === 'new') return out ? 'add' : 'plan';
-    return null;
-  }
-  const listName = (list: ListMove) => (list === 'CURRENT' ? 'Watching list' : 'plan list');
-  const addedText = ({ added, already, moved }: Add) =>
-    `${already ? 'Already on' : moved ? 'Moved to' : 'Added to'} your ${listName(added!)}`;
-
-  /**
-   * Adds or moves an anime, `from` the list it's moved from when the page knows it; an add learns
-   * where it was from the answer. A retry after the linked account missed the save keeps both
-   */
-  function add(anime: FoundAnime, list: ListMove, moved = false, from?: Before): SubmitFunction {
-    return ({ formElement }) => {
-      const previous = adds[anime.id];
-      adds[anime.id] = { ...previous, saving: true, message: undefined };
-      return async ({ result }) => {
-        if (result.type === 'success') {
-          const data = result.data ?? {};
-          const linked = data.linked as LinkedFailure | undefined;
-          const linkedBefore = isBefore(data.linkedBefore) ? data.linkedBefore : undefined;
-          if (data.linkedOnly) {
-            // Only the linked account was tried again: the add itself stands as it was
-            adds[anime.id] = {
-              ...previous,
-              saving: false,
-              linked,
-              linkedBefore: linkedBefore ?? previous?.linkedBefore,
-            };
-            if (linkedBefore && previous?.changeId)
-              updateChange(previous.changeId, { linkedBefore });
-            if (!linked) announcement = `Saved on both lists: ${anime.title}`;
-          } else {
-            const already = data.already === true;
-            const before = already ? undefined : isBefore(data.before) ? data.before : from;
-            const changeId =
-              already || previous?.added === list
-                ? previous?.changeId
-                : (recordListChange(domain, page.data, {
-                    kind: 'move',
-                    anime: {
-                      mediaId: anime.id,
-                      ...(anime.malId !== null && { malId: anime.malId }),
-                      title: anime.title,
-                      coverUrl: anime.coverUrl,
-                      isAdult: anime.isAdult,
-                    },
-                    before: !before || before === 'NONE' ? null : { status: before },
-                    after: { status: list, progress: Number(data.progress ?? 0) },
-                    ...(linkedBefore && { linkedBefore }),
-                  }) ?? undefined);
-            adds[anime.id] = {
-              saving: false,
-              added: list,
-              already,
-              moved: moved || (previous?.moved ?? false),
-              before,
-              linkedBefore,
-              linked,
-              changeId,
-            };
-            announcement = `${addedText(adds[anime.id])}: ${anime.title}`;
-            if (!already && previous?.added !== list)
-              onAdded(anime, list, Number(data.progress ?? 0));
-          }
-          // The button may be gone; the anime's link keeps the viewer's place in the results
-          await tick();
-          if (!dialog?.contains(document.activeElement) || document.activeElement === dialog)
-            dialog?.querySelector<HTMLElement>(`[data-anime="${anime.id}"] .result-link`)?.focus();
-        } else {
-          adds[anime.id] = {
-            ...previous,
-            saving: false,
-            message:
-              result.type === 'failure'
-                ? String(result.data?.message ?? 'The update failed')
-                : `${service} didn't answer, please try again`,
-          };
-          // Disabling the button while it saved took its focus, which goes back to try again
-          await tick();
-          if (!dialog?.contains(document.activeElement) || document.activeElement === dialog)
-            formElement.querySelector('button')?.focus();
-        }
-      };
-    };
-  }
-
-  /**
-   * Undoes an add: the anime goes back to where it was, which its row shows again, along with what
-   * the linked account kept, if anything
-   */
-  function undo(anime: FoundAnime): SubmitFunction {
-    return ({ formElement }) => {
-      const previous = adds[anime.id];
-      adds[anime.id] = { ...previous, saving: true, undoing: true, message: undefined };
-      return async ({ result }) => {
-        if (result.type === 'success') {
-          const linked = result.data?.linked as LinkedFailure | undefined;
-          if (linked) adds[anime.id] = { saving: false, message: linked.message };
-          else delete adds[anime.id];
-          if (previous.changeId) forgetChange(previous.changeId);
-          announcement = `Undone: ${anime.title}`;
-          onUndone?.(anime, previous.added!);
-          await tick();
-          if (!dialog?.contains(document.activeElement) || document.activeElement === dialog)
-            dialog?.querySelector<HTMLElement>(`[data-anime="${anime.id}"] .result-link`)?.focus();
-        } else {
-          adds[anime.id] = {
-            ...previous,
-            saving: false,
-            undoing: false,
-            message:
-              result.type === 'failure'
-                ? String(result.data?.message ?? "The change couldn't be undone")
-                : `${service} didn't answer, please try again`,
-          };
-          await tick();
-          if (!dialog?.contains(document.activeElement) || document.activeElement === dialog)
-            formElement.querySelector('button')?.focus();
-        }
-      };
-    };
-  }
 </script>
-
-<!--
-  Undoes an add, sending the list it went to, where it was, and where it was on the linked account
-  when the add changed that too
--->
-{#snippet undoForm(anime: FoundAnime, entry: Add)}
-  <form method="POST" action="?/undoAdd" use:enhance={undo(anime)}>
-    <input type="hidden" name="mediaId" value={anime.id} />
-    {#if anime.malId !== null}<input type="hidden" name="malId" value={anime.malId} />{/if}
-    <input type="hidden" name="list" value={entry.added} />
-    <input type="hidden" name="before" value={entry.before} />
-    {#if entry.linkedBefore}<input
-        type="hidden"
-        name="linkedBefore"
-        value={entry.linkedBefore}
-      />{/if}
-    <button
-      class="tw:btn tw:btn-sm tw:btn-ghost action"
-      disabled={entry.saving}
-      aria-busy={entry.undoing}
-      aria-label={`Undo: ${anime.title}`}
-    >
-      {#if entry.undoing}<span
-          class="tw:loading tw:loading-spinner tw:loading-xs"
-          aria-hidden="true"
-        ></span>{:else}Undo{/if}
-    </button>
-  </form>
-{/snippet}
-
-<!--
-  Adds an anime by its AniList id, and its MyAnimeList id, which a MyAnimeList list needs, once the
-  server has checked where it is on the list and on the linked account: `from` the plan, paused or
-  dropped list the page saw it on, for a move, which stays put if it has moved on since. A retry
-  after the linked account missed the add only tries that account again. Planning has a bookmark;
-  beside "Start" on a phone, it's only the bookmark
--->
-{#snippet addForm(
-  anime: FoundAnime,
-  list: ListMove,
-  label: string,
-  name: string,
-  how: 'add' | 'move' | 'retry',
-  look: 'plain' | 'compact' = 'plain',
-  from?: Before
-)}
-  {@const saving = adds[anime.id]?.saving ?? false}
-  <!-- Waiting on an undo, it can't be pressed, but it isn't what's busy -->
-  {@const busy = saving && !adds[anime.id]?.undoing}
-  <form method="POST" action="?/addAnime" use:enhance={add(anime, list, how === 'move', from)}>
-    <input type="hidden" name="mediaId" value={anime.id} />
-    {#if anime.malId !== null}<input type="hidden" name="malId" value={anime.malId} />{/if}
-    <input type="hidden" name="list" value={list} />
-    {#if from}<input type="hidden" name="from" value={from} />{/if}
-    {#if how === 'retry'}<input type="hidden" name="retry" value="linked" />{/if}
-    <button
-      class={['tw:btn tw:btn-sm', 'action', look === 'compact' && 'compact-action']}
-      disabled={saving}
-      aria-busy={busy}
-      aria-label={`${name}: ${anime.title}`}
-    >
-      {#if busy}<span class="tw:loading tw:loading-spinner tw:loading-xs" aria-hidden="true"
-        ></span>{:else}
-        {#if list === 'PLANNING' && how !== 'retry'}{@render bookmark()}{/if}
-        <span class={look === 'compact' ? 'compact-label' : undefined}>{label}</span>
-      {/if}
-    </button>
-  </form>
-{/snippet}
 
 <!--
   A title, cut in its middle when it's huge, the whole of it then a tooltip and what screen readers
@@ -707,19 +481,6 @@
   {#if marked}{#each highlightMatches(text, words) as piece, index (index)}{#if piece.match}<mark
           >{piece.text}</mark
         >{:else}{piece.text}{/if}{/each}{:else}{text}{/if}
-{/snippet}
-
-{#snippet bookmark()}
-  <svg
-    viewBox="0 0 24 24"
-    width="16"
-    height="16"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="1.8"
-    stroke-linejoin="round"
-    aria-hidden="true"><path d="M7 4h10v16l-5-4-5 4z" /></svg
-  >
 {/snippet}
 
 <dialog
@@ -828,7 +589,12 @@
     {/if}
 
     {#if idle && season && visible.length}
-      <h3 class="season-heading" id={`${id}-season`}>Popular in {seasonName(season)}</h3>
+      <div class="season-heading">
+        <h3 id={`${id}-season`}>Popular in {seasonName(season)}</h3>
+        {#if seasonPath}<a href={`${seasonPath}/${seasonSlug(season)}`}
+            >See all, picked for you<span aria-hidden="true">&nbsp;→</span></a
+          >{/if}
+      </div>
     {/if}
     {#if visible.length}
       <ul
@@ -944,22 +710,13 @@
   anime: FoundAnime,
   { part, series, sideOf = null }: { part?: number; series?: string; sideOf?: string | null }
 )}
-  {@const entry = adds[anime.id]}
   {@const where = stateOf(anime)}
   {@const titles = titlesFor(anime, words)}
   {@const title = series ? shortTitle(titles.title, series) : titles.title}
   {@const continues = continuesUnseen(anime, found)}
-  {@const action = actionFor(anime, entry, where)}
-  {@const undoable = !!entry?.added && entry.before !== undefined}
   {@const other = title === titles.title ? titles.other : null}
-  {@const status = entry?.added
-    ? addedText(entry)
-    : where.kind === 'watching'
-      ? describeWatching(where.anime)
-      : where.kind === 'listed'
-        ? describeListed(where.list, domain)
-        : null}
-  {@const done = !!entry?.added || (where.kind === 'listed' && where.list === 'COMPLETED')}
+  {@const status = adds.statusFor(anime, where)}
+  {@const done = adds.done(anime, where)}
   {@const notes = [
     continues && `Continues ${continues}`,
     sideOf && `Side story of ${sideOf}`,
@@ -1012,64 +769,15 @@
         <span class="tw:sr-only">, opens in a new tab</span>
       </span>
     </a>
-    <!-- There even when empty, as a phone keeps a row for it under each anime -->
-    <div class="row-actions">
-      {#if action || undoable}
-        {#if action === 'start'}
-          {@render addForm(
-            anime,
-            'CURRENT',
-            'Start',
-            'Start watching',
-            'move',
-            'plain',
-            'PLANNING'
-          )}
-        {:else if action === 'resume' && where.kind === 'listed'}
-          {@render addForm(
-            anime,
-            'CURRENT',
-            'Resume',
-            'Resume watching',
-            'move',
-            'plain',
-            where.list as Before
-          )}
-        {:else if action === 'show'}
-          <button
-            type="button"
-            class="tw:btn tw:btn-sm action"
-            aria-label={`Show on my list: ${anime.title}`}
-            onclick={() => onShow?.(anime.id)}>Show</button
-          >
-        {:else if action === 'plan'}
-          {@render addForm(anime, 'PLANNING', 'Plan', 'Add to Planning', 'add')}
-        {:else if action === 'add'}
-          {@render addForm(anime, 'CURRENT', 'Start', 'Start watching', 'add')}
-          {@render addForm(anime, 'PLANNING', 'Plan', 'Add to Planning', 'add', 'compact')}
-        {/if}
-        {#if undoable}{@render undoForm(anime, entry!)}{/if}
-      {/if}
-    </div>
+    <AddToListActions
+      {adds}
+      {anime}
+      {where}
+      {onShow}
+      focusFallback={() =>
+        dialog?.querySelector<HTMLElement>(`[data-anime="${anime.id}"] .result-link`)}
+    />
   </div>
-  {#if (entry?.added && entry.linked) || entry?.message}
-    <div class="notes">
-      {#if entry?.added && entry.linked}
-        <p class="tw:text-error" role="alert">{entry.linked.message}</p>
-        <!-- Moved from a list, it says which, as the linked account is likely on it too -->
-        {#if entry.linked.retry}{@render addForm(
-            anime,
-            entry.added,
-            'Try again',
-            'Try again',
-            'retry',
-            'plain',
-            entry.moved ? entry.before : undefined
-          )}{/if}
-      {/if}
-      {#if entry?.message}<p class="tw:text-error" role="alert">{entry.message}</p>{/if}
-    </div>
-  {/if}
 {/snippet}
 
 <style>
@@ -1197,7 +905,31 @@
   }
 
   .season-heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 2px 12px;
     margin-bottom: 6px;
+  }
+
+  .season-heading a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 32px;
+    border-radius: var(--radius-control);
+    color: var(--you-blue);
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+
+  .season-heading a:hover {
+    text-decoration: underline;
+  }
+
+  .season-heading a:focus-visible {
+    outline: 3px solid var(--you-blue);
+    outline-offset: 2px;
   }
 
   .recent-heading {
@@ -1259,12 +991,16 @@
     list-style: none;
   }
 
-  /* Its one column narrows to the dialog, as the one-line titles in it would otherwise widen it */
+  /*
+   * Its one column narrows to the dialog, as the one-line titles in it would otherwise widen it. As
+   * narrow as a phone's, its buttons take a line of their own (see AddToListActions)
+   */
   .result {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
     gap: 8px;
     padding: 10px 12px;
+    container-type: inline-size;
   }
 
   .results > li + li {
@@ -1377,60 +1113,12 @@
     font-weight: 600;
   }
 
-  .row-actions {
-    display: flex;
-    flex: none;
-    gap: 6px;
-    margin-left: auto;
-  }
-
-  .action {
-    min-width: 4.5rem;
-    gap: 4px;
-  }
-
-  /* Touch screens and phones get buttons big enough to tap, under the anime when they don't fit */
+  /* Touch screens and phones get buttons big enough to tap */
   @media (pointer: coarse), (max-width: 480px) {
-    .action,
     .clear,
     .recent-search,
     .show-more {
       min-height: 44px;
-    }
-  }
-
-  /*
-   * On a phone, the buttons take the row under the anime. Planning beside starting is a square
-   * bookmark there, its name left to screen readers, as there's no room to say it
-   */
-  @media (max-width: 480px) {
-    /* Kept, empty or not, so a result with nothing to do is as tall as the rest */
-    .row-actions {
-      flex: 1 1 100%;
-      min-height: 44px;
-    }
-
-    .row-actions > form,
-    .row-actions > .action {
-      flex: 1;
-    }
-
-    .row-actions .action {
-      width: 100%;
-    }
-
-    .row-actions > form:has(.compact-action) {
-      flex: none;
-    }
-
-    .row-actions .compact-action {
-      width: 44px;
-      min-width: 0;
-      padding: 0;
-    }
-
-    .compact-label {
-      display: none;
     }
   }
 
@@ -1498,14 +1186,5 @@
     .heading p {
       display: none;
     }
-  }
-
-  .notes {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 8px;
-    font-size: 0.8rem;
-    overflow-wrap: anywhere;
   }
 </style>

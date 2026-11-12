@@ -1,9 +1,22 @@
 import { matchesSearch, searchIndex, searchWords } from '#lib/anime.js';
 import { distinctEnglishTitle, groupSeries, type Series } from '#lib/planning.js';
 import { retryAfterSeconds } from '#lib/read-retry.js';
+import type { AnimeSeason } from '#lib/seasons.js';
 import type { AiringStatus, Anime, Sequel } from '#lib/types/anime.js';
 import type { ListedIds, OtherList } from '#lib/types/api.js';
 import { LIST_NAMES, type Domain } from '#lib/types/domain.js';
+
+export {
+  currentSeason,
+  defaultSeason,
+  nextSeason,
+  parseSeasonSlug,
+  seasonName,
+  seasonSlug,
+  seasonStartMonth,
+  seasonTiming,
+  type AnimeSeason,
+} from '#lib/seasons.js';
 
 /**
  * Finding an anime to add, by asking AniList straight from the browser. Each search counts against
@@ -47,9 +60,9 @@ export type FoundAnime = Sequel & {
   sideOf: string | null;
 };
 
-export type SearchOutcome =
+export type SearchOutcome<T = FoundAnime> =
   /** `more` when AniList has more to show, and scrolling may ask for it */
-  | { results: FoundAnime[]; more: boolean }
+  | { results: T[]; more: boolean }
   | { message: string; /** Seconds until AniList takes searches again */ retryAfter?: number };
 
 /**
@@ -95,6 +108,8 @@ type SearchMedia = {
       relationType: string | null;
       node: {
         id: number;
+        /** Only read for a season's lineup, whose MyAnimeList lists match prequels by it */
+        idMal?: number | null;
         type: string | null;
         title: { romaji: string | null; english: string | null } | null;
       } | null;
@@ -102,8 +117,11 @@ type SearchMedia = {
   } | null;
 };
 
-/** What each anime found is read with, whether by a search or as popular this season */
-const FOUND_FIELDS = `
+/**
+ * What each anime found is read with, whether by a search or as popular this season; a season's
+ * lineup also reads the MyAnimeList ids of what it continues
+ */
+const foundFields = (relatedMalIds: boolean) => `
       id
       idMal
       format
@@ -113,7 +131,8 @@ const FOUND_FIELDS = `
       title { romaji english }
       coverImage { large }
       startDate { year month day }
-      relations { edges { relationType node { id type title { romaji english } } } }`;
+      relations { edges { relationType node { id${relatedMalIds ? ' idMal' : ''} type title { romaji english } } } }`;
+const FOUND_FIELDS = foundFields(false);
 
 const SEARCH_QUERY = `query ($search: String, $page: Int, $perPage: Int, $isAdult: Boolean) {
   Page(page: $page, perPage: $perPage) {
@@ -122,23 +141,6 @@ const SEARCH_QUERY = `query ($search: String, $page: Int, $perPage: Int, $isAdul
     }
   }
 }`;
-
-/** An anime season, as AniList names them */
-export type AnimeSeason = { season: 'WINTER' | 'SPRING' | 'SUMMER' | 'FALL'; year: number };
-const SEASONS = ['WINTER', 'SPRING', 'SUMMER', 'FALL'] as const;
-
-/**
- * The season airing now, as anime seasons go: winter from January, spring from April, summer from
- * July and fall from October, in the viewer's own time
- */
-export function currentSeason(now = new Date()): AnimeSeason {
-  return { season: SEASONS[Math.floor(now.getMonth() / 3)], year: now.getFullYear() };
-}
-
-/** "Fall 2026" */
-export function seasonName({ season, year }: AnimeSeason): string {
-  return `${season[0]}${season.slice(1).toLowerCase()} ${year}`;
-}
 
 /** How many of the season's most popular anime the empty search shows, and shows more of */
 export const SEASON_RESULTS = 10;
@@ -179,6 +181,173 @@ export function seasonRequestBody(season: AnimeSeason, showMature: boolean, page
 }
 
 /**
+ * How many anime each request for a season's whole lineup asks for, the most AniList gives at once,
+ * and how many requests it makes at most: a season's 150 most popular series and online releases,
+ * past which there's little but shorts for children
+ */
+export const LINEUP_PAGE_SIZE = 50;
+export const LINEUP_PAGES = 3;
+
+// As the season's popular anime, with what ranking them for a viewer and telling them apart needs.
+// Kept apart from the search's fields, which every search would otherwise pay for
+const LINEUP_QUERY = `query (
+  $season: MediaSeason
+  $year: Int
+  $page: Int
+  $perPage: Int
+  $isAdult: Boolean
+) {
+  Page(page: $page, perPage: $perPage) {
+    pageInfo { hasNextPage }
+    media(
+      season: $season
+      seasonYear: $year
+      type: ANIME
+      format_in: [TV, TV_SHORT, ONA]
+      sort: POPULARITY_DESC
+      isAdult: $isAdult
+    ) {${foundFields(true)}
+      genres
+      tags { name rank isAdult isMediaSpoiler isGeneralSpoiler }
+      studios(isMain: true) { nodes { name } }
+      averageScore
+      popularity
+      description(asHtml: false)
+    }
+  }
+}`;
+
+/** The request for a page of a season's whole lineup, adult anime only when the viewer shows them */
+export function lineupRequestBody(season: AnimeSeason, showMature: boolean, page = 1): string {
+  return JSON.stringify({
+    query: LINEUP_QUERY,
+    variables: {
+      ...season,
+      page,
+      perPage: LINEUP_PAGE_SIZE,
+      ...(showMature ? {} : { isAdult: false }),
+    },
+  });
+}
+
+/** An anime another one continues or is a side story of, as a season's lineup names it */
+export type RelatedAnime = { id: number; malId: number | null; title: string };
+
+/** An anime of a season's lineup, with what ranking it for a viewer and describing it needs */
+export type SeasonAnime = FoundAnime & {
+  /** As AniList names them */
+  genres: string[];
+  /**
+   * AniList's tags for it, such as "Isekai" or "Found Family", with how central each is to it out of
+   * 100. Tags that give away the story, and adult ones, are left out
+   */
+  tags: { name: string; rank: number }[];
+  /** The main studios that made it */
+  studios: string[];
+  /** AniList users' weighted average score out of 100; null until enough have scored it */
+  averageScore: number | null;
+  /** How many AniList users have it on a list */
+  popularity: number;
+  /** AniList's description, as plain text; null when it has none */
+  synopsis: string | null;
+  /** The anime it continues, with their MyAnimeList ids, which MyAnimeList lists go by */
+  prequelLinks: RelatedAnime[];
+  /** The anime it's a side story or spin-off of, likewise */
+  parentLinks: RelatedAnime[];
+};
+
+type LineupMedia = SearchMedia & {
+  genres: (string | null)[] | null;
+  tags:
+    | ({
+        name: string | null;
+        rank: number | null;
+        isAdult: boolean | null;
+        isMediaSpoiler: boolean | null;
+        isGeneralSpoiler: boolean | null;
+      } | null)[]
+    | null;
+  studios: { nodes: ({ name: string | null } | null)[] | null } | null;
+  averageScore: number | null;
+  popularity: number | null;
+  description: string | null;
+};
+
+const ENTITIES: Record<string, string> = {
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  apos: "'",
+  nbsp: ' ',
+  mdash: '—',
+  ndash: '–',
+  hellip: '…',
+};
+
+/**
+ * AniList's description as plain text, to show as text rather than as markup: its line breaks kept,
+ * its other tags dropped and its character references read. Null when nothing is left
+ */
+export function plainSynopsis(description: string | null | undefined): string | null {
+  if (!description) return null;
+  const text = description
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&(#x[\da-f]+|#\d+|[a-z]+);/gi, (whole, name: string) => {
+      if (name[0] !== '#') return ENTITIES[name.toLowerCase()] ?? whole;
+      const code =
+        name[1] === 'x' || name[1] === 'X' ? parseInt(name.slice(2), 16) : Number(name.slice(1));
+      return Number.isSafeInteger(code) && code > 0 && code <= 0x10ffff
+        ? String.fromCodePoint(code)
+        : whole;
+    })
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  return text || null;
+}
+
+/** The anime of a page of a season's lineup, in AniList's order; one without a title is left out */
+export function parseLineup(body: unknown): SeasonAnime[] {
+  const media = (body as { data?: { Page?: { media?: (LineupMedia | null)[] } } } | null)?.data
+    ?.Page?.media;
+  if (!Array.isArray(media)) return [];
+  return media.flatMap((node) => {
+    const found = node && parseFound(node);
+    if (!node || !found) return [];
+    const links = (type: string) =>
+      (node.relations?.edges ?? []).flatMap((edge) => {
+        const title = edge?.node?.title?.romaji ?? edge?.node?.title?.english;
+        return edge?.relationType === type && edge.node?.type === 'ANIME' && title
+          ? [{ id: edge.node.id, malId: edge.node.idMal ?? null, title }]
+          : [];
+      });
+    return [
+      {
+        ...found,
+        genres: (node.genres ?? []).filter((genre): genre is string => !!genre),
+        tags: (node.tags ?? []).flatMap((tag) =>
+          tag?.name && !tag.isAdult && !tag.isMediaSpoiler && !tag.isGeneralSpoiler
+            ? [{ name: tag.name, rank: tag.rank ?? 0 }]
+            : []
+        ),
+        studios: [
+          ...new Set(
+            (node.studios?.nodes ?? []).flatMap((studio) => (studio?.name ? [studio.name] : []))
+          ),
+        ],
+        averageScore: node.averageScore ?? null,
+        popularity: node.popularity ?? 0,
+        synopsis: plainSynopsis(node.description),
+        prequelLinks: links('PREQUEL'),
+        parentLinks: links('PARENT'),
+      },
+    ];
+  });
+}
+
+/**
  * The request for a page of a search, the first by default. Adult anime are only searched when the
  * viewer's setting shows them; AniList otherwise returns both
  */
@@ -200,44 +369,48 @@ export function parseSearchResults(body: unknown): FoundAnime[] {
     ?.Page?.media;
   if (!Array.isArray(media)) return [];
   return media.flatMap((node) => {
-    const title = node?.title?.romaji ?? node?.title?.english;
-    if (!node || !Number.isSafeInteger(node.id) || !title) return [];
-    // Anime only, not the manga it adapts. Alternative versions, recaps and anime that only share
-    // characters are other stories, so they're not followed
-    const related = (type: string) =>
-      (node.relations?.edges ?? []).flatMap((edge) =>
-        edge?.relationType === type && edge.node?.type === 'ANIME' ? [edge.node] : []
-      );
-    const prequels = related('PREQUEL');
-    const parents = related('PARENT');
-    const titleOf = (anime?: { title: SearchMedia['title'] }) =>
-      anime?.title?.romaji ?? anime?.title?.english ?? null;
-    return [
-      {
-        id: node.id,
-        malId: node.idMal ?? null,
-        title,
-        englishTitle: node.title?.english ?? null,
-        coverUrl: node.coverImage?.large ?? null,
-        isAdult: node.isAdult ?? false,
-        // Without a status, it's most likely out already, as on the plan list
-        status: node.status ?? 'FINISHED',
-        format: node.format,
-        episodes: node.episodes,
-        startDate: {
-          year: node.startDate?.year ?? null,
-          month: node.startDate?.month ?? null,
-          day: node.startDate?.day ?? null,
-        },
-        planned: false,
-        year: node.startDate?.year ?? null,
-        prequels: [...new Set(prequels.map((prequel) => prequel.id))],
-        continues: titleOf(prequels[0]),
-        parents: [...new Set(parents.map((parent) => parent.id))],
-        sideOf: titleOf(parents[0]),
-      },
-    ];
+    const found = node && parseFound(node);
+    return found ? [found] : [];
   });
+}
+
+/** An anime AniList found, or null when it has no title to show it by */
+function parseFound(node: SearchMedia): FoundAnime | null {
+  const title = node.title?.romaji ?? node.title?.english;
+  if (!Number.isSafeInteger(node.id) || !title) return null;
+  // Anime only, not the manga it adapts. Alternative versions, recaps and anime that only share
+  // characters are other stories, so they're not followed
+  const related = (type: string) =>
+    (node.relations?.edges ?? []).flatMap((edge) =>
+      edge?.relationType === type && edge.node?.type === 'ANIME' ? [edge.node] : []
+    );
+  const prequels = related('PREQUEL');
+  const parents = related('PARENT');
+  const titleOf = (anime?: { title: SearchMedia['title'] }) =>
+    anime?.title?.romaji ?? anime?.title?.english ?? null;
+  return {
+    id: node.id,
+    malId: node.idMal ?? null,
+    title,
+    englishTitle: node.title?.english ?? null,
+    coverUrl: node.coverImage?.large ?? null,
+    isAdult: node.isAdult ?? false,
+    // Without a status, it's most likely out already, as on the plan list
+    status: node.status ?? 'FINISHED',
+    format: node.format,
+    episodes: node.episodes,
+    startDate: {
+      year: node.startDate?.year ?? null,
+      month: node.startDate?.month ?? null,
+      day: node.startDate?.day ?? null,
+    },
+    planned: false,
+    year: node.startDate?.year ?? null,
+    prequels: [...new Set(prequels.map((prequel) => prequel.id))],
+    continues: titleOf(prequels[0]),
+    parents: [...new Set(parents.map((parent) => parent.id))],
+    sideOf: titleOf(parents[0]),
+  };
 }
 
 /**
@@ -617,9 +790,10 @@ export function searchRetryAfter(headers: Headers, now = Date.now()): number {
   return retryAfterSeconds(headers.get('Retry-After'), now);
 }
 
-// Searching the same words again in one visit, as when going back to a result, asks nothing
+// Searching the same words again in one visit, as when going back to a result, asks nothing. A
+// season's lineup is remembered the same way, under keys of its own
 const MAX_REMEMBERED = 50;
-const remembered = new Map<string, { results: FoundAnime[]; more: boolean }>();
+const remembered = new Map<string, { results: unknown[]; more: boolean }>();
 
 type AskOptions = {
   showMature: boolean;
@@ -650,13 +824,58 @@ export function seasonAnime(season: AnimeSeason, options: AskOptions): Promise<S
   return askAniList(key, seasonRequestBody(season, showMature, page), options);
 }
 
+/**
+ * A season's whole lineup, the most popular first, page after page until AniList has no more or
+ * `LINEUP_PAGES` were read: each page a request on the viewer's own AniList allowance, asked once a
+ * visit. Never throws, but for an aborted read; a page that fails fails the whole, and trying again
+ * only asks for the pages not read yet
+ */
+export async function seasonLineup(
+  season: AnimeSeason,
+  options: Omit<AskOptions, 'page'>
+): Promise<SearchOutcome<SeasonAnime>> {
+  const { showMature } = options;
+  const lineup: SeasonAnime[] = [];
+  for (let page = 1; page <= LINEUP_PAGES; page++) {
+    const key = `lineup:${showMature ? 'all' : 'safe'}:${page}:${season.season}:${season.year}`;
+    const outcome = await askAniList(key, lineupRequestBody(season, showMature, page), {
+      ...options,
+      page,
+      parse: parseLineup,
+      lastPage: LINEUP_PAGES,
+      failed: "AniList couldn't list the season right now. Please try again.",
+      asked: 'requests',
+    });
+    if ('message' in outcome) return outcome;
+    lineup.push(...newResults(lineup, outcome.results));
+    if (!outcome.more) break;
+  }
+  return { results: lineup, more: false };
+}
+
 /** Asks AniList for anime, from the browser, unless the same was asked earlier in this visit */
-async function askAniList(
+async function askAniList<T = FoundAnime>(
   key: string,
   body: string,
-  { page = 1, signal, fetch: send = fetch }: AskOptions
-): Promise<SearchOutcome> {
-  const known = remembered.get(key);
+  {
+    page = 1,
+    signal,
+    fetch: send = fetch,
+    parse = parseSearchResults as (body: unknown) => T[],
+    lastPage = MAX_PAGES,
+    failed = "AniList couldn't search right now. Please try again.",
+    asked = 'searches',
+  }: AskOptions & {
+    parse?: (body: unknown) => T[];
+    /** The last page that may be asked for, whatever AniList has */
+    lastPage?: number;
+    /** What to say when AniList answers with an error */
+    failed?: string;
+    /** What the viewer asked AniList for, as said when it had too many: "searches" */
+    asked?: string;
+  }
+): Promise<SearchOutcome<T>> {
+  const known = remembered.get(key) as { results: T[]; more: boolean } | undefined;
   if (known) return known;
   let response: Response;
   try {
@@ -675,19 +894,19 @@ async function askAniList(
   if (response.status === 429) {
     const retryAfter = searchRetryAfter(response.headers);
     return {
-      message: `AniList has had a lot of searches from you. Try again in ${retryAfter} seconds.`,
+      message: `AniList has had a lot of ${asked} from you. Try again in ${retryAfter} seconds.`,
       retryAfter,
     };
   }
   const answer = await response.json().catch(() => null);
   // An answer with errors may still carry data, but not all of it, so it's neither shown nor kept
   if (!response.ok || answer?.errors?.length || !Array.isArray(answer?.data?.Page?.media)) {
-    return { message: "AniList couldn't search right now. Please try again." };
+    return { message: failed };
   }
   const outcome = {
-    results: parseSearchResults(answer),
+    results: parse(answer),
     // Past the last page scrolling may show, there's no more, whatever AniList has
-    more: answer.data.Page.pageInfo?.hasNextPage === true && page < MAX_PAGES,
+    more: answer.data.Page.pageInfo?.hasNextPage === true && page < lastPage,
   };
   if (remembered.size >= MAX_REMEMBERED) remembered.delete(remembered.keys().next().value!);
   remembered.set(key, outcome);
@@ -698,7 +917,7 @@ async function askAniList(
  * The anime of a further page that aren't shown already: AniList's pages can shift between
  * requests, so one can repeat an anime from the page before
  */
-export function newResults(shown: FoundAnime[], page: FoundAnime[]): FoundAnime[] {
+export function newResults<T extends { id: number }>(shown: T[], page: T[]): T[] {
   const ids = new Set(shown.map(({ id }) => id));
   return page.filter(({ id }) => !ids.has(id));
 }

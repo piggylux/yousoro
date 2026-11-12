@@ -5,7 +5,15 @@
     retryKey,
     recovered = false,
     onretry,
-  }: { retryAt: number; retryKey: string; recovered?: boolean; onretry: () => void } = $props();
+    service = 'AniList',
+  }: {
+    retryAt: number;
+    retryKey: string;
+    recovered?: boolean;
+    onretry: () => void;
+    /** Who is busy, as the reader knows it */
+    service?: string;
+  } = $props();
   let attempt = $state(0);
   let now = $state(Date.now());
   $effect(() => {
@@ -28,7 +36,7 @@
 </script>
 
 {#if retryAt && !recovered}<p role="status">
-    {#if attempt}AniList is busy. Retrying automatically in {Math.max(
+    {#if attempt}{service} is busy. Retrying automatically in {Math.max(
         0,
         Math.ceil((retryAt - now) / 1000)
       )}s ({attempt}/{MAX_READ_RETRIES}).{:else}Automatic retries paused. You can try again manually

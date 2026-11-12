@@ -10,6 +10,7 @@ import {
   deleteEntry,
   getListEntry,
   getListStatuses,
+  MalNotFoundError,
   MalTokenError,
   moveToList,
   saveEntry,
@@ -241,6 +242,90 @@ describe('adding an anime found by search', () => {
       linkedOnly: true,
     });
     expect(moveToList).not.toHaveBeenCalled();
+  });
+
+  describe('from a page that read the list itself', () => {
+    it('adds a new anime in one request, without asking where it is', async () => {
+      const saved = {
+        progress: 0,
+        score: 0,
+        status: 'PLANNING',
+        startedAt: null,
+        completedAt: null,
+      };
+      vi.mocked(moveToList).mockResolvedValue(saved);
+
+      expect(
+        await add({ mediaId: '7', malId: '1007', list: 'PLANNING', from: 'NONE', known: '1' })
+      ).toEqual({ mediaId: 7, malId: 1007, ...saved, before: 'NONE' });
+      expect(getListStatuses).not.toHaveBeenCalled();
+      expect(moveToList).toHaveBeenCalledTimes(1);
+    });
+
+    it('starts a planned one in one request, and remembers where it was for Undo', async () => {
+      const saved = {
+        progress: 0,
+        score: 0,
+        status: 'CURRENT',
+        startedAt: null,
+        completedAt: null,
+      };
+      vi.mocked(moveToList).mockResolvedValue(saved);
+
+      expect(
+        await add({ mediaId: '7', malId: '1007', list: 'CURRENT', from: 'PLANNING', known: '1' })
+      ).toMatchObject({ status: 'CURRENT', before: 'PLANNING' });
+      expect(getListStatuses).not.toHaveBeenCalled();
+    });
+
+    it('still asks when the page says nothing of where it saw it, or tries the linked account again', async () => {
+      vi.mocked(getListStatuses).mockResolvedValue(new Map([[1007, 'PLANNING']]));
+
+      await add({ mediaId: '7', malId: '1007', list: 'PLANNING', known: '1' });
+      expect(
+        await add({
+          mediaId: '7',
+          malId: '1007',
+          list: 'PLANNING',
+          from: 'NONE',
+          known: '1',
+          retry: 'linked',
+        })
+      ).toMatchObject({ linkedOnly: true });
+
+      expect(getListStatuses).toHaveBeenCalledTimes(2);
+      expect(moveToList).not.toHaveBeenCalled();
+    });
+
+    it("says MyAnimeList doesn't have the anime when the save finds it missing", async () => {
+      vi.mocked(moveToList).mockRejectedValue(new MalNotFoundError('not found'));
+
+      expect(
+        await add({ mediaId: '7', malId: '1007', list: 'CURRENT', from: 'NONE', known: '1' })
+      ).toMatchObject({ status: 404, data: { message: "MyAnimeList doesn't have this anime" } });
+    });
+
+    it('adds to an AniList list with only the save', async () => {
+      const saved = {
+        progress: 0,
+        score: 0,
+        status: 'PLANNING',
+        startedAt: null,
+        completedAt: null,
+      };
+      vi.mocked(saveAniListEntry).mockResolvedValue(saved);
+      const action = actions.addAnime!;
+      const fields = { mediaId: '7', list: 'PLANNING', from: 'NONE', known: '1' };
+      const request = event(null, fields, aniListSession, 'anilist').request;
+
+      expect(await action(request as unknown as Parameters<typeof action>[0])).toMatchObject({
+        status: 'PLANNING',
+        before: 'NONE',
+      });
+      expect(saveAniListEntry).toHaveBeenCalledTimes(1);
+      // Nothing else reached AniList: no read of where it was
+      expect(fetch).not.toHaveBeenCalled();
+    });
   });
 
   it("turns away an anime MyAnimeList doesn't have, and a list it can't add to", async () => {

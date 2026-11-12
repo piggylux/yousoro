@@ -7,6 +7,7 @@ import {
   getListedIds,
   getListStatuses,
   getPlanToWatchEntries,
+  getSeasonTasteEntries,
   getWatchingEntries,
   MalForbiddenError,
   MalNotFoundError,
@@ -655,5 +656,71 @@ describe('getListStatuses', () => {
     vi.mocked(fetch).mockResolvedValue(new Response(null, { status: 401 }));
 
     await expect(getListStatuses('token', [1])).rejects.toBeInstanceOf(MalTokenError);
+  });
+});
+
+describe('getSeasonTasteEntries', () => {
+  const tasted = (id: number, status: string, score: number) => ({
+    ...entry(id, status),
+    node: {
+      id,
+      title: `Anime ${id}`,
+      genres: [{ id: 1, name: 'Drama' }],
+      studios: [{ id: 2, name: 'Madhouse' }],
+    },
+    list_status: { ...entry(id, status).list_status, score },
+  });
+
+  it('reads the whole list with genres and studios, one request per 1,000 anime', async () => {
+    vi.mocked(fetch).mockImplementation(async (url) =>
+      String(url).includes('offset=1000')
+        ? Response.json({ data: [tasted(2, 'dropped', 3)] })
+        : Response.json({
+            data: [tasted(1, 'completed', 8)],
+            paging: { next: `${API}/users/Taster/animelist?offset=1000` },
+          })
+    );
+
+    const entries = await getSeasonTasteEntries('Taster');
+
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(takeMalRequest).toHaveBeenCalledWith('optional');
+    const [url] = vi.mocked(fetch).mock.calls[0];
+    expect(String(url)).toBe(
+      `${API}/users/taster/animelist?limit=1000&fields=list_status,genres,studios&nsfw=true`
+    );
+    expect(entries).toEqual([
+      {
+        id: 1,
+        status: 'COMPLETED',
+        progress: 1,
+        score100: 80,
+        genres: ['Drama'],
+        studios: ['Madhouse'],
+      },
+      {
+        id: 2,
+        status: 'DROPPED',
+        progress: 1,
+        score100: 30,
+        genres: ['Drama'],
+        studios: ['Madhouse'],
+      },
+    ]);
+  });
+
+  it('keeps an anonymous read for ten minutes, but never the owner’s own', async () => {
+    vi.mocked(fetch).mockImplementation(async () => Response.json({ data: [] }));
+    const now = Date.now();
+    vi.spyOn(Date, 'now').mockReturnValue(now);
+    await getSeasonTasteEntries('Kept');
+    vi.spyOn(Date, 'now').mockReturnValue(now + 9 * 60 * 1000);
+    await getSeasonTasteEntries('KEPT');
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    await getSeasonTasteEntries('Kept', 'token');
+    await getSeasonTasteEntries('Kept', 'token');
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(String(vi.mocked(fetch).mock.calls[1][0])).toContain('/users/@me/animelist');
   });
 });

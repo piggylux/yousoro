@@ -1,5 +1,6 @@
 import { joinNames } from '#lib/match-words.js';
 import { matchPath } from '#lib/match.js';
+import { defaultSeason, parseSeasonSlug, seasonName } from '#lib/seasons.js';
 import { togetherPath } from '#lib/together.js';
 import { DOMAIN_NAMES, listPath, type Domain } from '#lib/types/domain.js';
 import { wrappedPath } from '#lib/wrapped.js';
@@ -57,6 +58,9 @@ export function getPageSeo(url: SeoUrl, status = 200, resolvedUsername?: string)
   const group = path.match(/^\/user\/anilist\/([^/]+)\/together((?:\/[^/]+)*)$/);
   const wrapped = path.match(/^\/user\/anilist\/([^/]+)\/wrapped\/(\d{4})$/);
   const badge = path.match(/^\/user\/anilist\/([^/]+)\/badge$/);
+  const seasonPage = path.match(
+    /^\/user\/(anilist|myanimelist)\/([^/]+)\/season(?:\/([a-z]+-\d{4}))?$/
+  );
   // The names in the path of a group, a year in anime or a badge, its owner's first
   const owned = group ?? wrapped ?? badge;
   let names: string[] = [];
@@ -106,6 +110,18 @@ export function getPageSeo(url: SeoUrl, status = 200, resolvedUsername?: string)
       type: 'image/jpeg',
       alt: `${name}'s ${year} in anime`,
     };
+  } else if (seasonPage) {
+    // Ranked in the browser for whoever's list it is, and never indexed
+    let name: string;
+    try {
+      name = resolvedUsername || decodeURIComponent(seasonPage[2]);
+    } catch {
+      return { title, description, canonical, image, noindex: true, home: false };
+    }
+    const season = seasonPage[3] ? parseSeasonSlug(seasonPage[3]) : defaultSeason();
+    const shown = season ? seasonName(season) : 'This Season';
+    title = `${shown} Anime Picked for ${name} | ${SITE_NAME}`;
+    description = `The ${shown} anime lineup, ranked for ${name} by how they score genres, themes and studios, with sequels to what they've watched first.`;
   } else if (badge) {
     title = `${names[0]}'s Profile Badge | ${SITE_NAME}`;
     description = `Show what ${names[0]} is watching on an AniList profile, in a README, or anywhere that shows images.`;

@@ -3,6 +3,7 @@ import type { ScoreFormat } from '#lib/score.js';
 import type { Anime, PlannedAnime, PlannedSequel } from '#lib/types/anime.js';
 import type { Domain } from '#lib/types/domain.js';
 import type { Preferences } from '#lib/types/preferences.js';
+import type { SeasonTaste } from '#lib/types/season.js';
 
 export type UserAnimeList = {
   /** The service's id for the list owner, when the service provides it */
@@ -122,9 +123,19 @@ export type PlanningPageData = {
   userProfileLink: string;
 };
 
+/** Someone's taste and lists, as the season page reads them */
+export type TasteRead = {
+  /** The service's id for the list owner, when the service provides it */
+  userId: number | null;
+  /** The username as the service spells it, which may differ in case from the one requested */
+  username: string;
+  taste: SeasonTaste;
+};
+
 export interface Api {
   getUserAnimeList: (username: string) => Promise<UserAnimeList>;
   getPlannedAnime: (username: string) => Promise<PlannedList>;
+  getSeasonTaste: (username: string) => Promise<TasteRead>;
 }
 
 export type AnimePageData = {

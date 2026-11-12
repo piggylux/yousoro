@@ -8,8 +8,7 @@
   import CloseButton from '#lib/components/CloseButton.svelte';
   import ListFilters from '#lib/components/ListFilters.svelte';
   import SharedAnimePoster from '#lib/components/SharedAnimePoster.svelte';
-  import { recordOwnWatchingEntry } from '#lib/friend-watching.js';
-  import { expireRememberedList } from '#lib/list-data.js';
+  import { noteListMove } from '#lib/list-moves.js';
   import {
     countAnime,
     describePlanned,
@@ -295,24 +294,20 @@
             changeId,
           };
           if (pressed) await focusIn(part, '.started a');
-          markStarted(data.domain, data.username, anime);
           // The watching list this tab remembers doesn't have it yet, nor do the friends pages
-          expireRememberedList(data.username, data.domain);
-          if (data.domain === 'anilist' && data.user && anime.id !== null) {
-            recordOwnWatchingEntry(
-              data.user,
-              {
-                id: anime.id,
-                title: anime.title,
-                isAdult: anime.isAdult,
-                // Plan lists have AniList's smallest covers; the friends pages show bigger posters
-                thumbnailUrl: anime.coverUrl?.replace('/cover/small/', '/cover/medium/') ?? '',
-                currentEpisode: progress,
-                rewatching: false,
-              },
-              'CURRENT'
-            );
-          }
+          noteListMove(
+            {
+              domain: data.domain,
+              username: data.username,
+              friendsViewer: data.domain === 'anilist' ? (data.user ?? null) : null,
+            },
+            // Plan lists have AniList's smallest covers; the friends pages show bigger posters
+            {
+              ...anime,
+              coverUrl: anime.coverUrl?.replace('/cover/small/', '/cover/medium/') ?? null,
+            },
+            { list: 'CURRENT', progress }
+          );
         } else {
           // As it was, so an Undo the linked account missed can still be tried again
           starts[key] = { ...before, saving: false, started, message: failedMessage(result) };

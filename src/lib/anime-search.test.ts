@@ -4,19 +4,26 @@ import {
   ANILIST_GRAPHQL_URL,
   continuesUnseen,
   currentSeason,
+  defaultSeason,
   describeListed,
   describeWatching,
   forgetSearches,
   forgetRecentSearches,
   foundState,
   hidesListed,
+  LINEUP_PAGES,
+  lineupRequestBody,
   MAX_PAGES,
   middleEllipsis,
   newResults,
+  nextSeason,
   highlightMatches,
   hasSearch,
   listedLookup,
+  parseLineup,
   parseSearchResults,
+  parseSeasonSlug,
+  plainSynopsis,
   recentSearches,
   rememberHidesListed,
   rememberSearch,
@@ -28,8 +35,11 @@ import {
   sideNotes,
   searchText,
   seasonAnime,
+  seasonLineup,
   seasonName,
   seasonRequestBody,
+  seasonSlug,
+  seasonTiming,
   shortTitle,
   TITLE_LENGTH,
   titlesFor,
@@ -712,5 +722,197 @@ describe('huge titles on a narrow line', () => {
     expect(short).toMatch(/^Tsuihou Sareta … \S/);
     expect(short).not.toMatch(/… usou/);
     expect(short.endsWith('Suru')).toBe(true);
+  });
+});
+
+describe('the seasons the season page shows', () => {
+  it.each([
+    [
+      { season: 'WINTER', year: 2026 },
+      { season: 'SPRING', year: 2026 },
+    ],
+    [
+      { season: 'SUMMER', year: 2026 },
+      { season: 'FALL', year: 2026 },
+    ],
+    [
+      { season: 'FALL', year: 2026 },
+      { season: 'WINTER', year: 2027 },
+    ],
+  ] as const)('after %o comes %o', (season, next) => {
+    expect(nextSeason(season)).toEqual(next);
+  });
+
+  it.each([
+    [new Date(2026, 9, 1), { season: 'FALL', year: 2026 }],
+    [new Date(2026, 10, 30), { season: 'FALL', year: 2026 }],
+    // In a season's last month, the next one is announced and worth planning for
+    [new Date(2026, 11, 1), { season: 'WINTER', year: 2027 }],
+    [new Date(2027, 0, 1), { season: 'WINTER', year: 2027 }],
+    [new Date(2027, 2, 15), { season: 'SPRING', year: 2027 }],
+  ] as const)('on %s, it opens on %o', (now, season) => {
+    expect(defaultSeason(now)).toEqual(season);
+  });
+
+  it('says whether a season has aired, is airing, or is to come', () => {
+    const now = new Date(2026, 10, 12);
+    expect(seasonTiming({ season: 'SUMMER', year: 2026 }, now)).toBe('past');
+    expect(seasonTiming({ season: 'FALL', year: 2026 }, now)).toBe('airing');
+    expect(seasonTiming({ season: 'WINTER', year: 2027 }, now)).toBe('upcoming');
+    expect(seasonTiming({ season: 'FALL', year: 2025 }, now)).toBe('past');
+  });
+
+  it('names a season in a page address and reads it back', () => {
+    const now = new Date(2026, 10, 12);
+    const winter = { season: 'WINTER', year: 2027 } as const;
+    expect(seasonSlug(winter)).toBe('winter-2027');
+    expect(parseSeasonSlug('winter-2027', now)).toEqual(winter);
+    expect(parseSeasonSlug('fall-1940', now)).toEqual({ season: 'FALL', year: 1940 });
+  });
+
+  it.each(['Winter-2027', 'autumn-2026', 'fall-26', 'fall-1939', 'fall-2029', 'fall-2026-x', ''])(
+    "doesn't take %o for a season",
+    (slug) => {
+      expect(parseSeasonSlug(slug, new Date(2026, 10, 12))).toBeNull();
+    }
+  );
+});
+
+describe("a season's whole lineup", () => {
+  const fall = { season: 'FALL', year: 2026 } as const;
+  const lineupAnime = (id: number, overrides: Record<string, unknown> = {}) => ({
+    ...frieren,
+    id,
+    title: { romaji: `Anime ${id}`, english: null },
+    genres: ['Adventure', null],
+    tags: [
+      {
+        name: 'Found Family',
+        rank: 85,
+        isAdult: false,
+        isMediaSpoiler: false,
+        isGeneralSpoiler: false,
+      },
+      { name: 'Tragedy', rank: 70, isAdult: false, isMediaSpoiler: true, isGeneralSpoiler: false },
+      { name: 'Nudity', rank: 60, isAdult: true, isMediaSpoiler: false, isGeneralSpoiler: false },
+    ],
+    studios: { nodes: [{ name: 'Madhouse' }, { name: 'Madhouse' }, null] },
+    averageScore: 88,
+    popularity: 4200,
+    description: 'An elf mage&#039;s journey.<br><br>After the <i>hero</i> dies&hellip;',
+    relations: {
+      edges: [
+        {
+          relationType: 'PREQUEL',
+          node: { id: 9, idMal: 1009, type: 'ANIME', title: { romaji: 'Season 1', english: null } },
+        },
+        {
+          relationType: 'PARENT',
+          node: { id: 8, idMal: null, type: 'ANIME', title: { romaji: null, english: 'Main' } },
+        },
+        {
+          relationType: 'PREQUEL',
+          node: { id: 7, idMal: 7, type: 'MANGA', title: { romaji: 'The manga', english: null } },
+        },
+      ],
+    },
+    ...overrides,
+  });
+  const page = (media: unknown[], hasNextPage: boolean) =>
+    Response.json({ data: { Page: { pageInfo: { hasNextPage }, media } } });
+
+  it('asks for 50 series of the season at a time, by popularity, adult ones only when shown', () => {
+    const { query, variables } = JSON.parse(lineupRequestBody(fall, false, 2));
+
+    expect(variables).toEqual({ season: 'FALL', year: 2026, page: 2, perPage: 50, isAdult: false });
+    expect(query).toContain('sort: POPULARITY_DESC');
+    expect(query).toContain('format_in: [TV, TV_SHORT, ONA]');
+    expect(query).toContain('node { id idMal type');
+    expect(JSON.parse(lineupRequestBody(fall, true)).variables).not.toHaveProperty('isAdult');
+    // Searches don't pay for what ranking a season needs
+    expect(JSON.parse(searchRequestBody('frieren', false)).query).not.toContain('genres');
+  });
+
+  it('reads what ranking and describing an anime need, without spoilers or adult tags', () => {
+    const [anime] = parseLineup({ data: { Page: { media: [lineupAnime(1), null] } } });
+
+    expect(anime).toMatchObject({
+      id: 1,
+      genres: ['Adventure'],
+      tags: [{ name: 'Found Family', rank: 85 }],
+      studios: ['Madhouse'],
+      averageScore: 88,
+      popularity: 4200,
+      synopsis: "An elf mage's journey.\n\nAfter the hero dies…",
+      prequels: [9],
+      prequelLinks: [{ id: 9, malId: 1009, title: 'Season 1' }],
+      parentLinks: [{ id: 8, malId: null, title: 'Main' }],
+    });
+  });
+
+  it('reads a description as plain text', () => {
+    expect(plainSynopsis('A&amp;B <b>bold</b><br />next &#x2014; end &bogus;')).toBe(
+      'A&B bold\nnext — end &bogus;'
+    );
+    expect(plainSynopsis('<br><br>')).toBeNull();
+    expect(plainSynopsis(null)).toBeNull();
+  });
+
+  it('reads page after page until AniList has no more, then asks nothing again', async () => {
+    const send = vi
+      .fn()
+      .mockResolvedValueOnce(page([lineupAnime(1), lineupAnime(2)], true))
+      // Pages can shift between requests, so an anime can show twice
+      .mockResolvedValueOnce(page([lineupAnime(2), lineupAnime(3)], false));
+
+    const outcome = await seasonLineup(fall, { showMature: false, fetch: send });
+    expect(outcome).toMatchObject({ results: [{ id: 1 }, { id: 2 }, { id: 3 }] });
+    await seasonLineup(fall, { showMature: false, fetch: send });
+
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+
+  it(`stops after ${LINEUP_PAGES} pages, whatever AniList has`, async () => {
+    let id = 0;
+    const send = vi.fn(async () => page([lineupAnime(++id)], true));
+
+    await seasonLineup(fall, { showMature: false, fetch: send });
+
+    expect(send).toHaveBeenCalledTimes(LINEUP_PAGES);
+  });
+
+  it("keeps apart from the search's popular anime of the same season", async () => {
+    const send = vi.fn(async () => page([lineupAnime(1)], false));
+
+    await seasonAnime(fall, { showMature: false, fetch: send });
+    const outcome = await seasonLineup(fall, { showMature: false, fetch: send });
+
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(outcome).toMatchObject({ results: [{ id: 1, genres: ['Adventure'] }] });
+  });
+
+  it('says to wait when AniList is busy, and only asks for the pages it missed when tried again', async () => {
+    const send = vi
+      .fn()
+      .mockResolvedValueOnce(page([lineupAnime(1)], true))
+      .mockResolvedValueOnce(new Response(null, { status: 429, headers: { 'Retry-After': '30' } }))
+      .mockResolvedValueOnce(page([lineupAnime(2)], false));
+
+    expect(await seasonLineup(fall, { showMature: false, fetch: send })).toEqual({
+      message: 'AniList has had a lot of requests from you. Try again in 30 seconds.',
+      retryAfter: 30,
+    });
+    expect(await seasonLineup(fall, { showMature: false, fetch: send })).toMatchObject({
+      results: [{ id: 1 }, { id: 2 }],
+    });
+    expect(send).toHaveBeenCalledTimes(3);
+  });
+
+  it('says AniList failed when it answers with errors', async () => {
+    const send = vi.fn(async () => Response.json({ data: null, errors: [{ message: 'x' }] }));
+
+    expect(await seasonLineup(fall, { showMature: false, fetch: send })).toEqual({
+      message: "AniList couldn't list the season right now. Please try again.",
+    });
   });
 });

@@ -7,6 +7,7 @@ import {
   takeMalRequest,
   type RequestPriority,
 } from '#lib/server/rate-limit.js';
+import type { MalTasteEntry } from '#lib/server/season-taste.js';
 import {
   addedDates,
   OTHER_LISTS,
@@ -62,6 +63,8 @@ export type MalEntry = {
     alternative_titles?: { en?: string };
     /** Genres, themes and demographics together, as MyAnimeList sends them */
     genres?: { id: number; name: string }[];
+    /** The studios that made it, only there when asked for, as the season page's read does */
+    studios?: { id: number; name: string }[];
     start_season?: { year: number; season: string };
   };
   list_status: MalListStatusData;
@@ -246,6 +249,55 @@ export async function getPlanToWatchEntries(userName: string, token?: string): P
     if (planningCache.size >= MAX_PLANNING_LISTS)
       planningCache.delete(planningCache.keys().next().value!);
     planningCache.set(key, { entries, expiresAt: Date.now() + PLANNING_TTL_MS });
+  }
+  return entries;
+}
+
+/*
+ * Taste changes slowly, so anonymous reads are kept a while, apart from the public cache, as
+ * plan-to-watch lists are
+ */
+const seasonTasteCache = new Map<string, { entries: MalTasteEntry[]; expiresAt: number }>();
+const SEASON_TASTE_TTL_MS = 10 * 60 * 1000;
+const MAX_SEASON_TASTES = 20;
+
+/**
+ * Every anime on someone's lists, with its genres and studios, for the season page to work out
+ * their taste from, as MyAnimeList keeps no statistics of a list: one request per 1,000 anime.
+ * Their own list with their token, or anyone's public list by name; anonymous reads are kept for
+ * ten minutes. It gives way to watching lists and saves when the budget runs low
+ */
+export async function getSeasonTasteEntries(
+  userName: string,
+  token?: string
+): Promise<MalTasteEntry[]> {
+  // MyAnimeList names ignore case
+  const key = userName.toLowerCase();
+  if (!token) {
+    const cached = seasonTasteCache.get(key);
+    if (cached && cached.expiresAt > Date.now()) return cached.entries;
+  }
+  // One spelling, so simultaneous reads of the list share one request
+  const path = `${API_URL}/users/${token ? '@me' : encodeURIComponent(key)}/animelist`;
+  const read = await readPages(
+    `${path}?limit=1000&fields=list_status,genres,studios&nsfw=true`,
+    token,
+    { cacheMs: 0, priority: 'optional' }
+  );
+  const entries = read.map(({ node, list_status }) => ({
+    id: node.id,
+    status: toAniListStatus(list_status),
+    progress: list_status.num_episodes_watched ?? 0,
+    // Whole numbers out of 10 on MyAnimeList
+    score100: (list_status.score ?? 0) * 10,
+    genres: node.genres?.map(({ name }) => name) ?? [],
+    studios: node.studios?.map(({ name }) => name) ?? [],
+  }));
+  if (!token) {
+    seasonTasteCache.delete(key);
+    if (seasonTasteCache.size >= MAX_SEASON_TASTES)
+      seasonTasteCache.delete(seasonTasteCache.keys().next().value!);
+    seasonTasteCache.set(key, { entries, expiresAt: Date.now() + SEASON_TASTE_TTL_MS });
   }
   return entries;
 }
