@@ -15,11 +15,8 @@ export const IMPORT_FILE_NAMES: Record<Domain, string> = {
   myanimelist: 'yousoro-for-myanimelist.xml',
 };
 
-/** Each site's undo file, which puts back the anime its import file updates */
-export const UNDO_FILE_NAMES: Record<Domain, string> = {
-  anilist: 'yousoro-undo-for-anilist.xml',
-  myanimelist: 'yousoro-undo-for-myanimelist.xml',
-};
+/** AniList's undo file, which puts back the anime its import file updates */
+export const ANILIST_UNDO_FILE_NAME = 'yousoro-undo-for-anilist.xml';
 
 const STATUSES: Record<string, string> = {
   CURRENT: 'Watching',
@@ -38,10 +35,20 @@ function importDate(date: string | null): string {
   return `${year}-${month}-${day}`;
 }
 
-/** Whether XML 1.0 can hold a character: not most control characters, nor U+FFFE and U+FFFF */
+/**
+ * Whether XML 1.0 can hold a character: tabs, line breaks and anything from a space on, emoji
+ * included, but not other control characters, lone surrogates, U+FFFE or U+FFFF
+ */
 function xmlCharacter(character: string): boolean {
   const code = character.codePointAt(0)!;
-  return (code >= 0x20 || code === 0x9 || code === 0xa || code === 0xd) && code < 0xfffe;
+  return (
+    code === 0x9 ||
+    code === 0xa ||
+    code === 0xd ||
+    (code >= 0x20 && code <= 0xd7ff) ||
+    (code >= 0xe000 && code <= 0xfffd) ||
+    code >= 0x10000
+  );
 }
 
 // A character XML can't hold, as in a pasted comment, would make the whole file unreadable

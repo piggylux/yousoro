@@ -217,9 +217,10 @@
   /*
    * On your own list, with both accounts signed in, the two lists are compared every few hours, and
    * a note says when they differ in ways not reviewed yet, as after a change on one of the sites.
-   * A check a busy service couldn't answer isn't recorded, so a later visit tries again; one
-   * answered without a result, as when a sign-in has expired, waits as long as a finished one. A
-   * browser that can't keep the record isn't checked, as it would compare the lists on every visit
+   * A check a busy service couldn't answer, or that didn't reach the site, isn't recorded, so a
+   * later visit tries again; one answered without a result, as when a sign-in has expired or a
+   * service failed, waits as long as a finished one, rather than reading both lists on every visit.
+   * A browser that can't keep the record isn't checked, for the same reason
    */
   let syncNote = $state<{ account: string; count: number } | null>(null);
   const syncCheckAccount = $derived(
@@ -230,7 +231,7 @@
   $effect(() => {
     const account = syncCheckAccount;
     syncNote = null;
-    if (!account || !canKeepSyncCheck()) return;
+    if (!account) return;
     let cancelled = false;
     const show = (check: SyncCheck) => {
       const count = unseen(check).length;
@@ -238,14 +239,14 @@
     };
     const check = loadSyncCheck(account);
     if (!shouldCheck(check, Date.now())) show(check);
-    else {
+    else if (canKeepSyncCheck()) {
       fetch('/api/sync/status')
         .then(async (response) => {
-          if (response.status === 204) {
+          if (response.status === 429) return;
+          if (response.status !== 200) {
             saveSyncCheck(account, { ...check, checkedAt: Date.now() });
             return;
           }
-          if (response.status !== 200) return;
           const keys: unknown = (await response.json())?.keys;
           if (!Array.isArray(keys) || keys.some((key) => typeof key !== 'string')) return;
           const checked = afterCheck(check, keys, Date.now());

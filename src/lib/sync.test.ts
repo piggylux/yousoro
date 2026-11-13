@@ -401,23 +401,26 @@ describe('importFiles', () => {
     );
 
     expect(files.anilist).toEqual([]);
-    expect(files.undo.anilist).toEqual([]);
+    expect(files.undo).toEqual([]);
     expect(files.held).toEqual([11]);
   });
 
-  it('undoes each update with the entry as the site has it now, own extras included', () => {
+  it('undoes each AniList update with the entry as AniList has it now, notes included', () => {
     const anilist = entry({ extras: aniListExtras });
     const files = importFiles(
-      [item({ anilist }, 'anilist'), { ...item({ myanimelist: null }, 'myanimelist'), malId: 12 }],
-      { 11: 'anilist', 12: 'myanimelist' }
+      [
+        item({ anilist }, 'anilist'),
+        { ...item({ anilist: null }, 'anilist'), malId: 12 },
+        { ...item({}, 'myanimelist'), malId: 13 },
+      ],
+      { 11: 'anilist', 12: 'anilist', 13: 'myanimelist' }
     );
 
-    expect(files.undo.anilist).toEqual([
-      { malId: 11, title: 'Fixture', entry: anilist, update: true },
-    ]);
-    // An anime the file adds can't be taken off again by an import
-    expect(files.myanimelist.map((anime) => anime.malId)).toEqual([12]);
-    expect(files.undo.myanimelist).toEqual([]);
+    // An anime the file adds can't be taken off again by an import, and MyAnimeList's updates have
+    // its own export as their backup
+    expect(files.anilist.map((anime) => anime.malId)).toEqual([11, 12]);
+    expect(files.myanimelist.map((anime) => anime.malId)).toEqual([13]);
+    expect(files.undo).toEqual([{ malId: 11, title: 'Fixture', entry: anilist, update: true }]);
   });
 });
 
@@ -471,15 +474,14 @@ describe('mixing the two entries', () => {
     ]);
   });
 
-  it('puts a mixed anime in both sites’ files, with an undo for each', () => {
+  it('puts a mixed anime in both sites’ files, with an undo for AniList’s', () => {
     const [item] = planSync([split]);
 
     const files = importFiles([item], { 11: defaultMix(item) });
 
     expect(files.anilist.map((anime) => anime.entry.progress)).toEqual([8]);
     expect(files.myanimelist.map((anime) => anime.entry.score100)).toEqual([90]);
-    expect(files.undo.anilist.map((anime) => anime.entry.progress)).toEqual([5]);
-    expect(files.undo.myanimelist.map((anime) => anime.entry.score100)).toEqual([70]);
+    expect(files.undo.map((anime) => anime.entry.progress)).toEqual([5]);
   });
 
   it('ends the same as copying when every part is taken from one list', () => {

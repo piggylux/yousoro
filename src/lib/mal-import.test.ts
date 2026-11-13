@@ -114,12 +114,17 @@ describe('malImportFile', () => {
     expect(file).toContain('<my_tags>a&amp;b</my_tags>');
   });
 
-  it('leaves out characters XML can’t hold, keeping the rest of the text', () => {
+  it('leaves out characters XML can’t hold, keeping the rest of the text, emoji included', () => {
     const file = malImportFile([
-      anime({ update: true, entry: entry({ extras: { notes: 'Bell\u0007 ok\ttab\nline ✨' } }) }),
+      anime({
+        title: 'Bocchi the Rock! 🎸',
+        update: true,
+        entry: entry({ extras: { notes: 'Bell\u0007 ok\ttab\nline ✨ 😭\uffff\ud800!' } }),
+      }),
     ]);
 
-    expect(file).toContain('<my_comments>Bell ok\ttab\nline ✨</my_comments>');
+    expect(file).toContain('<series_title>Bocchi the Rock! 🎸</series_title>');
+    expect(file).toContain('<my_comments>Bell ok\ttab\nline ✨ 😭!</my_comments>');
   });
 
   it('writes only what the list sent, so a field it left out stays as it is', () => {

@@ -3,11 +3,11 @@
   import { expireRememberedList } from '#lib/list-data.js';
   import {
     ANILIST_IMPORT_URL,
+    ANILIST_UNDO_FILE_NAME,
     IMPORT_FILE_NAMES,
     MAL_EXPORT_URL,
     MAL_IMPORT_URL,
     malImportFile,
-    UNDO_FILE_NAMES,
   } from '#lib/mal-import.js';
   import { retryAfterSeconds } from '#lib/read-retry.js';
   import { reviewed, saveSyncCheck, syncAccount } from '#lib/sync-check.js';
@@ -260,8 +260,9 @@
       {items.length === 1 ? 'One anime differs' : `${items.length} anime differ`} between your AniList
       and MyAnimeList lists. Each suggests keeping the entry you changed last, or the one that's further
       along or more complete when that's all that differs. Below each is what syncing changes on each
-      list. A date or score only one list has is kept either way, and nothing is deleted. When each list
-      has part of your latest changes, choose Mix to take each part from the right one.
+      list. A date or score only one list has is kept either way, and nothing is deleted. Where the lists
+      disagree on more than one thing, as when each has part of your latest changes, Mix takes each part
+      from the list you pick.
     </p>
     <label class="bulk">
       <span class="bulk-label">For every anime</span>
@@ -381,8 +382,9 @@
         </p>
         {#each SITES as site (site)}
           {@const entries = files[site]}
-          {@const undo = files.undo[site]}
-          {@const updates = undo.length > 0}
+          {@const updates = entries.some((entry) => entry.update)}
+          <!-- MyAnimeList's export, linked below, is its backup -->
+          {@const undo = site === 'anilist' ? files.undo : []}
           {#if entries.length}
             <section class="import" aria-labelledby={`import-${site}`}>
               <h3 id={`import-${site}`} class="import-site">
@@ -397,16 +399,16 @@
                       onclick={() => downloadImportFile(site)}
                       >Download the file for {DOMAIN_NAMES[site]}</button
                     >
-                    {#if updates}
+                    {#if undo.length}
                       <button
                         class="tw:btn"
                         disabled={applying}
-                        onclick={() => saveFile(UNDO_FILE_NAMES[site], undo)}
+                        onclick={() => saveFile(ANILIST_UNDO_FILE_NAME, undo)}
                         >Download the undo file</button
                       >
                     {/if}
                   </span>
-                  {#if updates}
+                  {#if undo.length}
                     <span class="undo-hint">
                       Download the undo file before importing, and keep it: once you’ve imported,
                       this page can’t make it any more. Imported the same way, it puts {undo.length ===

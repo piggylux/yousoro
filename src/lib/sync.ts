@@ -340,15 +340,16 @@ export type ImportFiles = Record<Domain, ImportEntry[]> & {
    */
   held: number[];
   /**
-   * Each site's undo file: the anime its file updates, as that site has them now. Imported the
-   * same way, it puts them back. It can't take off anime the file adds, as an import never removes
+   * AniList's undo file: the anime its file updates, as AniList has them now. Imported the same
+   * way, it puts them back. It can't take off anime the file adds, as an import never removes.
+   * MyAnimeList has none: the page points to MyAnimeList's own export, a fuller backup
    */
-  undo: Record<Domain, ImportEntry[]>;
+  undo: ImportEntry[];
 };
 
 /**
  * The import files that make the lists agree, as each anime is chosen to be synced (by MyAnimeList
- * id: how, or skip), and the files that undo them. Each entry carries the target's own notes, tags
+ * id: how, or skip), and the file that undoes AniList's. Each entry carries the target's own notes, tags
  * and rewatch count, so a file that overwrites an entry keeps them
  */
 export function importFiles(
@@ -359,7 +360,7 @@ export function importFiles(
     anilist: [],
     myanimelist: [],
     held: [],
-    undo: { anilist: [], myanimelist: [] },
+    undo: [],
   };
   for (const item of items) {
     const to = choices[item.malId];
@@ -378,7 +379,9 @@ export function importFiles(
         entry: { ...entry, extras: target?.extras },
         update: target !== null,
       });
-      if (target) files.undo[service].push({ malId, title, entry: target, update: true });
+      if (target && service === 'anilist') {
+        files.undo.push({ malId, title, entry: target, update: true });
+      }
     }
   }
   return files;
