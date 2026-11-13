@@ -48,6 +48,17 @@
     ownerProfiles,
     signedInAccounts,
   } from '#lib/profile-links.js';
+  import {
+    afterCheck,
+    canKeepSyncCheck,
+    loadSyncCheck,
+    saveSyncCheck,
+    shouldCheck,
+    syncAccount,
+    unseen,
+    type SyncCheck,
+  } from '#lib/sync-check.js';
+  import { SYNC_ENABLED } from '#lib/sync.js';
   import { togetherPath } from '#lib/together.js';
   import type { Anime, Sequel } from '#lib/types/anime.js';
   import type { AnimePageData, LinkedFailure, ListMove } from '#lib/types/api.js';
@@ -201,6 +212,58 @@
   function dismissMovedNote() {
     clearTimeout(movedNoteTimer);
     movedNote = null;
+  }
+
+  /*
+   * On your own list, with both accounts signed in, the two lists are compared every few hours, and
+   * a note says when they differ in ways not reviewed yet, as after a change on one of the sites.
+   * A check a busy service couldn't answer isn't recorded, so a later visit tries again; one
+   * answered without a result, as when a sign-in has expired, waits as long as a finished one. A
+   * browser that can't keep the record isn't checked, as it would compare the lists on every visit
+   */
+  let syncNote = $state<{ account: string; count: number } | null>(null);
+  const syncCheckAccount = $derived(
+    SYNC_ENABLED && page.data.malEnabled && data.canEdit && page.data.user && page.data.malUser
+      ? syncAccount(page.data.user, page.data.malUser)
+      : null
+  );
+  $effect(() => {
+    const account = syncCheckAccount;
+    syncNote = null;
+    if (!account || !canKeepSyncCheck()) return;
+    let cancelled = false;
+    const show = (check: SyncCheck) => {
+      const count = unseen(check).length;
+      if (!cancelled) syncNote = count ? { account, count } : null;
+    };
+    const check = loadSyncCheck(account);
+    if (!shouldCheck(check, Date.now())) show(check);
+    else {
+      fetch('/api/sync/status')
+        .then(async (response) => {
+          if (response.status === 204) {
+            saveSyncCheck(account, { ...check, checkedAt: Date.now() });
+            return;
+          }
+          if (response.status !== 200) return;
+          const keys: unknown = (await response.json())?.keys;
+          if (!Array.isArray(keys) || keys.some((key) => typeof key !== 'string')) return;
+          const checked = afterCheck(check, keys, Date.now());
+          saveSyncCheck(account, checked);
+          show(checked);
+        })
+        .catch(() => {});
+    }
+    return () => {
+      cancelled = true;
+    };
+  });
+
+  function dismissSyncNote() {
+    if (!syncNote) return;
+    const check = loadSyncCheck(syncNote.account);
+    saveSyncCheck(syncNote.account, { ...check, seen: check.keys });
+    syncNote = null;
   }
 
   /*
@@ -860,7 +923,7 @@
 
 <FriendsWatchingDialog selection={friendSelection} onclose={() => (friendSelection = null)} />
 
-{#if linkedNote || movedNote}
+{#if linkedNote || movedNote || syncNote}
   <div class="notes">
     {#if linkedNote}
       <div class="note" role="alert">
@@ -900,6 +963,17 @@
           Show {LIST_SECTION_LABELS[movedNote.section]}
         </button>
         <CloseButton label="Dismiss notification" onclick={dismissMovedNote} />
+      </div>
+    {/if}
+    {#if syncNote}
+      <div class="note" role="status">
+        <span>
+          Your AniList and MyAnimeList lists differ on {syncNote.count === 1
+            ? 'one anime'
+            : `${syncNote.count} anime`}.
+        </span>
+        <a class="tw:btn tw:btn-xs note-action" href="/sync">Review</a>
+        <CloseButton label="Dismiss notification" onclick={dismissSyncNote} />
       </div>
     {/if}
   </div>

@@ -7,9 +7,9 @@ import { SYNC_ENABLED } from '#lib/sync.js';
 import type { RequestHandler } from './$types';
 
 /**
- * Applies a few of the changes the sync page lists. Changes a busy service couldn't take come back
- * untried, with how long it asks to wait, and the page sends them again later. When a sign-in can't
- * be renewed, syncing stops and that service is signed out
+ * Applies the changes the sync page lists for a few anime; more go through each site's import page.
+ * Changes a busy service couldn't take come back untried, with how long it asks to wait. When a
+ * sign-in can't be renewed, syncing stops and that service is signed out
  */
 export const POST: RequestHandler = async (event) => {
   const { request, locals, getClientAddress } = event;

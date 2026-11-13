@@ -17,7 +17,12 @@ import {
   type MalEntry,
 } from '#lib/server/myanimelist-client.js';
 import type { MalSession, Session } from '#lib/server/session.js';
-import { applySyncChanges, getSyncPlan, parseSyncChanges } from '#lib/server/sync.js';
+import {
+  applySyncChanges,
+  getSyncPlan,
+  MAL_SYNC_GAP_MS,
+  parseSyncChanges,
+} from '#lib/server/sync.js';
 import type { SyncChange } from '#lib/sync.js';
 import type { Domain } from '#lib/types/domain.js';
 
@@ -61,6 +66,8 @@ function aniList(
     updatedAt,
     startedAt: { year: 2026, month: 9, day: 1 },
     completedAt: status === 'COMPLETED' ? { year: 2026, month: 10, day: null } : null,
+    notes: null,
+    repeat: 0,
     media: {
       id,
       idMal,
@@ -138,8 +145,58 @@ describe('getSyncPlan', () => {
     });
     expect(plan.unmatched).toEqual(['Anime 4']);
     // By id, as the name saved at sign-in may have changed since; no lookups before syncing
-    expect(getAllListEntries).toHaveBeenCalledWith(40, 'anilist.token.jwt');
+    expect(getAllListEntries).toHaveBeenCalledWith(40, 'anilist.token.jwt', 'required');
+    expect(getAllEntries).toHaveBeenCalledWith('mal-token', 'required');
     expect(getMediaByMalIds).not.toHaveBeenCalled();
+  });
+
+  it('reads what each list keeps beyond what’s compared, for import files to keep it', async () => {
+    vi.mocked(getAllListEntries).mockResolvedValue([
+      { ...aniList(2, 102, 'CURRENT', 6), notes: 'Watch with Ann', repeat: 1 },
+    ]);
+    const entry = mal(102, 'completed', 12, '2026-10-30T00:00:00Z');
+    vi.mocked(getAllEntries).mockResolvedValue([
+      {
+        ...entry,
+        list_status: {
+          ...entry.list_status,
+          comments: 'Great ending',
+          num_times_rewatched: 3,
+          tags: ['drama'],
+          priority: 2,
+          rewatch_value: 4,
+        },
+      },
+    ]);
+
+    const [item] = (await getSyncPlan(event, 'spare')).items;
+
+    expect(item.anilist?.extras).toEqual({ notes: 'Watch with Ann', rewatched: 1 });
+    expect(item.myanimelist?.extras).toEqual({
+      notes: 'Great ending',
+      rewatched: 3,
+      tags: ['drama'],
+      priority: 2,
+      rewatchValue: 4,
+    });
+    // A check nobody waits on gives way to everything else
+    expect(getAllListEntries).toHaveBeenCalledWith(40, 'anilist.token.jwt', 'spare');
+    expect(getAllEntries).toHaveBeenCalledWith('mal-token', 'spare');
+  });
+
+  it('leaves out what MyAnimeList didn’t send, rather than guessing it', async () => {
+    vi.mocked(getAllListEntries).mockResolvedValue([aniList(2, 102, 'CURRENT', 6)]);
+    vi.mocked(getAllEntries).mockResolvedValue([mal(102, 'completed', 12, '2026-10-30T00:00:00Z')]);
+
+    const [item] = (await getSyncPlan(event)).items;
+
+    expect(item.myanimelist?.extras).toEqual({
+      notes: undefined,
+      rewatched: undefined,
+      tags: undefined,
+      priority: undefined,
+      rewatchValue: undefined,
+    });
   });
 });
 
@@ -151,15 +208,22 @@ describe('parseSyncChanges', () => {
     entry: { status: 'COMPLETED', progress: 12, score100: 85 },
   };
 
-  it('reads up to ten changes', () => {
+  it('reads the changes for up to ten anime, two each at most', () => {
     expect(parseSyncChanges([change])).toEqual([
       {
         ...change,
         entry: { ...change.entry, startedAt: null, completedAt: null, updatedAt: null },
       },
     ]);
-    expect(parseSyncChanges(Array(10).fill(change))).toHaveLength(10);
-    expect(parseSyncChanges(Array(11).fill(change))).toBeNull();
+    const forAnime = (count: number) =>
+      Array.from({ length: count }, (_, i) => [
+        { ...change, malId: i + 1 },
+        { ...change, malId: i + 1, to: 'anilist' },
+      ]).flat();
+    expect(parseSyncChanges(forAnime(10))).toHaveLength(20);
+    expect(parseSyncChanges(forAnime(11))).toBeNull();
+    // More than ten anime, even with one change each
+    expect(parseSyncChanges(forAnime(11).filter((c) => c.to === 'myanimelist'))).toBeNull();
   });
 
   it('reads dates as far as they’re known, and refuses others', () => {
@@ -226,7 +290,7 @@ describe('applySyncChanges', () => {
           completedAt: null,
         },
       ],
-      'optional'
+      'spare'
     );
     // In MyAnimeList's whole numbers, without the read that counting a rewatch takes
     expect(copyEntry).toHaveBeenCalledWith(
@@ -239,8 +303,27 @@ describe('applySyncChanges', () => {
         startedAt: '2026-09-01',
         completedAt: null,
       },
-      { countRewatch: false, priority: 'optional' }
+      { countRewatch: false, priority: 'spare' }
     );
+  });
+
+  it('spreads MyAnimeList’s writes a second apart, so they never come in a burst', async () => {
+    vi.useFakeTimers();
+    try {
+      const outcome = applySyncChanges(event, [
+        change(102, 'myanimelist'),
+        change(103, 'myanimelist'),
+        change(104, 'myanimelist'),
+      ]);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(copyEntry).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(MAL_SYNC_GAP_MS);
+      expect(copyEntry).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(MAL_SYNC_GAP_MS);
+      expect((await outcome).results).toEqual([true, true, true]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('finds anime only on MyAnimeList’s list on AniList, in one request', async () => {
@@ -251,11 +334,11 @@ describe('applySyncChanges', () => {
       change(202, 'anilist', null),
     ]);
 
-    expect(getMediaByMalIds).toHaveBeenCalledWith([201, 202], 'optional');
+    expect(getMediaByMalIds).toHaveBeenCalledWith([201, 202], 'spare');
     expect(saveEntries).toHaveBeenCalledWith(
       'anilist.token.jwt',
       [expect.objectContaining({ mediaId: 9 })],
-      'optional'
+      'spare'
     );
     expect(outcome.results).toEqual([true, "AniList doesn't have this anime"]);
   });

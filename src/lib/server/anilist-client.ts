@@ -1574,6 +1574,9 @@ export type AniListListEntry = {
   updatedAt: number;
   startedAt: FuzzyDate | null;
   completedAt: FuzzyDate | null;
+  /** The user's own notes, and how many times they watched it again */
+  notes: string | null;
+  repeat: number;
   media: {
     id: number;
     idMal: number | null;
@@ -1589,7 +1592,8 @@ export type AniListListEntry = {
  */
 export async function getAllListEntries(
   userId: number,
-  token: string
+  token: string,
+  priority?: RequestPriority
 ): Promise<AniListListEntry[]> {
   const entries: AniListListEntry[] = [];
   for (let chunk = 1, more = true; more && chunk <= 20; chunk++) {
@@ -1610,13 +1614,16 @@ export async function getAllListEntries(
               updatedAt
               startedAt { ${FUZZY_DATE_FIELDS} }
               completedAt { ${FUZZY_DATE_FIELDS} }
+              notes
+              repeat
               media { id idMal title { romaji } coverImage { extraLarge } isAdult }
             }
           }
         }
       }`,
       { userId, chunk },
-      token
+      token,
+      { priority }
     );
     // Custom lists mostly repeat entries of the status lists, but an entry hidden from the status
     // lists is only in its custom lists, so every list is read and each anime kept once

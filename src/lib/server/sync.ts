@@ -19,10 +19,11 @@ import {
   toAniListStatus,
   type MalEntry,
 } from '#lib/server/myanimelist-client.js';
+import type { RequestPriority } from '#lib/server/rate-limit.js';
 import { clearMalSession, clearSession } from '#lib/server/session.js';
 import {
   planSync,
-  SYNC_BATCH_SIZE,
+  SYNC_DIRECT_LIMIT,
   type SyncCandidate,
   type SyncChange,
   type SyncEntry,
@@ -43,6 +44,15 @@ function fromMal({ list_status }: MalEntry): SyncEntry {
     startedAt: list_status.start_date || null,
     completedAt: list_status.finish_date || null,
     updatedAt: Date.parse(list_status.updated_at) || null,
+    // As MyAnimeList sent them: one it left out is left out of an import file too, rather than
+    // guessed and written over what the list has
+    extras: {
+      notes: list_status.comments,
+      rewatched: list_status.num_times_rewatched,
+      tags: list_status.tags,
+      priority: list_status.priority,
+      rewatchValue: list_status.rewatch_value,
+    },
   };
 }
 
@@ -51,16 +61,20 @@ function fromMal({ list_status }: MalEntry): SyncEntry {
  * matched by MyAnimeList id. Each list takes a few requests to read, however long. An anime only on
  * MyAnimeList's list is shown as MyAnimeList has it, and found on AniList only once it's synced
  * there, so a first sync of a long list doesn't spend AniList's budget before anything is chosen.
- * Needs both sign-ins
+ * Needs both sign-ins. The sync page reads them when asked; the check for lists drifting apart,
+ * which nobody waits on, gives way to everything else (`priority`)
  */
-export async function getSyncPlan(event: SignedInEvent): Promise<SyncPlan> {
+export async function getSyncPlan(
+  event: SignedInEvent,
+  priority: RequestPriority = 'required'
+): Promise<SyncPlan> {
   const session = event.locals.session!;
   // Both reads finish before any failure is reported, so a MyAnimeList sign-in renewed meanwhile is
   // still saved in this response. AniList's list is read by id, as the name saved at sign-in may
   // have changed since
   const [aniListRead, malRead] = await Promise.allSettled([
-    getAllListEntries(session.user.id, session.token),
-    withMalToken(event, (token) => getAllEntries(token)),
+    getAllListEntries(session.user.id, session.token, priority),
+    withMalToken(event, (token) => getAllEntries(token, priority)),
   ]);
   if (aniListRead.status === 'rejected') throw aniListRead.reason;
   if (malRead.status === 'rejected') throw malRead.reason;
@@ -68,7 +82,7 @@ export async function getSyncPlan(event: SignedInEvent): Promise<SyncPlan> {
   const byMalId = new Map<number, SyncCandidate>();
   const unmatched: string[] = [];
   for (const entry of aniListRead.value) {
-    const { media, status, progress, score, updatedAt } = entry;
+    const { media, status, progress, score, updatedAt, notes, repeat } = entry;
     if (media.idMal === null) {
       unmatched.push(media.title.romaji);
       continue;
@@ -87,6 +101,7 @@ export async function getSyncPlan(event: SignedInEvent): Promise<SyncPlan> {
         startedAt: fromFuzzyDate(entry.startedAt),
         completedAt: fromFuzzyDate(entry.completedAt),
         updatedAt: updatedAt ? updatedAt * 1000 : null,
+        extras: { notes: notes ?? '', rewatched: repeat ?? 0 },
       },
       myanimelist: null,
     });
@@ -119,11 +134,14 @@ const isDate = (value: unknown): value is string | null =>
   value === null || (typeof value === 'string' && /^\d{4}(-\d{2}){0,2}$/.test(value));
 
 /**
- * The changes a request asks to apply, a few at a time so each request stays short, or null when
- * they don't fit. They're written to the user's own lists, so they're checked for shape only
+ * The changes a request asks to apply, or null when they don't fit: a few anime at most (each can
+ * take a write to both lists), as more go through the sites' import pages. They're written to the
+ * user's own lists, so they're checked for shape only
  */
 export function parseSyncChanges(value: unknown): SyncChange[] | null {
-  if (!Array.isArray(value) || value.length === 0 || value.length > SYNC_BATCH_SIZE) return null;
+  if (!Array.isArray(value) || value.length === 0 || value.length > 2 * SYNC_DIRECT_LIMIT) {
+    return null;
+  }
   const changes: SyncChange[] = [];
   for (const change of value as Record<string, unknown>[]) {
     const entry = change?.entry as Record<string, unknown> | undefined;
@@ -154,7 +172,7 @@ export function parseSyncChanges(value: unknown): SyncChange[] | null {
       },
     });
   }
-  return changes;
+  return new Set(changes.map((change) => change.malId)).size <= SYNC_DIRECT_LIMIT ? changes : null;
 }
 
 /** How a batch of changes went */
@@ -169,10 +187,19 @@ export type SyncOutcome = {
 const FAILED = "Couldn't update";
 
 /**
+ * How long MyAnimeList's writes wait for each other. MyAnimeList refuses a site it thinks sends too
+ * much at once, which would pause it for everyone here, so a sync's writes are spread out
+ */
+export const MAL_SYNC_GAP_MS = 1000;
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
  * Writes a few anime's entries to the services they're copied to. AniList takes all of its changes
  * in one request, after one more to find the anime only on MyAnimeList's list; MyAnimeList, one
- * request per change. Both give way to list reads and saves when busy, as a sync can wait. When one
- * service is busy, the other's changes still go ahead
+ * request per change, a second apart. Both only use what's left of each service's requests once
+ * everything else has had its share (`spare`), so a sync never crowds out other people's lists and
+ * saves. When one service is busy, the other's changes still go ahead
  */
 export async function applySyncChanges(
   event: SignedInEvent,
@@ -201,15 +228,16 @@ export async function applySyncChanges(
 
   await saveToAniList(event.locals.session!.token, changes, indexes('anilist'), results, halts);
 
-  for (const i of indexes('myanimelist')) {
+  for (const [n, i] of indexes('myanimelist').entries()) {
     const { progress, status, score100, startedAt, completedAt } = changes[i].entry;
+    if (n > 0) await wait(MAL_SYNC_GAP_MS);
     try {
       await withMalToken(event, (token) =>
         copyEntry(
           token,
           changes[i].malId,
           { progress, status, score: score100ToMal(score100), startedAt, completedAt },
-          { countRewatch: false, priority: 'optional' }
+          { countRewatch: false, priority: 'spare' }
         )
       );
       results[i] = true;
@@ -237,7 +265,7 @@ async function saveToAniList(
     try {
       const media = await getMediaByMalIds(
         unknown.map((i) => changes[i].malId),
-        'optional'
+        'spare'
       );
       for (const i of unknown) {
         const found = media.get(changes[i].malId);
@@ -263,7 +291,7 @@ async function saveToAniList(
     };
   };
   try {
-    await saveEntries(token, ready.map(entry), 'optional');
+    await saveEntries(token, ready.map(entry), 'spare');
     for (const i of ready) results[i] = true;
   } catch (err) {
     if (halts(err, 'anilist')) return;
@@ -272,7 +300,7 @@ async function saveToAniList(
     else {
       for (const i of ready) {
         try {
-          await saveEntries(token, [entry(i)], 'optional');
+          await saveEntries(token, [entry(i)], 'spare');
           results[i] = true;
         } catch (err) {
           if (halts(err, 'anilist')) return;

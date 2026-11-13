@@ -18,7 +18,9 @@ shows you're actively watching come first. Once you've watched an episode, mark 
   taste, with new seasons of shows you watched first. Each says why it's there, you can watch its
   trailer, and you can plan or start it in one click.
 - **Keep both lists in step**: link your AniList and MyAnimeList accounts, and every episode and
-  score you save goes to both.
+  score you save goes to both. When the lists drift apart, as after a change on one of the sites,
+  your list lets you know. Review where they differ, choose which entry to keep, and apply a few
+  straight away or import the rest into each site.
 - **Put a change back**: undo recent changes to your list, like an episode, a score or a finished
   anime.
 - **Plan your next watch**: see next-episode countdowns and upcoming airing dates in your time zone.
