@@ -19,7 +19,7 @@ export const load: PageServerLoad = async (event) => {
   try {
     const limit = await takeClientLimit(getClientAddress(), 'read', 2);
     if (!limit.allowed) throw new AniListRateLimitError(limit.retryAfter);
-    return { linked: true as const, ...(await getSyncPlan(event)) };
+    return { linked: true as const, ...(await getSyncPlan(event, 'optional')) };
   } catch (err) {
     if (err instanceof AniListRateLimitError || err instanceof MalRateLimitError) {
       locals.retryAfter = Math.max(locals.retryAfter ?? 0, err.retryAfter);

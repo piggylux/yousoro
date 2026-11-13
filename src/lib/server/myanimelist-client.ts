@@ -40,6 +40,12 @@ export type MalListStatusData = {
   /** When the user started and finished it, YYYY-MM-DD or less when partly unknown; left out unset */
   start_date?: string;
   finish_date?: string;
+  /** Only there when asked for, as the sync page's read does: 0 low, 1 medium, 2 high */
+  priority?: number;
+  /** 0 when unset, else 1 (very low) to 5 (very high) */
+  rewatch_value?: number;
+  tags?: string[];
+  comments?: string;
 };
 
 /** Whether an anime has aired, as MyAnimeList says it */
@@ -381,11 +387,31 @@ export async function deleteEntry(token: string, malId: number): Promise<void> {
   }
 }
 
-/** Every anime on the token owner's list, whatever its status */
-export function getAllEntries(token: string): Promise<MalEntry[]> {
+/** Every list field the sync page compares, or writes back as it is */
+const ALL_LIST_STATUS_FIELDS = [
+  'status',
+  'score',
+  'num_episodes_watched',
+  'is_rewatching',
+  'start_date',
+  'finish_date',
+  'updated_at',
+  'priority',
+  'num_times_rewatched',
+  'rewatch_value',
+  'tags',
+  'comments',
+].join(',');
+
+/**
+ * Every anime on the token owner's list, whatever its status, with everything MyAnimeList keeps of
+ * each entry
+ */
+export function getAllEntries(token: string, priority?: RequestPriority): Promise<MalEntry[]> {
   return readPages(
-    `${API_URL}/users/@me/animelist?fields=list_status,nsfw&limit=1000&nsfw=true`,
-    token
+    `${API_URL}/users/@me/animelist?fields=list_status{${ALL_LIST_STATUS_FIELDS}},nsfw&limit=1000&nsfw=true`,
+    token,
+    { priority }
   );
 }
 

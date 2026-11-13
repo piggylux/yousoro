@@ -14,7 +14,7 @@ vi.mock('#lib/server/sync.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('#lib/server/sync.js')>()),
   applySyncChanges: vi.fn(),
 }));
-// Sync is switched off for now; these tests cover it as it works once it's back on
+// Sync can be switched off; these tests cover it on, unless they say otherwise
 const sync = vi.hoisted(() => ({ enabled: true }));
 vi.mock('#lib/sync.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('#lib/sync.js')>()),
@@ -78,10 +78,12 @@ describe('POST /api/sync', () => {
     expect(vi.mocked(applySyncChanges).mock.calls[0][1]).toHaveLength(2);
   });
 
-  it('takes up to ten changes at once', async () => {
-    await expect(post({ changes: Array(11).fill(change(1)) })).rejects.toMatchObject({
-      status: 400,
-    });
+  it('takes the changes for up to ten anime at once', async () => {
+    const changes = (count: number) => Array.from({ length: count }, (_, i) => change(i + 1));
+    vi.mocked(applySyncChanges).mockResolvedValue({ results: [] });
+
+    await expect(post({ changes: changes(10) })).resolves.toMatchObject({ status: 200 });
+    await expect(post({ changes: changes(11) })).rejects.toMatchObject({ status: 400 });
   });
 
   it.each([
