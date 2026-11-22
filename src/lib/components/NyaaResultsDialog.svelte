@@ -63,6 +63,14 @@
     nyaaNarrowing(appliedQuery === null ? search : { ...search, query: appliedQuery })
   );
   const lookingFor = $derived(allReleases ? '' : narrowing);
+  const searchingText = $derived(
+    lookingFor ? `Searching for ${lookingFor} releases…` : 'Searching for releases…'
+  );
+  const emptyText = $derived(
+    lookingFor
+      ? `No ${lookingFor} releases found. Show all releases, or try another search query.`
+      : 'No releases found. Try another search query.'
+  );
   const resultSearch = $derived(
     resolvedQuery === null ? activeSearch : { ...activeSearch, query: resolvedQuery }
   );
@@ -84,6 +92,35 @@
     );
   });
   const site = $derived(nyaaSite(search.adult ?? false));
+  // Packs when no release had the episode alone, in the count as in what a screen reader hears
+  const releaseNoun = (count: number) => `${inPacks ? 'pack' : 'release'}${count === 1 ? '' : 's'}`;
+  /*
+   * What a screen reader hears about the list: as each search starts and ends, and how many
+   * releases match as the viewer filters them, including with a filter kept from the episode
+   * before. The list's own messages appear with their text, which screen readers mostly don't read
+   * out, so this region is always there and only its text changes. It's the only one, so nothing
+   * is read twice. A failure is read out by its alert
+   */
+  const announcement = $derived.by(() => {
+    if (loading) return searchingText;
+    if (errorMessage) return '';
+    const count = releases.length;
+    if (!count) return emptyText;
+    const packs = inPacks ? `No release of episode ${episode} alone. ` : '';
+    if (filter.trim()) {
+      const shown = filteredReleases.length;
+      const matching =
+        shown === 0
+          ? count === 1
+            ? `The ${releaseNoun(1)} doesn't match`
+            : `None of the ${count} ${releaseNoun(count)} match`
+          : `${shown} of ${count} ${releaseNoun(count)} ${shown === 1 ? 'matches' : 'match'}`;
+      return `${packs}${matching} your filter`;
+    }
+    return inPacks
+      ? `${packs}${count} ${count === 1 ? 'pack includes' : 'packs include'} it`
+      : `${count} ${releaseNoun(count)} found`;
+  });
 
   $effect(() => {
     void filter;
@@ -318,9 +355,11 @@
           Search
         </button>
       </div>
-      {#if queryTooLong}<p id={`${heading}-query-length`} role="status">
-          This search is too long. Use fewer title words or alternatives.
-        </p>{/if}
+      <!-- Always there, out of sight and taking no room while empty, so a screen reader reads the
+      warning as it appears -->
+      <p id={`${heading}-query-length`} class={[!queryTooLong && 'tw:sr-only']} role="status">
+        {queryTooLong ? 'This search is too long. Use fewer title words or alternatives.' : ''}
+      </p>
       <!-- Reset waits for a custom search to run, so typing doesn't push the results down -->
       {#if narrowing || appliedQuery !== null}
         <div class="search-options">
@@ -356,10 +395,10 @@
         </div>
       {/if}
     </form>
-    <!-- Kept while the next search loads, so the list doesn't jump and a filter kept between
-    episodes stays in view; not for a failed or empty search, with nothing to filter -->
+    <!-- Only shown once there are releases to filter, but its room is kept while a search loads,
+    so the list doesn't jump when they arrive; not for a failed or empty search -->
     {#if !errorMessage && (loading || releases.length > 0)}
-      <div class="filter">
+      <div class="filter" class:waiting={loading}>
         <label class="tw:sr-only" for={`${heading}-filter`}>Filter loaded results</label>
         <div class="filter-input">
           <svg
@@ -405,11 +444,12 @@
             </button>
           {/if}
         </div>
-        {#if !loading}
-          <p class="result-count" role="status">
-            {filteredReleases.length} of {releases.length} releases
-          </p>
-        {/if}
+        <!-- Kept while hidden too, as on a narrow screen it takes a line of its own. Read out by the
+        list's status at the end of the dialog -->
+        <p class="result-count">
+          {filteredReleases.length} of {releases.length}
+          {releaseNoun(releases.length)}
+        </p>
       </div>
     {/if}
     <section
@@ -419,9 +459,9 @@
       aria-busy={loading}
     >
       {#if loading}
-        <p class="message" role="status">
+        <p class="message">
           <span class="tw:loading tw:loading-spinner tw:loading-sm" aria-hidden="true"></span>
-          {lookingFor ? `Searching for ${lookingFor} releases…` : 'Searching for releases…'}
+          {searchingText}
         </p>
       {:else if errorMessage}
         <div class="message">
@@ -429,11 +469,7 @@
           <button class="retry" type="button" onclick={() => attempt++}>Try again</button>
         </div>
       {:else if releases.length === 0}
-        <p class="message" role="status">
-          {lookingFor
-            ? `No ${lookingFor} releases found. Show all releases, or try another search query.`
-            : 'No releases found. Try another search query.'}
-        </p>
+        <p class="message">{emptyText}</p>
       {:else}
         <p class="result-order">
           {inPacks
@@ -481,6 +517,7 @@
         </ul>
       {/if}
     </section>
+    <p class="tw:sr-only" role="status">{announcement}</p>
   </div>
 </dialog>
 
@@ -634,6 +671,10 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 8px 12px;
+  }
+  /* Out of sight, out of the tab order and unread, but keeping its room */
+  .filter.waiting {
+    visibility: hidden;
   }
   .filter-input {
     position: relative;
