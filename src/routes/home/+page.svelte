@@ -28,10 +28,9 @@
       </div>
     </div>
 
-    <figure class="illustration">
+    <div class="illustration">
       <img src={YouSvg} alt="" fetchpriority="high" />
-      <figcaption>Inspired by You Watanabe.</figcaption>
-    </figure>
+    </div>
   </section>
 
   <section class="features" aria-label="What you can do with Yousoro">
@@ -153,12 +152,11 @@
 
   .illustration {
     display: grid;
-    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-rows: minmax(0, 1fr);
     place-items: center;
     min-width: 0;
     height: 360px;
-    margin: 0;
-    padding: 24px 24px 16px;
+    padding: 24px;
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-panel);
     background: var(--you-blue-pale);
@@ -171,13 +169,6 @@
     object-fit: contain;
     user-select: none;
     max-width: 380px;
-  }
-
-  figcaption {
-    margin-top: 12px;
-    color: var(--text-accent);
-    font-size: 0.75rem;
-    line-height: 1.5;
   }
 
   .features {
