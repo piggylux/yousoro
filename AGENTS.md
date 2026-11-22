@@ -57,6 +57,17 @@ sections.
 - Handle long titles, names, labels, and missing data without horizontal overflow or overlapping
   controls. Allow text wrapping and use truncation only where space is deliberately constrained.
 
+## Loading and layout stability
+
+- Keep controls in place while content loads, refreshes, or is replaced. Reserve the space a result
+  area needs, or keep the previous content until the next arrives, rather than collapsing to a short
+  loading message. A control people click repeatedly, like a stepper, pager, or retry button, must
+  not move between clicks.
+- Give a dialog whose content is replaced in place a steady height. A centered dialog that shrinks and
+  grows moves everything in it, including the control that triggered the change.
+- Plan for these in-between states while implementing, not only for the loaded result: loading,
+  empty, error, and the moment content is swapped.
+
 ## Dialogs and dismiss controls
 
 - Use `src/lib/components/CloseButton.svelte` for icon dismiss controls, including dialog close
@@ -79,8 +90,10 @@ sections.
 - Keep touch controls comfortably usable; close controls and mobile card actions need targets
   at least 44px in each dimension. Allow controls to grow for text sizing and content.
 - For UI changes, inspect the affected components and their shared consumers in the browser at
-  narrow mobile and desktop widths. Include long content, empty states, and short viewport heights
-  where relevant. Check keyboard access, focus return, scrolling, and both themes.
+  narrow mobile and desktop widths. Include long content, empty states, loading states, and short
+  viewport heights where relevant. Check keyboard access, focus return, scrolling, and both themes.
+- Repeat interactions that replace content, like stepping, retrying, or searching again, and
+  compare the positions of the controls before, during, and after loading; they should not move.
 - Format changed files with `bunx oxfmt <paths>`; `bun run format` formats the whole repository.
   Avoid incidental formatting changes to unrelated files.
 - For code changes, run `bun run lint`, `bun run check`, and `bun run build`, plus
