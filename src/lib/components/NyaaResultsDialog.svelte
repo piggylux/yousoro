@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
+
   import CloseButton from '#lib/components/CloseButton.svelte';
   import { closeOnBackdrop } from '#lib/dialog.js';
   import {
@@ -11,7 +13,19 @@
     type NyaaSearch,
   } from '#lib/nyaa.js';
 
-  let { search, onclose }: { search: NyaaSearch; onclose: () => void } = $props();
+  // How long a step waits for another before searching
+  const STEP_DELAY_MS = 300;
+
+  let {
+    search,
+    episodes,
+    onclose,
+  }: {
+    search: NyaaSearch;
+    /** The episodes the viewer can step through, as the ones they're behind on */
+    episodes?: { first: number; last: number };
+    onclose: () => void;
+  } = $props();
   const heading = $props.id();
   let dialog = $state<HTMLDialogElement>();
   let results = $state<HTMLElement>();
@@ -20,7 +34,13 @@
   let loading = $state(true);
   let errorMessage = $state('');
   let attempt = $state(0);
-  const suggestedQuery = $derived(`${search.title} ${String(search.episode).padStart(2, '0')}`);
+  // The episode searched, from the one the dialog opened on, as the viewer steps through `episodes`
+  let episode = $state(untrack(() => search.episode));
+  const first = $derived(episodes?.first ?? search.episode);
+  const last = $derived(episodes?.last ?? search.episode);
+  // A step waits for the viewer to stop clicking, so the episodes passed on aren't searched
+  let stepped = false;
+  const suggestedQuery = $derived(`${search.title} ${String(episode).padStart(2, '0')}`);
   let queryDraft = $derived(suggestedQuery);
   const queryTooLong = $derived(nyaaQueryLength(queryDraft.trim()) > NYAA_MAX_QUERY_LENGTH);
   let appliedQuery = $state<string | null>(null);
@@ -29,9 +49,11 @@
   let allReleases = $state(false);
   // No release had the episode alone, so these are packs that include it
   let inPacks = $state(false);
-  const scopedSearch = $derived<NyaaSearch>(
-    allReleases ? { ...search, language: 'any', version: 'any' } : search
-  );
+  const scopedSearch = $derived<NyaaSearch>({
+    ...search,
+    episode,
+    ...(allReleases ? { language: 'any', version: 'any' } : {}),
+  });
   const activeSearch = $derived(
     appliedQuery === null ? scopedSearch : { ...scopedSearch, query: appliedQuery }
   );
@@ -65,6 +87,7 @@
 
   $effect(() => {
     void filter;
+    void episode;
     if (results) results.scrollTop = 0;
   });
   $effect(() => {
@@ -74,16 +97,17 @@
     void attempt;
     const selection = activeSearch;
     const controller = new AbortController();
-    const signal = AbortSignal.any([
-      controller.signal,
-      AbortSignal.timeout(NYAA_CLIENT_TIMEOUT_MS),
-    ]);
     loading = true;
     errorMessage = '';
     resolvedQuery = null;
     inPacks = false;
     releases = [];
     async function load() {
+      // From when the search starts, so the wait after a step doesn't count
+      const signal = AbortSignal.any([
+        controller.signal,
+        AbortSignal.timeout(NYAA_CLIENT_TIMEOUT_MS),
+      ]);
       try {
         const response = await fetch('/api/nyaa', {
           method: 'POST',
@@ -165,9 +189,24 @@
         if (!controller.signal.aborted) loading = false;
       }
     }
-    void load();
-    return () => controller.abort();
+    // After a step, only once the viewer stops clicking through episodes
+    const delayed = stepped;
+    stepped = false;
+    const timer = delayed ? setTimeout(() => void load(), STEP_DELAY_MS) : undefined;
+    if (!delayed) void load();
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
   });
+
+  function step(to: number) {
+    if (to < first || to > last || to === episode) return;
+    stepped = true;
+    episode = to;
+    // A custom search was for the episode before
+    appliedQuery = null;
+  }
 </script>
 
 <dialog
@@ -181,8 +220,8 @@
     <div class="heading-copy">
       <p class="eyebrow">Releases from {site}</p>
       <h2 id={heading}>{search.title}</h2>
-      <p id={`${heading}-description`}>
-        {appliedQuery === null ? `Episode ${search.episode}` : 'Custom search'} ·
+      <p class="description" id={`${heading}-description`}>
+        {appliedQuery === null ? `Episode ${episode}` : 'Custom search'} ·
         <a href={nyaaSearchUrl(resultSearch)} target="_blank" rel="noreferrer"
           >Open full search ↗<span class="tw:sr-only"> (opens in a new tab)</span></a
         >
@@ -190,6 +229,54 @@
     </div>
     <CloseButton label="Close Nyaa results" onclick={() => dialog?.close()} />
   </header>
+  <!-- Outside the body, so it stays in view when the body scrolls on a short screen. The ends are
+  aria-disabled rather than disabled, so focus stays on the button that reached one -->
+  {#if last > first}
+    <div class="episode-stepper" role="group" aria-label="Episodes to watch">
+      <button
+        type="button"
+        class="step"
+        aria-label={episode > first ? `Previous episode, ${episode - 1}` : 'Previous episode'}
+        aria-disabled={episode <= first}
+        onclick={() => step(episode - 1)}
+      >
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"><path d="m15 6-6 6 6 6" /></svg
+        >
+      </button>
+      <p>
+        <strong aria-live="polite">Episode {episode}</strong>
+        <span>{first}–{last} to watch</span>
+      </p>
+      <button
+        type="button"
+        class="step"
+        aria-label={episode < last ? `Next episode, ${episode + 1}` : 'Next episode'}
+        aria-disabled={episode >= last}
+        onclick={() => step(episode + 1)}
+      >
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg
+        >
+      </button>
+    </div>
+  {/if}
   <div class="dialog-body">
     <form
       class="search-form"
@@ -269,8 +356,9 @@
         </div>
       {/if}
     </form>
-    <!-- Only once there are releases to filter, which keeps the room for them -->
-    {#if !loading && !errorMessage && releases.length > 0}
+    <!-- Kept while the next search loads, so the list doesn't jump and a filter kept between
+    episodes stays in view; not for a failed or empty search, with nothing to filter -->
+    {#if !errorMessage && (loading || releases.length > 0)}
       <div class="filter">
         <label class="tw:sr-only" for={`${heading}-filter`}>Filter loaded results</label>
         <div class="filter-input">
@@ -317,9 +405,11 @@
             </button>
           {/if}
         </div>
-        <p class="result-count" role="status">
-          {filteredReleases.length} of {releases.length} releases
-        </p>
+        {#if !loading}
+          <p class="result-count" role="status">
+            {filteredReleases.length} of {releases.length} releases
+          </p>
+        {/if}
       </div>
     {/if}
     <section
@@ -347,7 +437,7 @@
       {:else}
         <p class="result-order">
           {inPacks
-            ? `No release of episode ${search.episode} alone · Packs that include it`
+            ? `No release of episode ${episode} alone · Packs that include it`
             : 'Newest first · Latest RSS results'}
         </p>
         {#if filteredReleases.length === 0}
@@ -395,9 +485,15 @@
 </dialog>
 
 <style>
+  /*
+   * A steady height, as every search empties the list until its releases arrive, and a centered
+   * dialog that shrank and grew would move its controls, like the stepper, from under the pointer.
+   * Only the list area changes
+   */
   dialog {
     margin: auto;
     width: min(calc(100vw - 32px), 42rem);
+    height: min(85dvh, 44rem);
     max-height: 85dvh;
     padding: var(--dialog-padding);
     border: 1px solid var(--border-subtle);
@@ -443,10 +539,61 @@
     color: var(--text-accent);
     margin-bottom: 3px;
   }
-  header p:last-child {
+  .description {
     margin-top: 4px;
     font-size: 0.75rem;
     opacity: 0.65;
+  }
+  .episode-stepper {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .episode-stepper p {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: center;
+    column-gap: 8px;
+    text-align: center;
+  }
+  .episode-stepper strong {
+    font-size: 0.9rem;
+    font-weight: 650;
+    color: var(--text-heading);
+    font-variant-numeric: tabular-nums;
+  }
+  .episode-stepper span {
+    font-size: 0.75rem;
+    opacity: 0.65;
+  }
+  .step {
+    flex: none;
+    display: grid;
+    place-items: center;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-control);
+    background: var(--you-blue-pale);
+    color: var(--text-accent);
+    transition:
+      background-color 150ms ease,
+      border-color 150ms ease,
+      color 150ms ease;
+  }
+  .step:not([aria-disabled='true']):hover {
+    background: var(--sea-blue);
+    border-color: var(--sea-blue);
+    color: #ffffff;
+  }
+  .step[aria-disabled='true'] {
+    opacity: 0.45;
+    cursor: default;
   }
   a {
     color: var(--text-accent);
@@ -692,7 +839,8 @@
     text-transform: none;
   }
   @media (prefers-reduced-motion: reduce) {
-    .downloads a {
+    .downloads a,
+    .step {
       transition: none;
     }
   }
@@ -714,6 +862,7 @@
   }
   @media (max-height: 600px) {
     dialog {
+      height: calc(100dvh - 24px);
       max-height: calc(100dvh - 24px);
     }
     .dialog-body {

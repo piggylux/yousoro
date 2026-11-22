@@ -77,6 +77,22 @@ export function getEpisodeToSearch(anime: Anime): number | null {
 }
 
 /**
+ * The episodes a search can step through: from the one to search to the last aired, when the user
+ * is behind, and otherwise just the one. The aired count can run one over the total, as AniList
+ * counts an episode aired a little early, so the total caps it when known
+ */
+export function getEpisodeRangeToSearch(anime: Anime): { first: number; last: number } | null {
+  const first = getEpisodeToSearch(anime);
+  if (first === null) return null;
+  if (getWatchState(anime) !== 'to-watch' || !anime.numberAiredEpisodes)
+    return { first, last: first };
+  const aired = anime.numberEpisodes
+    ? Math.min(anime.numberAiredEpisodes, anime.numberEpisodes)
+    : anime.numberAiredEpisodes;
+  return { first, last: Math.max(first, aired) };
+}
+
+/**
  * The sections of a list, in the order they're listed: new episodes to watch, then rewatches,
  * which can wait as every episode has aired, then caught-up or completed anime, then those without
  * episode info. The viewer can hide any of them

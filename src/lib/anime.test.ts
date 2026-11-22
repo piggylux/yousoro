@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   getBacklog,
+  getEpisodeRangeToSearch,
   getEpisodeToSearch,
   getNextUp,
   countBySection,
@@ -81,6 +82,47 @@ describe('getEpisodeToSearch', () => {
     [{ currentEpisode: 0, numberAiredEpisodes: null }, null],
   ] as const)('selects the correct episode for %j', (overrides, expected) => {
     expect(getEpisodeToSearch(anime(overrides))).toBe(expected);
+  });
+});
+
+describe('getEpisodeRangeToSearch', () => {
+  it.each([
+    // Behind: from the next episode to the last aired
+    [
+      { currentEpisode: 3, numberAiredEpisodes: 5 },
+      { first: 4, last: 5 },
+    ],
+    [
+      { currentEpisode: 0, numberAiredEpisodes: 3 },
+      { first: 1, last: 3 },
+    ],
+    // The total caps an aired count that runs over it
+    [
+      { currentEpisode: 5, numberEpisodes: 12, numberAiredEpisodes: 13 },
+      { first: 6, last: 12 },
+    ],
+    // Without a known total, the aired count alone
+    [
+      { currentEpisode: 2, numberEpisodes: 0, numberAiredEpisodes: 9 },
+      { first: 3, last: 9 },
+    ],
+    [
+      { currentEpisode: 1, numberAiredEpisodes: 12, rewatching: true },
+      { first: 2, last: 12 },
+    ],
+    // Caught up, only the latest episode out
+    [
+      { currentEpisode: 5, numberAiredEpisodes: 5 },
+      { first: 5, last: 5 },
+    ],
+    [
+      { currentEpisode: 6, numberAiredEpisodes: 5 },
+      { first: 6, last: 6 },
+    ],
+    [{ currentEpisode: 12, numberEpisodes: 12, numberAiredEpisodes: 12 }, null],
+    [{ currentEpisode: 5, numberAiredEpisodes: null }, null],
+  ] as const)('steps through the right episodes for %j', (overrides, expected) => {
+    expect(getEpisodeRangeToSearch(anime(overrides))).toEqual(expected);
   });
 });
 

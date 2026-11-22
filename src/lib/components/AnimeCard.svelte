@@ -4,7 +4,7 @@
 
   import {
     BIG_BACKLOG,
-    getEpisodeToSearch,
+    getEpisodeRangeToSearch,
     getEpisodesToWatch,
     getWatchState,
     hasNewEpisode,
@@ -113,7 +113,11 @@
   }: Props = $props();
 
   const coverBlurred = $derived(anime.isAdult && blurMature);
-  let nyaaSearch = $state<NyaaSearch | null>(null);
+  // What the nyaa.si dialog opened on, kept as it was while the dialog is open
+  let nyaaDialog = $state<{
+    search: NyaaSearch;
+    episodes?: { first: number; last: number };
+  } | null>(null);
 
   // Countdowns use the viewer's clock and time zone, so they only appear once in the browser
   let mounted = $state(false);
@@ -161,7 +165,9 @@
   const episodesToWatch = $derived(getEpisodesToWatch(anime));
   const watchState = $derived(getWatchState(anime));
   // Search the next episode on any list, including when the list owner is caught up.
-  const searchEpisode = $derived(getEpisodeToSearch(anime));
+  // The search can then step on through every episode the user is behind on
+  const searchRange = $derived(getEpisodeRangeToSearch(anime));
+  const searchEpisode = $derived(searchRange?.first ?? null);
   // Only a just-aired episode makes the badge pulse, so the pulse means something. It depends on the
   // viewer's clock, so like the countdowns it waits for the browser. Cards that can't have one
   // don't read the clock, so they aren't updated as it ticks
@@ -1291,15 +1297,18 @@
                 aria-haspopup="dialog"
                 aria-label={`Find episode ${searchEpisode} on ${nyaaSite(anime.isAdult)}`}
                 onclick={() =>
-                  (nyaaSearch = {
-                    title: anime.title,
-                    englishTitle: anime.englishTitle,
-                    otherTitles: anime.otherTitles,
-                    episode: searchEpisode,
-                    language: downloadLanguage,
-                    version: downloadVersion,
-                    adult: anime.isAdult,
-                    mediaId: anime.id,
+                  (nyaaDialog = {
+                    search: {
+                      title: anime.title,
+                      englishTitle: anime.englishTitle,
+                      otherTitles: anime.otherTitles,
+                      episode: searchEpisode,
+                      language: downloadLanguage,
+                      version: downloadVersion,
+                      adult: anime.isAdult,
+                      mediaId: anime.id,
+                    },
+                    episodes: searchRange ?? undefined,
                   })}
               >
                 <!-- The compact back shortens the visible label; the accessible name keeps the site. -->
@@ -1324,8 +1333,8 @@
   </div>
 </div>
 
-{#if nyaaSearch}
-  <NyaaResultsDialog search={nyaaSearch} onclose={() => (nyaaSearch = null)} />
+{#if nyaaDialog}
+  <NyaaResultsDialog {...nyaaDialog} onclose={() => (nyaaDialog = null)} />
 {/if}
 
 <style>
