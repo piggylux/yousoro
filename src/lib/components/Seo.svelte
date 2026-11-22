@@ -12,8 +12,10 @@
   const resolvedUsername = $derived(
     typeof page.data.username === 'string' ? page.data.username : undefined
   );
-  const seo = $derived(getPageSeo(page.url, page.status, resolvedUsername));
-  const noindex = $derived(seo.noindex || Boolean(page.data.user || page.data.malUser));
+  // A list still loading in the browser is titled as the list, though its page is never indexed
+  const loading = $derived(page.error?.loading === true);
+  const seo = $derived(getPageSeo(page.url, loading ? 200 : page.status, resolvedUsername));
+  const noindex = $derived(loading || seo.noindex || Boolean(page.data.user || page.data.malUser));
 </script>
 
 <svelte:head>

@@ -8,6 +8,8 @@ declare global {
     interface Error {
       message: string;
       retryAt?: number;
+      /** A first load that answered before the list did; the browser goes on to read it */
+      loading?: boolean;
     }
     interface Locals {
       /** Combined delay from action and load; emitted once by the response hook. */

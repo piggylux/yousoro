@@ -86,10 +86,7 @@ export const load: PageLoad = async ({ data: serverData, parent, fetch, url, par
       };
     }
     if (data.retryAt)
-      error(429, {
-        message: `${service} is busy. Your list will retry shortly.`,
-        retryAt: data.retryAt,
-      });
+      error(429, `${service} is busy. Your list will retry shortly.`, { retryAt: data.retryAt });
     error(503, `${service} isn't answering right now, please try again in a moment`);
   }
   if (browser && context === getListContext()) {

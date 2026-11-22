@@ -1,24 +1,43 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
+  import { untrack } from 'svelte';
 
   import AutoReadRetry from '#lib/components/AutoReadRetry.svelte';
+  import Spinner from '#lib/components/Spinner.svelte';
+
+  /** The first load answered before the list did, so the browser reads it now (see list-page.ts) */
+  const loading = $derived(page.error?.loading === true);
+
+  const reload = () => void goto(page.url.href, { invalidateAll: true, replaceState: true });
+
+  $effect(() => {
+    if (loading) untrack(reload);
+  });
 </script>
 
 <section class="error-page">
-  <p class="error-code">Error {page.status}</p>
-  <h1>{page.status === 404 ? 'List not found' : 'Unable to load this list'}</h1>
-  <p class="error-message">{page.error?.message}</p>
-  <AutoReadRetry
-    retryKey={`page:${page.data.user?.id ?? 'public'}:${page.url.pathname}:${page.url.search}`}
-    retryAt={page.status === 429 ? (page.error?.retryAt ?? 0) : 0}
-    onretry={() => void goto(page.url.href, { invalidateAll: true, replaceState: true })}
-  />
-  {#if page.status === 429}<button
-      class="tw:btn"
-      onclick={() => void goto(page.url.href, { invalidateAll: true, replaceState: true })}
-      >Try again</button
-    >{/if}
+  {#if loading}
+    <Spinner />
+    <h1>Loading {page.params.username}’s list</h1>
+    <p class="error-message" role="status">{page.error?.message}</p>
+    <!-- Only the browser's script reads the list from here; without it, a reload is the way on -->
+    <noscript>
+      <p class="error-message">
+        <a href={page.url.href}>Reload the page</a> in a moment to see the list.
+      </p>
+    </noscript>
+  {:else}
+    <p class="error-code">Error {page.status}</p>
+    <h1>{page.status === 404 ? 'List not found' : 'Unable to load this list'}</h1>
+    <p class="error-message">{page.error?.message}</p>
+    <AutoReadRetry
+      retryKey={`page:${page.data.user?.id ?? 'public'}:${page.url.pathname}:${page.url.search}`}
+      retryAt={page.status === 429 ? (page.error?.retryAt ?? 0) : 0}
+      onretry={reload}
+    />
+    {#if page.status === 429}<button class="tw:btn" onclick={reload}>Try again</button>{/if}
+  {/if}
 
   <a class="home-link" href="/home">Back to home</a>
 </section>
@@ -27,6 +46,8 @@
   .error-page {
     width: min(100%, 40rem);
     margin: 64px auto;
+    /* Long usernames wrap rather than run off narrow screens */
+    overflow-wrap: anywhere;
   }
   .error-code {
     color: var(--text-accent);

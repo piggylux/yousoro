@@ -1,4 +1,4 @@
-import { error, type Cookies } from '@sveltejs/kit';
+import { error, isHttpError, type Cookies } from '@sveltejs/kit';
 
 import { withoutHiddenMature } from '#lib/anime.js';
 import { HIDDEN_SECTIONS_COOKIE, parseHiddenSections } from '#lib/hidden-sections.js';
@@ -48,8 +48,7 @@ function checkReadError(
   const rateLimited = err instanceof AniListRateLimitError || err instanceof MalRateLimitError;
   if (rateLimited) {
     locals.retryAfter = Math.max(locals.retryAfter ?? 0, err.retryAfter);
-    if (busyIsError)
-      error(429, { message: err.message, retryAt: Date.now() + err.retryAfter * 1000 });
+    if (busyIsError) error(429, err.message, { retryAt: Date.now() + err.retryAfter * 1000 });
   }
   if (err instanceof AniListNotFoundError || err instanceof MalNotFoundError) {
     error(404, `There's no ${DOMAIN_NAMES[domain]} user named ${username}`);
@@ -58,6 +57,43 @@ function checkReadError(
     error(403, `MyAnimeList didn't share ${username}'s list. It may be private.`);
   }
   return rateLimited ? err.retryAfter : null;
+}
+
+/**
+ * How long a first load waits for the list. Past this it answers without it, rather than leave the
+ * visitor a blank tab for as long as the service takes; lists usually arrive well within it
+ */
+const PAGE_LOAD_WAIT_MS = 2500;
+
+const STILL_READING = Symbol('still reading');
+
+/**
+ * The read's result, or STILL_READING once `ms` have passed. The read carries on, and the race
+ * handles its rejection, so a read that fails after the page answered goes unnoticed
+ */
+async function within<T>(read: Promise<T>, ms: number): Promise<T | typeof STILL_READING> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const wait = new Promise<typeof STILL_READING>((resolve) => {
+    timer = setTimeout(() => resolve(STILL_READING), ms);
+  });
+  try {
+    return await Promise.race([read, wait]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Whether the list is read with the viewer's MyAnimeList sign-in, as their own list is (see
+ * readMal). That read may renew it, once it has expired or whenever MyAnimeList turns it down, and
+ * the new token is saved in a cookie, which can't be sent once the page has answered. Each renewal
+ * replaces the last one's token, so losing it signs them out: such a read is always waited for
+ */
+function readsWithMalSignIn(domain: Domain, username: string, locals: App.Locals): boolean {
+  return (
+    domain === 'myanimelist' &&
+    locals.malSession?.user.name.toLowerCase() === username.toLowerCase()
+  );
 }
 
 export async function loadAnimePage({
@@ -83,24 +119,41 @@ export async function loadAnimePage({
   try {
     const limit = await takeClientLimit(getClientAddress(), 'read', 2);
     if (!limit.allowed) throw new AniListRateLimitError(limit.retryAfter);
-    userAnimeList = await getUserAnimeList(
+    const read = getUserAnimeList(
       domain,
       params.username,
       { locals, cookies },
       url?.searchParams.get('view') !== 'calendar'
     );
+    userAnimeList =
+      isDataRequest || readsWithMalSignIn(domain, params.username, locals)
+        ? await read
+        : await within(read, PAGE_LOAD_WAIT_MS);
   } catch (err) {
     const retryAfter = checkReadError(err, domain, params.username, locals, !isDataRequest);
+    console.error(err);
+    if (!isDataRequest) {
+      if (isHttpError(err)) throw err;
+      // A first load has no list to fall back on. It says so as the browser would (see +page.ts)
+      error(503, `${DOMAIN_NAMES[domain]} isn't answering right now, please try again in a moment`);
+    }
     // In the browser, the page may already show this list, reloading it by itself or after a
     // save. It keeps showing it then (see +page.ts), rather than an error the viewer didn't ask for
-    if (!isDataRequest) throw err;
-    console.error(err);
     return {
       unavailable: true as const,
       username: params.username,
       hiddenSections,
       retryAt: retryAfter === null ? 0 : Date.now() + retryAfter * 1000,
     };
+  }
+  if (userAnimeList === STILL_READING) {
+    // Answered without the list, so the visitor sees it's on its way: the page reads it again from
+    // the browser (see +error.svelte). A 503 keeps crawlers from taking this page for the list
+    error(
+      503,
+      `${DOMAIN_NAMES[domain]} is taking longer than usual to answer. The list will appear as soon as it does.`,
+      { loading: true }
+    );
   }
   const { userId, username, avatarUrl, scoreFormat, animeList, listedIds } = userAnimeList;
   const viewer = domain === 'anilist' ? locals.session : locals.malSession;
