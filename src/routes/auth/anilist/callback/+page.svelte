@@ -3,6 +3,7 @@
   import { onMount } from 'svelte';
 
   import { PENDING_SIGN_IN_KEY } from '#lib/anilist-auth.js';
+  import Spinner from '#lib/components/Spinner.svelte';
 
   let errorMessage = $state<string | null>(null);
 
@@ -53,7 +54,7 @@
     <p class="tw:text-error" role="alert">{errorMessage}</p>
     <a class="tw:btn" href="/home">Back to home</a>
   {:else}
-    <span class="tw:loading tw:loading-ring tw:loading-lg"></span>
+    <Spinner />
     <p>Signing in with AniList…</p>
   {/if}
 </section>
