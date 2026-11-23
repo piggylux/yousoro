@@ -38,7 +38,8 @@
     "test": "vitest",
     "lint": "oxfmt --check && oxlint",
     "lint:fix": "oxlint --fix",
-    "format": "oxfmt"
+    "format": "oxfmt",
+    "icons": "bun scripts/app-icons.ts"
   },
   "type": "module"
 }
