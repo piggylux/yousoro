@@ -1,4 +1,5 @@
 import { isUserName } from '#lib/match.js';
+import { isNotificationType } from '#lib/notifications.js';
 import type { NyaaSeries } from '#lib/nyaa.js';
 import { retryAfterSeconds } from '#lib/read-retry.js';
 import { DEFAULT_SCORE_FORMAT, isScoreFormat, toScore100, type ScoreFormat } from '#lib/score.js';
@@ -13,6 +14,7 @@ import type { AiringStatus, Sequel } from '#lib/types/anime.js';
 import { OTHER_LISTS, type ListedIds, type OtherList } from '#lib/types/api.js';
 import type { FriendWatchingResult, SharedAnime } from '#lib/types/friend-watching.js';
 import type { TasteProfile } from '#lib/types/match.js';
+import type { AppNotification, NotificationsPage } from '#lib/types/notification.js';
 import type { ScheduleResult, ScheduledEpisode } from '#lib/types/schedule.js';
 import type { SeasonTaste } from '#lib/types/season.js';
 import type { AnimeYear } from '#lib/types/wrapped.js';
@@ -1428,6 +1430,255 @@ export async function getViewer(token: string): Promise<AniListUser> {
   );
 
   return toUser(data.Viewer);
+}
+
+/**
+ * How many notifications the user hasn't seen on AniList. Asked in the background for the bell in
+ * the header, so it gives way to everything else
+ */
+export async function getUnreadNotificationCount(token: string): Promise<number> {
+  const data = await query<{ Viewer: { unreadNotificationCount: number | null } }>(
+    'query { Viewer { unreadNotificationCount } }',
+    {},
+    token,
+    { priority: 'spare' }
+  );
+  return Math.max(0, data.Viewer.unreadNotificationCount ?? 0);
+}
+
+const NOTIFICATIONS_PAGE_SIZE = 20;
+const ANILIST_SITE = 'https://anilist.co';
+
+type NotificationMediaFields = {
+  id: number;
+  type: 'ANIME' | 'MANGA' | null;
+  title: { romaji: string | null } | null;
+  coverImage: { medium: string | null } | null;
+  isAdult: boolean | null;
+};
+
+/** One notification as AniList sends it; which fields are there depends on its type */
+type NotificationFields = {
+  id?: number;
+  type?: string | null;
+  createdAt?: number | null;
+  episode?: number | null;
+  activityId?: number | null;
+  commentId?: number | null;
+  threadId?: number | null;
+  thread?: { id: number; title: string | null } | null;
+  media?: NotificationMediaFields | null;
+  user?: AniListUserFields | null;
+  reason?: string | null;
+  deletedMediaTitles?: (string | null)[] | null;
+  deletedMediaTitle?: string | null;
+  status?: string | null;
+  notes?: string | null;
+  submittedTitle?: string | null;
+  staff?: { id: number; name: { full: string | null } | null } | null;
+  character?: { id: number; name: { full: string | null } | null } | null;
+};
+
+// Every member of AniList's NotificationUnion. One it adds later sends no fields and is left out
+const NOTIFICATION_FIELDS = `
+  ... on AiringNotification { id type createdAt episode media { ...notificationMedia } }
+  ... on FollowingNotification { id type createdAt user { ...notificationUser } }
+  ... on ActivityMessageNotification { id type createdAt activityId user { ...notificationUser } }
+  ... on ActivityMentionNotification { id type createdAt activityId user { ...notificationUser } }
+  ... on ActivityReplyNotification { id type createdAt activityId user { ...notificationUser } }
+  ... on ActivityReplySubscribedNotification {
+    id type createdAt activityId user { ...notificationUser }
+  }
+  ... on ActivityLikeNotification { id type createdAt activityId user { ...notificationUser } }
+  ... on ActivityReplyLikeNotification { id type createdAt activityId user { ...notificationUser } }
+  ... on ThreadCommentMentionNotification {
+    id type createdAt commentId thread { id title } user { ...notificationUser }
+  }
+  ... on ThreadCommentReplyNotification {
+    id type createdAt commentId thread { id title } user { ...notificationUser }
+  }
+  ... on ThreadCommentSubscribedNotification {
+    id type createdAt commentId thread { id title } user { ...notificationUser }
+  }
+  ... on ThreadCommentLikeNotification {
+    id type createdAt commentId thread { id title } user { ...notificationUser }
+  }
+  ... on ThreadLikeNotification {
+    id type createdAt threadId thread { id title } user { ...notificationUser }
+  }
+  ... on RelatedMediaAdditionNotification { id type createdAt media { ...notificationMedia } }
+  ... on MediaDataChangeNotification { id type createdAt reason media { ...notificationMedia } }
+  ... on MediaMergeNotification {
+    id type createdAt reason deletedMediaTitles media { ...notificationMedia }
+  }
+  ... on MediaDeletionNotification { id type createdAt reason deletedMediaTitle }
+  ... on MediaSubmissionUpdateNotification {
+    id type createdAt status notes submittedTitle media { ...notificationMedia }
+  }
+  ... on StaffSubmissionUpdateNotification {
+    id type createdAt status notes staff { id name { full } }
+  }
+  ... on CharacterSubmissionUpdateNotification {
+    id type createdAt status notes character { id name { full } }
+  }
+`;
+
+function isId(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) > 0;
+}
+
+/** Only https images, since the URL ends up in an <img> */
+function httpsImage(url: string | null | undefined): string | null {
+  return typeof url === 'string' && url.startsWith('https://') ? url : null;
+}
+
+function nonEmpty(text: string | null | undefined): string | null {
+  return text?.trim() || null;
+}
+
+function mediaUrl(media: NotificationMediaFields | null): string | null {
+  return media && `${ANILIST_SITE}/${media.type === 'MANGA' ? 'manga' : 'anime'}/${media.id}`;
+}
+
+/**
+ * Trims a notification to what the list shows. Its link is put together from AniList's ids rather
+ * than taken from AniList as it is; null for a notification of a type this app doesn't know, or
+ * without a time to place it by
+ */
+function toNotification(fields: NotificationFields): AppNotification | null {
+  const { type } = fields;
+  if (!isNotificationType(type) || !isId(fields.id) || !isId(fields.createdAt)) return null;
+
+  const media = fields.media && isId(fields.media.id) ? fields.media : null;
+  const actor = fields.user && isId(fields.user.id) ? toUser(fields.user) : null;
+  if (actor) actor.avatarUrl = httpsImage(actor.avatarUrl);
+  const thread = fields.thread && isId(fields.thread.id) ? fields.thread : null;
+
+  // Only the notifications about an anime or manga have one, and they lead to its page
+  let href = mediaUrl(media);
+  let subject: string | null = null;
+  switch (type) {
+    case 'MEDIA_MERGE':
+      subject = nonEmpty(
+        fields.deletedMediaTitles?.filter((title): title is string => !!title?.trim()).join(', ')
+      );
+      break;
+    case 'MEDIA_DELETION':
+      subject = nonEmpty(fields.deletedMediaTitle);
+      break;
+    case 'MEDIA_SUBMISSION_UPDATE':
+      subject = nonEmpty(media?.title?.romaji) ?? nonEmpty(fields.submittedTitle);
+      break;
+    case 'STAFF_SUBMISSION_UPDATE':
+      if (fields.staff && isId(fields.staff.id)) {
+        href = `${ANILIST_SITE}/staff/${fields.staff.id}`;
+        subject = nonEmpty(fields.staff.name?.full);
+      }
+      break;
+    case 'CHARACTER_SUBMISSION_UPDATE':
+      if (fields.character && isId(fields.character.id)) {
+        href = `${ANILIST_SITE}/character/${fields.character.id}`;
+        subject = nonEmpty(fields.character.name?.full);
+      }
+      break;
+    case 'FOLLOWING':
+      // To their list here, as the people watching an anime with you do
+      if (actor && isUserName(actor.name)) href = `/user/anilist/${encodeURIComponent(actor.name)}`;
+      break;
+    case 'THREAD_LIKE': {
+      const threadId = isId(fields.threadId) ? fields.threadId : thread?.id;
+      if (threadId) href = `${ANILIST_SITE}/forum/thread/${threadId}`;
+      subject = nonEmpty(thread?.title);
+      break;
+    }
+    case 'THREAD_COMMENT_MENTION':
+    case 'THREAD_SUBSCRIBED':
+    case 'THREAD_COMMENT_REPLY':
+    case 'THREAD_COMMENT_LIKE':
+      if (thread) {
+        const comment = isId(fields.commentId) ? `/comment/${fields.commentId}` : '';
+        href = `${ANILIST_SITE}/forum/thread/${thread.id}${comment}`;
+      }
+      subject = nonEmpty(thread?.title);
+      break;
+    case 'ACTIVITY_MESSAGE':
+    case 'ACTIVITY_MENTION':
+    case 'ACTIVITY_REPLY':
+    case 'ACTIVITY_REPLY_SUBSCRIBED':
+    case 'ACTIVITY_LIKE':
+    case 'ACTIVITY_REPLY_LIKE':
+      if (isId(fields.activityId)) href = `${ANILIST_SITE}/activity/${fields.activityId}`;
+      break;
+  }
+
+  const status = nonEmpty(fields.status);
+  const reason = nonEmpty(fields.reason) ?? nonEmpty(fields.notes);
+  return {
+    id: fields.id,
+    type,
+    createdAt: fields.createdAt * 1000,
+    href,
+    ...(actor ? { actor } : {}),
+    ...(media
+      ? {
+          media: {
+            id: media.id,
+            title: nonEmpty(media.title?.romaji),
+            coverUrl: httpsImage(media.coverImage?.medium),
+            isAdult: media.isAdult ?? false,
+          },
+        }
+      : {}),
+    ...(isId(fields.episode) ? { episode: fields.episode } : {}),
+    ...(subject ? { subject } : {}),
+    ...(status ? { status } : {}),
+    ...(reason ? { reason } : {}),
+  };
+}
+
+/**
+ * A page of the user's AniList notifications, of every type, newest first. With `markRead`, the read
+ * also clears AniList's unread count, the way opening the notifications on AniList does, and says
+ * how many were unread
+ */
+export async function getNotifications(
+  token: string,
+  { page, markRead }: { page: number; markRead: boolean }
+): Promise<NotificationsPage> {
+  // Every type, so no `type_in`: AniList fails with a server error when it's null
+  const data = await query<{
+    Viewer?: { unreadNotificationCount: number | null } | null;
+    Page: {
+      pageInfo: { hasNextPage: boolean | null };
+      notifications: (NotificationFields | null)[];
+    };
+  }>(
+    `query ($page: Int, $markRead: Boolean!) {
+      Viewer @include(if: $markRead) { unreadNotificationCount }
+      Page(page: $page, perPage: ${NOTIFICATIONS_PAGE_SIZE}) {
+        pageInfo { hasNextPage }
+        notifications(resetNotificationCount: $markRead) {
+          ${NOTIFICATION_FIELDS}
+        }
+      }
+    }
+    fragment notificationMedia on Media {
+      id type title { romaji } coverImage { medium } isAdult
+    }
+    fragment notificationUser on User { id name avatar { large } }`,
+    { page, markRead },
+    token,
+    { priority: 'optional' }
+  );
+
+  return {
+    notifications: data.Page.notifications.flatMap((fields) => {
+      const notification = fields && toNotification(fields);
+      return notification ? [notification] : [];
+    }),
+    hasNextPage: data.Page.pageInfo.hasNextPage ?? false,
+    ...(markRead ? { unread: Math.max(0, data.Viewer?.unreadNotificationCount ?? 0) } : {}),
+  };
 }
 
 /** An AniList date as text: YYYY-MM-DD, or YYYY-MM or YYYY as far as it's known; null without a year */
