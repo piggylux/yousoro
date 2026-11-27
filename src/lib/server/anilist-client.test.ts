@@ -12,11 +12,13 @@ import {
   getLatestAirings,
   getListEntry,
   getListStatus,
+  getNotifications,
   getPlanningEntries,
   getSeasonTaste,
   getSequels,
   getSeries,
   getTasteProfile,
+  getUnreadNotificationCount,
   getViewer,
   getWatchingEntries,
   saveEntries,
@@ -1081,5 +1083,206 @@ describe('tastes for the season page', () => {
     await getSeasonTaste('Hidden');
     expect(fetch).toHaveBeenCalledTimes(3);
     expect(vi.mocked(fetch).mock.calls[2][1]!.headers).not.toHaveProperty('Authorization');
+  });
+});
+
+describe('AniList notifications', () => {
+  const user = (id: number, name: string, avatar: string | null = null) => ({
+    id,
+    name,
+    avatar: { large: avatar },
+  });
+  const media = (id: number, type: 'ANIME' | 'MANGA' = 'ANIME') => ({
+    id,
+    type,
+    title: { romaji: `Title ${id}` },
+    coverImage: { medium: `https://s4.anilist.co/cover/${id}.jpg` },
+    isAdult: false,
+  });
+
+  function respond(notifications: unknown[], extra: Record<string, unknown> = {}) {
+    vi.mocked(fetch).mockResolvedValue(
+      Response.json({
+        data: { Page: { pageInfo: { hasNextPage: true }, notifications }, ...extra },
+      })
+    );
+  }
+  function sent() {
+    return JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string);
+  }
+
+  it('counts unread notifications with whatever budget is spare', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      Response.json({ data: { Viewer: { unreadNotificationCount: 4 } } })
+    );
+    expect(await getUnreadNotificationCount('token')).toBe(4);
+    expect(takeAniListRequest).toHaveBeenCalledWith('spare');
+  });
+
+  it('reads a page of every type and leaves the unread count alone', async () => {
+    respond([]);
+    expect(await getNotifications('token', { page: 2, markRead: false })).toEqual({
+      notifications: [],
+      hasNextPage: true,
+    });
+    expect(sent().variables).toEqual({ page: 2, markRead: false });
+    expect(sent().query).toContain('resetNotificationCount: $markRead');
+    // AniList fails with a server error when type_in is null, so it's never sent
+    expect(sent().query).not.toContain('type_in');
+    expect(takeAniListRequest).toHaveBeenCalledWith('optional');
+  });
+
+  it('says how many were unread when marking them read', async () => {
+    respond([], { Viewer: { unreadNotificationCount: 3 } });
+    const page = await getNotifications('token', { page: 1, markRead: true });
+    expect(sent().variables).toEqual({ page: 1, markRead: true });
+    expect(page.unread).toBe(3);
+  });
+
+  it('trims each kind of notification and links it from ids alone', async () => {
+    respond([
+      { id: 20, type: 'AIRING', createdAt: 1_700_000_000, episode: 7, media: media(1) },
+      { id: 19, type: 'FOLLOWING', createdAt: 1, user: user(5, 'Alice', 'http://insecure/a.png') },
+      { id: 18, type: 'ACTIVITY_LIKE', createdAt: 1, activityId: 77, user: user(5, 'Alice') },
+      {
+        id: 17,
+        type: 'THREAD_COMMENT_REPLY',
+        createdAt: 1,
+        commentId: 9,
+        thread: { id: 3, title: ' Fall 2026 ' },
+        user: user(6, 'Bob', 'https://s4.anilist.co/avatar/6.png'),
+      },
+      { id: 16, type: 'THREAD_LIKE', createdAt: 1, threadId: 4, thread: null, user: null },
+      {
+        id: 15,
+        type: 'MEDIA_MERGE',
+        createdAt: 1,
+        reason: 'Duplicate',
+        deletedMediaTitles: ['Old one', null, ' '],
+        media: media(2, 'MANGA'),
+      },
+      { id: 14, type: 'MEDIA_DELETION', createdAt: 1, deletedMediaTitle: 'Gone', reason: '' },
+      {
+        id: 13,
+        type: 'MEDIA_SUBMISSION_UPDATE',
+        createdAt: 1,
+        status: 'ACCEPTED',
+        notes: 'Thanks',
+        submittedTitle: 'New show',
+        media: null,
+      },
+      {
+        id: 12,
+        type: 'STAFF_SUBMISSION_UPDATE',
+        createdAt: 1,
+        staff: { id: 8, name: { full: 'Kana' } },
+      },
+    ]);
+    const { notifications } = await getNotifications('token', { page: 1, markRead: false });
+    expect(notifications).toEqual([
+      {
+        id: 20,
+        type: 'AIRING',
+        createdAt: 1_700_000_000_000,
+        href: 'https://anilist.co/anime/1',
+        media: {
+          id: 1,
+          title: 'Title 1',
+          coverUrl: 'https://s4.anilist.co/cover/1.jpg',
+          isAdult: false,
+        },
+        episode: 7,
+      },
+      {
+        id: 19,
+        type: 'FOLLOWING',
+        createdAt: 1000,
+        href: '/user/anilist/Alice',
+        actor: { id: 5, name: 'Alice', avatarUrl: null },
+      },
+      {
+        id: 18,
+        type: 'ACTIVITY_LIKE',
+        createdAt: 1000,
+        href: 'https://anilist.co/activity/77',
+        actor: { id: 5, name: 'Alice', avatarUrl: null },
+      },
+      {
+        id: 17,
+        type: 'THREAD_COMMENT_REPLY',
+        createdAt: 1000,
+        href: 'https://anilist.co/forum/thread/3/comment/9',
+        actor: { id: 6, name: 'Bob', avatarUrl: 'https://s4.anilist.co/avatar/6.png' },
+        subject: 'Fall 2026',
+      },
+      {
+        id: 16,
+        type: 'THREAD_LIKE',
+        createdAt: 1000,
+        href: 'https://anilist.co/forum/thread/4',
+      },
+      {
+        id: 15,
+        type: 'MEDIA_MERGE',
+        createdAt: 1000,
+        href: 'https://anilist.co/manga/2',
+        media: {
+          id: 2,
+          title: 'Title 2',
+          coverUrl: 'https://s4.anilist.co/cover/2.jpg',
+          isAdult: false,
+        },
+        subject: 'Old one',
+        reason: 'Duplicate',
+      },
+      { id: 14, type: 'MEDIA_DELETION', createdAt: 1000, href: null, subject: 'Gone' },
+      {
+        id: 13,
+        type: 'MEDIA_SUBMISSION_UPDATE',
+        createdAt: 1000,
+        href: null,
+        subject: 'New show',
+        status: 'ACCEPTED',
+        reason: 'Thanks',
+      },
+      {
+        id: 12,
+        type: 'STAFF_SUBMISSION_UPDATE',
+        createdAt: 1000,
+        href: 'https://anilist.co/staff/8',
+        subject: 'Kana',
+      },
+    ]);
+  });
+
+  it("leaves out notifications it can't show", async () => {
+    respond([
+      null,
+      {},
+      { id: 3, type: 'SOMETHING_NEW', createdAt: 1 },
+      { id: 0, type: 'AIRING', createdAt: 1 },
+      { id: 4, type: 'AIRING', createdAt: null, episode: 2 },
+      { id: 2, type: 'FOLLOWING', createdAt: 1, user: user(5, 'not a name!') },
+    ]);
+    const { notifications } = await getNotifications('token', { page: 1, markRead: false });
+    // A name that couldn't be a list's address links nowhere rather than somewhere wrong
+    expect(notifications).toEqual([
+      {
+        id: 2,
+        type: 'FOLLOWING',
+        createdAt: 1000,
+        href: null,
+        actor: { id: 5, name: 'not a name!', avatarUrl: null },
+      },
+    ]);
+  });
+
+  it('passes on a rejected token', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      Response.json({ data: null, errors: [{ message: 'Invalid token' }] })
+    );
+    await expect(getNotifications('token', { page: 1, markRead: true })).rejects.toBeInstanceOf(
+      AniListTokenError
+    );
   });
 });

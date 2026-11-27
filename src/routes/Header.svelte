@@ -1,12 +1,20 @@
 <script lang="ts">
+  import { afterNavigate } from '$app/navigation';
   import { page } from '$app/state';
 
   import { startAniListSignIn } from '#lib/anilist-auth.js';
   import FriendAvatar from '#lib/components/FriendAvatar.svelte';
   import Menu from '#lib/components/Menu.svelte';
+  import NotificationsMenu from '#lib/components/NotificationsMenu.svelte';
   import SettingsDrawer from '#lib/components/SettingsDrawer.svelte';
   import SignInButton from '#lib/components/SignInButton.svelte';
   import { malSignInPath } from '#lib/myanimelist-auth.js';
+  import {
+    notificationCount,
+    refreshUnread,
+    resetForUser,
+  } from '#lib/notification-count.svelte.js';
+  import { unreadBadgeText } from '#lib/notifications.js';
   import {
     accountMenuLinks,
     headerList,
@@ -34,6 +42,18 @@
 
   let settingsOpen = $state(false);
   const logoutFormId = $props.id();
+
+  // The bell's count is the AniList account's, asked again after each page and on coming back to
+  // the tab, no more than once a minute
+  $effect.pre(() => resetForUser(user?.id ?? null));
+  afterNavigate(() => {
+    resetForUser(user?.id ?? null);
+    void refreshUnread();
+  });
+  function onvisibilitychange() {
+    if (document.visibilityState === 'visible') void refreshUnread();
+  }
+  const unread = $derived(user ? notificationCount.unread : 0);
 
   // The gear opens the settings drawer, except on the settings page, which already shows them. A
   // click meant for a new tab still opens the page there
@@ -219,6 +239,40 @@
             />
           </svg>
         </a>
+        {#if user}
+          <NotificationsMenu>
+            {#snippet trigger({ open, props })}
+              <button
+                type="button"
+                class="utility-link notifications-button"
+                class:open
+                {...props}
+                aria-label={unread ? `Notifications, ${unread} unread` : 'Notifications'}
+                title="Notifications"
+              >
+                <!-- A bell -->
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  width="22"
+                  height="22"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+                  <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+                </svg>
+                {#if unread}<span class="unread-badge" aria-hidden="true"
+                    >{unreadBadgeText(unread)}</span
+                  >{/if}
+              </button>
+            {/snippet}
+          </NotificationsMenu>
+        {/if}
 
         {#if accounts[0]}
           <Menu align="end">
@@ -296,6 +350,8 @@
 </header>
 
 <SettingsDrawer {preferences} {user} {malUser} {malEnabled} bind:open={settingsOpen} />
+
+<svelte:document {onvisibilitychange} />
 
 <style>
   header {
@@ -380,6 +436,39 @@
   }
   .github-link {
     opacity: 0.7;
+  }
+  .notifications-button {
+    position: relative;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+  }
+  .notifications-button.open {
+    background: var(--you-blue-pale);
+    color: var(--you-blue);
+  }
+  /*
+   * The count, on the bell's corner; the button's name says it to screen readers. Neutral, as blue is
+   * for actions and selection, and the heading colour stands out on the bar in either theme
+   */
+  .unread-badge {
+    position: absolute;
+    top: 4px;
+    right: 2px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border: 2px solid var(--surface);
+    border-radius: 999px;
+    background: var(--text-heading);
+    color: var(--surface);
+    font-size: 0.65rem;
+    font-weight: 700;
+    line-height: 14px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    box-sizing: border-box;
   }
   .github-link:hover {
     opacity: 1;
