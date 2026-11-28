@@ -1,82 +1,38 @@
 <script lang="ts">
-  import { goto } from '$app/navigation';
   import { page } from '$app/state';
-  import { untrack } from 'svelte';
 
-  import AutoReadRetry from '#lib/components/AutoReadRetry.svelte';
+  import PageError from '#lib/components/PageError.svelte';
+  import FriendsSkeleton from '#lib/components/skeletons/FriendsSkeleton.svelte';
   import ListSkeleton from '#lib/components/skeletons/ListSkeleton.svelte';
+  import PlanningSkeleton from '#lib/components/skeletons/PlanningSkeleton.svelte';
   import { ownsList } from '#lib/navigation-skeleton.js';
 
-  /** The first load answered before the list did, so the browser reads it now (see list-page.ts) */
-  const loading = $derived(page.error?.loading === true);
-
-  const reload = () => void goto(page.url.href, { invalidateAll: true, replaceState: true });
-
-  $effect(() => {
-    if (loading) untrack(reload);
-  });
+  // The list's pages that can answer before what they show (see first-load.ts)
+  const PLANNING = '/user/[domain]/[username]/planning';
+  const FRIENDS = '/user/[domain]/[username]/friends';
+  const name = $derived(page.params.username);
+  const what = $derived(
+    page.route.id === PLANNING
+      ? `${name}’s planning list`
+      : page.route.id === FRIENDS
+        ? `${name}’s friends`
+        : `${name}’s list`
+  );
 </script>
 
-{#if loading}
-  <!-- The list in outline, filled in when the browser has read it -->
-  <ListSkeleton
-    calendar={page.url.searchParams.get('view') === 'calendar'}
-    cardSize={page.data.preferences?.cardSize}
-    own={ownsList(page.params, page.data)}
-    anilist={page.params.domain !== 'myanimelist'}
-  />
-  <p class="tw:sr-only" role="status">
-    Loading {page.params.username}’s list. {page.error?.message}
-  </p>
-  <!-- Only the browser's script reads the list from here; without it, a reload is the way on -->
-  <noscript>
-    <p class="error-message">
-      <a href={page.url.href}>Reload the page</a> in a moment to see the list.
-    </p>
-  </noscript>
-{:else}
-  <section class="error-page">
-    <p class="error-code">Error {page.status}</p>
-    <h1>{page.status === 404 ? 'List not found' : 'Unable to load this list'}</h1>
-    <p class="error-message">{page.error?.message}</p>
-    <AutoReadRetry
-      retryKey={`page:${page.data.user?.id ?? 'public'}:${page.url.pathname}:${page.url.search}`}
-      retryAt={page.status === 429 ? (page.error?.retryAt ?? 0) : 0}
-      onretry={reload}
-    />
-    {#if page.status === 429}<button class="tw:btn" onclick={reload}>Try again</button>{/if}
-
-    <a class="home-link" href="/home">Back to home</a>
-  </section>
-{/if}
-
-<style>
-  .error-page {
-    width: min(100%, 40rem);
-    margin: 64px auto;
-    /* Long usernames wrap rather than run off narrow screens */
-    overflow-wrap: anywhere;
-  }
-  .error-code {
-    color: var(--text-accent);
-    font-size: 0.875rem;
-  }
-  h1 {
-    margin-top: 8px;
-    font-size: 1.75rem;
-    font-weight: 600;
-    letter-spacing: -0.025em;
-  }
-  .error-message {
-    margin: 12px 0 24px;
-    color: var(--text-accent);
-  }
-  .home-link {
-    display: inline-flex;
-    align-items: center;
-    min-height: 44px;
-    color: var(--you-blue);
-    text-decoration: underline;
-    text-underline-offset: 3px;
-  }
-</style>
+<PageError heading={page.status === 404 ? 'List not found' : 'Unable to load this list'} {what}>
+  {#snippet loading()}
+    {#if page.route.id === PLANNING}
+      <PlanningSkeleton />
+    {:else if page.route.id === FRIENDS}
+      <FriendsSkeleton />
+    {:else}
+      <ListSkeleton
+        calendar={page.url.searchParams.get('view') === 'calendar'}
+        cardSize={page.data.preferences?.cardSize}
+        own={ownsList(page.params, page.data)}
+        anilist={page.params.domain !== 'myanimelist'}
+      />
+    {/if}
+  {/snippet}
+</PageError>

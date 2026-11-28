@@ -1,6 +1,7 @@
 import { browser } from '$app/env';
 import { error } from '@sveltejs/kit';
 
+import { STILL_READING, stillReading, within } from '#lib/first-load.js';
 import { viewerKey } from '#lib/list-data.js';
 import { getRememberedPlanned, rememberPlanned } from '#lib/planning.js';
 import { retryAfterSeconds } from '#lib/read-retry.js';
@@ -13,7 +14,9 @@ import type { PageLoad } from './$types';
  * Plan lists are read through the API rather than a server load, so that coming back to one in the
  * same tab within a few minutes shows it from memory, without asking AniList or MyAnimeList for the
  * whole list again. On the first visit the server's read is sent with the page, so the browser
- * doesn't repeat it
+ * doesn't repeat it. When it takes long, the page answers first, in outline, and the browser reads
+ * it then. The viewer's own MyAnimeList list is always waited for, as its read may renew their
+ * sign-in, whose new token the page couldn't send once it had answered
  */
 export const load: PageLoad = async ({ parent, fetch, params }) => {
   const { preferences, user, malUser } = await parent();
@@ -24,13 +27,16 @@ export const load: PageLoad = async ({ parent, fetch, params }) => {
     if (saved) return saved;
   }
 
-  const response = await fetch(
+  const read = fetch(
     `/api/planning/${encodeURIComponent(domain)}/${encodeURIComponent(username)}`,
     { headers: { Accept: 'application/json' } }
   );
+  const ownMal = domain === 'myanimelist' && malUser?.name.toLowerCase() === username.toLowerCase();
+  const response = browser || ownMal ? await read : await within(read);
+  const service = isDomain(domain) ? DOMAIN_NAMES[domain] : 'The service';
+  if (response === STILL_READING) stillReading(service, 'The planning list');
   if (!response.ok) {
     const body: App.Error | null = await response.json().catch(() => null);
-    const service = isDomain(domain) ? DOMAIN_NAMES[domain] : 'The service';
     if (response.status === 429) {
       error(429, {
         message: body?.message ?? `${service} is busy. The list will retry shortly.`,

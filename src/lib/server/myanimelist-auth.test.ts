@@ -3,7 +3,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   finishSignIn,
+  MalRenewalDeferredError,
   MalSignInError,
+  renewMalTokenIfExpiring,
   startSignIn,
   withMalToken,
 } from '#lib/server/myanimelist-auth.js';
@@ -172,5 +174,53 @@ describe('withMalToken', () => {
     vi.mocked(fetch).mockResolvedValue(Response.json({ error: 'invalid_grant' }, { status: 400 }));
 
     await expect(withMalToken(event, vi.fn())).rejects.toBeInstanceOf(MalTokenError);
+  });
+  it('leaves a token that would need renewing to a read that may renew it, when told to', async () => {
+    const expired = signedIn(Date.now() - 1);
+    await expect(withMalToken(expired.event, vi.fn(), { renew: false })).rejects.toBeInstanceOf(
+      MalRenewalDeferredError
+    );
+
+    const revoked = signedIn(Date.now() + 3_600_000);
+    const use = vi.fn().mockRejectedValue(new MalTokenError('revoked'));
+    await expect(withMalToken(revoked.event, use, { renew: false })).rejects.toBeInstanceOf(
+      MalRenewalDeferredError
+    );
+
+    // Nothing renewed, so the sign-in in the cookie still works for the read that can renew it
+    expect(fetch).not.toHaveBeenCalled();
+    expect(revoked.event.locals.malSession).toMatchObject({ token: 'access-1' });
+  });
+
+  it('still reads with a token that lasts, when told not to renew', async () => {
+    const { event } = signedIn(Date.now() + 3_600_000);
+    expect(await withMalToken(event, vi.fn().mockResolvedValue('done'), { renew: false })).toBe(
+      'done'
+    );
+  });
+});
+
+describe('renewMalTokenIfExpiring', () => {
+  function signedIn(expiresAt: number) {
+    const { values, cookies } = jar();
+    const session: MalSession = { token: 'access-1', refreshToken: 'refresh-1', expiresAt, user };
+    return { values, event: { cookies, locals: { malSession: session } as App.Locals } };
+  }
+
+  it('renews a token about to expire, and keeps the new one', async () => {
+    const { event, values } = signedIn(Date.now() + 30_000);
+    vi.mocked(fetch).mockResolvedValue(tokens());
+    await renewMalTokenIfExpiring(event);
+    expect(event.locals.malSession).toMatchObject({ token: 'access-2' });
+    expect(JSON.parse(values.get('session_mal')!).data.token).toBe('access-2');
+  });
+
+  it('leaves a token that lasts, and a visitor not signed in, as they are', async () => {
+    await renewMalTokenIfExpiring(signedIn(Date.now() + 3_600_000).event);
+    await renewMalTokenIfExpiring({
+      cookies: jar().cookies,
+      locals: { malSession: null } as App.Locals,
+    });
+    expect(fetch).not.toHaveBeenCalled();
   });
 });
