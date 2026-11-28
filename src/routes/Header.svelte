@@ -3,6 +3,7 @@
   import { page } from '$app/state';
 
   import { startAniListSignIn } from '#lib/anilist-auth.js';
+  import ActivityMenu from '#lib/components/ActivityMenu.svelte';
   import FriendAvatar from '#lib/components/FriendAvatar.svelte';
   import Menu from '#lib/components/Menu.svelte';
   import NotificationsMenu from '#lib/components/NotificationsMenu.svelte';
@@ -240,11 +241,44 @@
           </svg>
         </a>
         {#if user}
+          <ActivityMenu>
+            {#snippet trigger({ open, props })}
+              <button
+                type="button"
+                class="utility-link menu-button"
+                class:open
+                {...props}
+                aria-label="Friends' activity"
+                title="Friends' activity"
+              >
+                <!-- A newspaper: the news from friends -->
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  width="22"
+                  height="22"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"
+                  />
+                  <path d="M18 14h-8" />
+                  <path d="M15 18h-5" />
+                  <path d="M10 6h8v4h-8V6Z" />
+                </svg>
+              </button>
+            {/snippet}
+          </ActivityMenu>
           <NotificationsMenu>
             {#snippet trigger({ open, props })}
               <button
                 type="button"
-                class="utility-link notifications-button"
+                class="utility-link menu-button"
                 class:open
                 {...props}
                 aria-label={unread ? `Notifications, ${unread} unread` : 'Notifications'}
@@ -437,14 +471,15 @@
   .github-link {
     opacity: 0.7;
   }
-  .notifications-button {
+  /* The buttons that open the activity and notifications dropdowns */
+  .menu-button {
     position: relative;
     padding: 0;
     border: 0;
     background: transparent;
     cursor: pointer;
   }
-  .notifications-button.open {
+  .menu-button.open {
     background: var(--you-blue-pale);
     color: var(--you-blue);
   }

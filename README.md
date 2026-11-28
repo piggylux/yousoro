@@ -26,6 +26,8 @@ shows you're actively watching come first. Once you've watched an episode, mark 
 - **Plan your next watch**: see next-episode countdowns and upcoming airing dates in your time zone.
 - **Catch up on AniList notifications**: see new episodes, replies, likes and follows from AniList
   without leaving your list, and clear them as you read them.
+- **Follow your friends' watching**: see the episodes the people you follow on AniList just
+  watched, and the anime they finished or plan to watch, without leaving your list.
 - **Keep up with rewatches**: track rewatch progress alongside your current shows.
 - **Share and discover**: browse friends' lists, share yours, and see which anime you're watching
   together.
