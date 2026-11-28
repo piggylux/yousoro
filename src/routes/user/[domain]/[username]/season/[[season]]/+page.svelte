@@ -23,6 +23,7 @@
   import ListFilters from '#lib/components/ListFilters.svelte';
   import SeasonAnimeDialog from '#lib/components/SeasonAnimeDialog.svelte';
   import SharedAnimePoster from '#lib/components/SharedAnimePoster.svelte';
+  import Skeleton from '#lib/components/Skeleton.svelte';
   import { ListAdds } from '#lib/list-adds.svelte.js';
   import { viewerKey } from '#lib/list-data.js';
   import { noteListMove } from '#lib/list-moves.js';
@@ -409,9 +410,9 @@
   <ul class="tile-grid" aria-hidden="true">
     {#each Array.from({ length: 12 }, (_, index) => index) as index (index)}
       <li class="season-tile">
-        <span class="skeleton-poster"></span>
-        <span class="skeleton-line"></span>
-        <span class="skeleton-line short"></span>
+        <Skeleton ratio="3 / 4" />
+        <Skeleton width="85%" />
+        <Skeleton width="55%" />
       </li>
     {/each}
   </ul>
@@ -511,7 +512,7 @@
   {:else if !ranked}
     <p class="tw:sr-only" role="status">Reading {seasonName(season)}…</p>
     <section class="season-section" aria-hidden="true">
-      <span class="skeleton-heading"><span></span></span>
+      <Skeleton width="12rem" height="1.25rem" />
       {@render skeleton()}
     </section>
   {:else if ranked.all.length === 0}
@@ -835,32 +836,6 @@
   .empty-state button {
     min-height: 44px;
     margin-top: 12px;
-  }
-
-  .skeleton-heading span,
-  .skeleton-poster,
-  .skeleton-line {
-    display: block;
-    border-radius: var(--radius-control);
-    background: var(--surface-muted);
-  }
-
-  .skeleton-heading span {
-    width: 12rem;
-    height: 1.25rem;
-  }
-
-  .skeleton-poster {
-    aspect-ratio: 3 / 4;
-  }
-
-  .skeleton-line {
-    width: 85%;
-    height: 0.75rem;
-  }
-
-  .skeleton-line.short {
-    width: 55%;
   }
 
   @media (max-width: 480px) {

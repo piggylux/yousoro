@@ -6,6 +6,7 @@
   import FriendAvatar from '#lib/components/FriendAvatar.svelte';
   import ShareButton from '#lib/components/ShareButton.svelte';
   import SharedAnimePoster from '#lib/components/SharedAnimePoster.svelte';
+  import Skeleton from '#lib/components/Skeleton.svelte';
   import YouSvg from '#lib/images/minimalist_you.svg';
   import { describeMatch, finalThought, matchComment, voiceFor } from '#lib/match-words.js';
   import {
@@ -306,7 +307,10 @@
       <p>Both names belong to the same AniList account. Compare {nameA} with someone else below.</p>
     </div>
   {:else if pair && !match}
-    <div class="result loading" aria-hidden="true"><span></span><span></span></div>
+    <div class="result loading" aria-hidden="true">
+      <Skeleton width="9rem" height="3.5rem" />
+      <Skeleton width="min(100%, 22rem)" height="1rem" />
+    </div>
     <p class="tw:sr-only" role="status">Comparing lists…</p>
   {/if}
 
@@ -561,19 +565,6 @@
     display: flex;
     flex-direction: column;
     gap: 14px;
-  }
-
-  .loading span {
-    display: block;
-    width: 9rem;
-    height: 3.5rem;
-    border-radius: var(--radius-control);
-    background: var(--surface-muted);
-  }
-
-  .loading span + span {
-    width: min(100%, 22rem);
-    height: 1rem;
   }
 
   .notice h2 {

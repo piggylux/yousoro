@@ -2,6 +2,7 @@
   import { untrack } from 'svelte';
 
   import CloseButton from '#lib/components/CloseButton.svelte';
+  import Skeleton from '#lib/components/Skeleton.svelte';
   import { closeOnBackdrop } from '#lib/dialog.js';
   import {
     nyaaNarrowing,
@@ -63,6 +64,9 @@
     nyaaNarrowing(appliedQuery === null ? search : { ...search, query: appliedQuery })
   );
   const lookingFor = $derived(allReleases ? '' : narrowing);
+  // The width of each placeholder release's title, varied so they read as titles
+  const SKELETON_TITLES = ['88%', '72%', '94%', '64%', '80%'];
+
   const searchingText = $derived(
     lookingFor ? `Searching for ${lookingFor} releases…` : 'Searching for releases…'
   );
@@ -459,10 +463,29 @@
       aria-busy={loading}
     >
       {#if loading}
-        <p class="message">
-          <span class="tw:loading tw:loading-spinner tw:loading-sm" aria-hidden="true"></span>
-          {searchingText}
-        </p>
+        <!-- Releases in outline while the search runs; the status below says what it's looking for -->
+        <div class="skeleton" aria-hidden="true">
+          <!-- Where the line saying how the releases are ordered goes -->
+          <span class="skeleton-order"><Skeleton width="13rem" /></span>
+          <ul>
+            {#each SKELETON_TITLES as width, index (index)}
+              <li>
+                <Skeleton {width} height="0.85rem" />
+                <span class="skeleton-metadata"><Skeleton width="9rem" height="0.7rem" /></span>
+                <span class="release-actions">
+                  <span class="swarm-stats">
+                    <Skeleton width="64px" height="44px" />
+                    <Skeleton width="64px" height="44px" />
+                  </span>
+                  <span class="downloads">
+                    <Skeleton width="6rem" height="38px" />
+                    <Skeleton width="6rem" height="38px" />
+                  </span>
+                </span>
+              </li>
+            {/each}
+          </ul>
+        </div>
       {:else if errorMessage}
         <div class="message">
           <p role="alert">{errorMessage}</p>
@@ -817,6 +840,20 @@
   li + li {
     border-top: 1px solid color-mix(in srgb, var(--border-subtle) 50%, transparent);
   }
+  /* As many placeholder releases as fit, without making the list scroll while it loads */
+  .skeleton {
+    height: 100%;
+    overflow: hidden;
+  }
+  .skeleton-order {
+    display: block;
+    margin-bottom: 12px;
+    padding: 3px 0;
+  }
+  .skeleton-metadata {
+    display: block;
+    margin: 10px 0;
+  }
   .release-title {
     font-size: 0.85rem;
     font-weight: 700;
@@ -917,6 +954,11 @@
     }
     section {
       max-height: 50dvh;
+    }
+    /* The list has no set height here, so the skeleton stops at the most it shows, less its padding */
+    .skeleton {
+      height: auto;
+      max-height: calc(50dvh - 3px - 8px);
     }
   }
 </style>

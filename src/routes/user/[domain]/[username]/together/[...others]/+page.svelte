@@ -8,6 +8,7 @@
   import FriendAvatar from '#lib/components/FriendAvatar.svelte';
   import ShareButton from '#lib/components/ShareButton.svelte';
   import SharedAnimePoster from '#lib/components/SharedAnimePoster.svelte';
+  import Skeleton from '#lib/components/Skeleton.svelte';
   import { joinNames, voiceFor } from '#lib/match-words.js';
   import { loadTasteProfile, parseUserName, type TasteProfileState } from '#lib/match.js';
   import { MAX_GROUP, pickForGroup, togetherPath, type GroupPick } from '#lib/together.js';
@@ -301,7 +302,10 @@
   {/if}
 
   {#if data.others.length && !settled && !failed && !retryAt}
-    <div class="result loading" aria-hidden="true"><span></span><span></span></div>
+    <div class="result loading" aria-hidden="true">
+      <Skeleton width="9rem" height="3.5rem" />
+      <Skeleton width="min(100%, 22rem)" height="1rem" />
+    </div>
     <p class="tw:sr-only" role="status">Reading everyone's lists…</p>
   {:else if picks}
     {@const [top, ...more] = picks}
@@ -611,19 +615,6 @@
     display: flex;
     flex-direction: column;
     gap: 14px;
-  }
-
-  .loading span {
-    display: block;
-    width: 9rem;
-    height: 3.5rem;
-    border-radius: var(--radius-control);
-    background: var(--surface-muted);
-  }
-
-  .loading span + span {
-    width: min(100%, 22rem);
-    height: 1rem;
   }
 
   @media (max-width: 480px) {

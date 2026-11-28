@@ -4,7 +4,8 @@
   import { untrack } from 'svelte';
 
   import AutoReadRetry from '#lib/components/AutoReadRetry.svelte';
-  import Spinner from '#lib/components/Spinner.svelte';
+  import ListSkeleton from '#lib/components/skeletons/ListSkeleton.svelte';
+  import { ownsList } from '#lib/navigation-skeleton.js';
 
   /** The first load answered before the list did, so the browser reads it now (see list-page.ts) */
   const loading = $derived(page.error?.loading === true);
@@ -16,18 +17,25 @@
   });
 </script>
 
-<section class="error-page">
-  {#if loading}
-    <Spinner />
-    <h1>Loading {page.params.username}’s list</h1>
-    <p class="error-message" role="status">{page.error?.message}</p>
-    <!-- Only the browser's script reads the list from here; without it, a reload is the way on -->
-    <noscript>
-      <p class="error-message">
-        <a href={page.url.href}>Reload the page</a> in a moment to see the list.
-      </p>
-    </noscript>
-  {:else}
+{#if loading}
+  <!-- The list in outline, filled in when the browser has read it -->
+  <ListSkeleton
+    calendar={page.url.searchParams.get('view') === 'calendar'}
+    cardSize={page.data.preferences?.cardSize}
+    own={ownsList(page.params, page.data)}
+    anilist={page.params.domain !== 'myanimelist'}
+  />
+  <p class="tw:sr-only" role="status">
+    Loading {page.params.username}’s list. {page.error?.message}
+  </p>
+  <!-- Only the browser's script reads the list from here; without it, a reload is the way on -->
+  <noscript>
+    <p class="error-message">
+      <a href={page.url.href}>Reload the page</a> in a moment to see the list.
+    </p>
+  </noscript>
+{:else}
+  <section class="error-page">
     <p class="error-code">Error {page.status}</p>
     <h1>{page.status === 404 ? 'List not found' : 'Unable to load this list'}</h1>
     <p class="error-message">{page.error?.message}</p>
@@ -37,10 +45,10 @@
       onretry={reload}
     />
     {#if page.status === 429}<button class="tw:btn" onclick={reload}>Try again</button>{/if}
-  {/if}
 
-  <a class="home-link" href="/home">Back to home</a>
-</section>
+    <a class="home-link" href="/home">Back to home</a>
+  </section>
+{/if}
 
 <style>
   .error-page {
