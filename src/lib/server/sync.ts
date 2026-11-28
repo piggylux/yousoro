@@ -62,11 +62,13 @@ function fromMal({ list_status }: MalEntry): SyncEntry {
  * MyAnimeList's list is shown as MyAnimeList has it, and found on AniList only once it's synced
  * there, so a first sync of a long list doesn't spend AniList's budget before anything is chosen.
  * Needs both sign-ins. The sync page reads them when asked; the check for lists drifting apart,
- * which nobody waits on, gives way to everything else (`priority`)
+ * which nobody waits on, gives way to everything else (`priority`). Without `renew`, the read
+ * leaves the MyAnimeList sign-in as it is (see withMalToken)
  */
 export async function getSyncPlan(
   event: SignedInEvent,
-  priority: RequestPriority = 'required'
+  priority: RequestPriority = 'required',
+  { renew = true }: { renew?: boolean } = {}
 ): Promise<SyncPlan> {
   const session = event.locals.session!;
   // Both reads finish before any failure is reported, so a MyAnimeList sign-in renewed meanwhile is
@@ -74,7 +76,7 @@ export async function getSyncPlan(
   // have changed since
   const [aniListRead, malRead] = await Promise.allSettled([
     getAllListEntries(session.user.id, session.token, priority),
-    withMalToken(event, (token) => getAllEntries(token, priority)),
+    withMalToken(event, (token) => getAllEntries(token, priority), { renew }),
   ]);
   if (aniListRead.status === 'rejected') throw aniListRead.reason;
   if (malRead.status === 'rejected') throw malRead.reason;

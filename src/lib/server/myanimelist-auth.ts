@@ -144,26 +144,55 @@ async function renew(
 }
 
 /**
+ * Thrown by a read told not to renew the MyAnimeList sign-in when it would have had to: one that may
+ * outlast the page it's for, which couldn't send the renewed token's cookie by then, and every
+ * renewal revokes the token before it. The read is left to a request that can renew, as the
+ * browser's own read of the page
+ */
+export class MalRenewalDeferredError extends Error {}
+
+/** Whether the sign-in's token expires within the minute, and so is renewed before it's used */
+function expiring(session: MalSession): boolean {
+  return session.expiresAt <= Date.now() + 60_000;
+}
+
+/**
+ * Renews the signed-in user's MyAnimeList token now if it's about to expire, so a read that
+ * mustn't renew it can go ahead with a fresh one
+ */
+export async function renewMalTokenIfExpiring(event: {
+  cookies: Cookies;
+  locals: App.Locals;
+}): Promise<void> {
+  const session = event.locals.malSession;
+  if (session && expiring(session)) await renew(event, session);
+}
+
+/**
  * Runs `use` with the signed-in user's MyAnimeList token, renewed first when it has expired. A token
  * can also be revoked early, as when another request renewed it, so one MyAnimeList rejects is
  * renewed once and tried again. Throws MalTokenError only when the sign-in can't be renewed; the
- * caller then signs the user out of MyAnimeList
+ * caller then signs the user out of MyAnimeList. Without `renew`, a token that would need renewing
+ * throws MalRenewalDeferredError instead
  */
 export async function withMalToken<T>(
   event: { cookies: Cookies; locals: App.Locals },
-  use: (token: string) => Promise<T>
+  use: (token: string) => Promise<T>,
+  { renew: renewable = true }: { renew?: boolean } = {}
 ): Promise<T> {
   const session = event.locals.malSession;
   if (!session) throw new MalTokenError('Not signed in with MyAnimeList');
-  if (session.expiresAt <= Date.now() + 60_000) {
+  const renewed = async () => {
+    if (!renewable) throw new MalRenewalDeferredError('The MyAnimeList sign-in needs renewing');
     return useRenewed(use, (await renew(event, session)).token);
-  }
+  };
+  if (expiring(session)) return renewed();
   try {
     return await use(session.token);
   } catch (err) {
     if (!(err instanceof MalTokenError)) throw err;
   }
-  return useRenewed(use, (await renew(event, session)).token);
+  return renewed();
 }
 
 /**
