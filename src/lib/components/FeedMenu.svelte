@@ -21,6 +21,7 @@
   import CloseButton from '#lib/components/CloseButton.svelte';
   import Popover, { type PopoverTriggerProps } from '#lib/components/Popover.svelte';
   import SignInButton from '#lib/components/SignInButton.svelte';
+  import Skeleton from '#lib/components/Skeleton.svelte';
   import { formatAirDate, formatTimeAgo } from '#lib/countdown.js';
   import { groupByDay } from '#lib/notifications.js';
   import { clearReadRetries, retryAfterSeconds } from '#lib/read-retry.js';
@@ -86,6 +87,17 @@
     /** Why the next page didn't load; the ones already shown stay */
     moreProblem?: Problem;
   };
+
+  // The widths of each placeholder row's two lines, varied so they read as text; enough rows to fill
+  // the panel
+  const SKELETON_WIDTHS = [
+    ['72%', '46%'],
+    ['58%', '38%'],
+    ['80%', '52%'],
+    ['64%', '42%'],
+    ['76%', '34%'],
+    ['54%', '48%'],
+  ];
 
   let popover = $state<Popover>();
   let list = $state<HTMLElement>();
@@ -177,7 +189,8 @@
     if (!open || !list || (document.activeElement && document.activeElement !== document.body)) {
       return;
     }
-    const first = pageNumber > 1 && added[0] && list.querySelector(`[data-id="${added[0].id}"]`);
+    // Only a row that links somewhere can take focus; the list takes it in place of one that doesn't
+    const first = pageNumber > 1 && added[0] && list.querySelector(`a[data-id="${added[0].id}"]`);
     (first instanceof HTMLElement ? first : list).focus();
   }
 
@@ -220,10 +233,22 @@
     {#if open}
       <div class="list" bind:this={list} tabindex="-1" aria-busy={!feed || feed.loading}>
         {#if !feed || (feed.loading && !feed.problem)}
-          <p class="message">
-            <span class="tw:loading tw:loading-spinner tw:loading-sm" aria-hidden="true"></span>
-            Loading {noun}…
-          </p>
+          <!-- Rows shaped like the ones on their way, so the list fills in where they'll be; the
+               status below says it's loading -->
+          <div class="skeleton" aria-hidden="true">
+            <span class="skeleton-day"><Skeleton width="4.5rem" /></span>
+            <ul>
+              {#each SKELETON_WIDTHS as [title, meta], index (index)}
+                <li class="row">
+                  <span class="thumbnail"><Skeleton width="40px" ratio="3 / 4" /></span>
+                  <span class="copy skeleton-copy">
+                    <Skeleton width={title} />
+                    <Skeleton width={meta} />
+                  </span>
+                </li>
+              {/each}
+            </ul>
+          </div>
         {:else if feed.problem}
           <div class="message">
             <p role="alert">{feed.problem.message}</p>
@@ -490,6 +515,20 @@
     color: var(--text-accent);
     font-size: 0.75rem;
     overflow-wrap: anywhere;
+  }
+  /* As many placeholder rows as fit, without making the list scroll while it loads */
+  .skeleton {
+    height: 100%;
+    overflow: hidden;
+  }
+  /* Where a day heading's text sits */
+  .skeleton-day {
+    display: block;
+    margin: 13px 8px 9px;
+  }
+  /* A title and the line under it */
+  .skeleton-copy {
+    gap: 8px;
   }
   .row-arrow {
     flex: none;

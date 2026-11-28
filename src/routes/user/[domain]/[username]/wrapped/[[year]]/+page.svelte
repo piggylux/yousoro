@@ -5,6 +5,7 @@
   import FriendAvatar from '#lib/components/FriendAvatar.svelte';
   import ShareButton from '#lib/components/ShareButton.svelte';
   import SharedAnimePoster from '#lib/components/SharedAnimePoster.svelte';
+  import Skeleton from '#lib/components/Skeleton.svelte';
   import YouSvg from '#lib/images/minimalist_you.svg';
   import { joinNames, voiceFor } from '#lib/match-words.js';
   import { matchPath } from '#lib/match.js';
@@ -125,7 +126,10 @@
       </button>
     </div>
   {:else if !summary}
-    <div class="panel loading" aria-hidden="true"><span></span><span></span></div>
+    <div class="panel loading" aria-hidden="true">
+      <Skeleton width="9rem" height="3.5rem" />
+      <Skeleton width="min(100%, 22rem)" height="1rem" />
+    </div>
     <p class="tw:sr-only" role="status">Reading the year…</p>
   {:else if !summary.finished}
     <div class="notice">
@@ -565,19 +569,6 @@
     display: flex;
     flex-direction: column;
     gap: 14px;
-  }
-
-  .loading span {
-    display: block;
-    width: 9rem;
-    height: 3.5rem;
-    border-radius: var(--radius-control);
-    background: var(--surface-muted);
-  }
-
-  .loading span + span {
-    width: min(100%, 22rem);
-    height: 1rem;
   }
 
   @media (max-width: 640px) {
