@@ -10,11 +10,16 @@ import {
   type RequestPriority,
 } from '#lib/server/rate-limit.js';
 import { fromAniListStatistics, type AniListStatistics } from '#lib/server/season-taste.js';
+import type { ActivityPage, FriendActivity } from '#lib/types/activity.js';
 import type { AiringStatus, Sequel } from '#lib/types/anime.js';
 import { OTHER_LISTS, type ListedIds, type OtherList } from '#lib/types/api.js';
 import type { FriendWatchingResult, SharedAnime } from '#lib/types/friend-watching.js';
 import type { TasteProfile } from '#lib/types/match.js';
-import type { AppNotification, NotificationsPage } from '#lib/types/notification.js';
+import type {
+  AppNotification,
+  NotificationMedia,
+  NotificationsPage,
+} from '#lib/types/notification.js';
 import type { ScheduleResult, ScheduledEpisode } from '#lib/types/schedule.js';
 import type { SeasonTaste } from '#lib/types/season.js';
 import type { AnimeYear } from '#lib/types/wrapped.js';
@@ -1468,7 +1473,7 @@ type NotificationFields = {
   threadId?: number | null;
   thread?: { id: number; title: string | null } | null;
   media?: NotificationMediaFields | null;
-  user?: AniListUserFields | null;
+  user?: FeedUserFields | null;
   reason?: string | null;
   deletedMediaTitles?: (string | null)[] | null;
   deletedMediaTitle?: string | null;
@@ -1523,6 +1528,16 @@ const NOTIFICATION_FIELDS = `
   }
 `;
 
+// The anime and people that notifications and friends' activity show. Their pictures are drawn at
+// 40px or less, so the smallest sizes AniList has: 100px wide, a quarter of a large avatar's weight
+const FEED_FRAGMENTS = `
+  fragment notificationMedia on Media { id type title { romaji } coverImage { medium } isAdult }
+  fragment notificationUser on User { id name avatar { medium } }
+`;
+
+/** A person as the notifications and friends' activity ask for them */
+type FeedUserFields = { id: number; name: string; avatar: { medium: string | null } | null };
+
 function isId(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) > 0;
 }
@@ -1534,6 +1549,19 @@ function httpsImage(url: string | null | undefined): string | null {
 
 function nonEmpty(text: string | null | undefined): string | null {
   return text?.trim() || null;
+}
+
+function toFeedUser(user: FeedUserFields): AniListUser {
+  return { id: user.id, name: user.name, avatarUrl: httpsImage(user.avatar?.medium) };
+}
+
+function toFeedMedia(media: NotificationMediaFields): NotificationMedia {
+  return {
+    id: media.id,
+    title: nonEmpty(media.title?.romaji),
+    coverUrl: httpsImage(media.coverImage?.medium),
+    isAdult: media.isAdult ?? false,
+  };
 }
 
 function mediaUrl(media: NotificationMediaFields | null): string | null {
@@ -1550,8 +1578,7 @@ function toNotification(fields: NotificationFields): AppNotification | null {
   if (!isNotificationType(type) || !isId(fields.id) || !isId(fields.createdAt)) return null;
 
   const media = fields.media && isId(fields.media.id) ? fields.media : null;
-  const actor = fields.user && isId(fields.user.id) ? toUser(fields.user) : null;
-  if (actor) actor.avatarUrl = httpsImage(actor.avatarUrl);
+  const actor = fields.user && isId(fields.user.id) ? toFeedUser(fields.user) : null;
   const thread = fields.thread && isId(fields.thread.id) ? fields.thread : null;
 
   // Only the notifications about an anime or manga have one, and they lead to its page
@@ -1619,16 +1646,7 @@ function toNotification(fields: NotificationFields): AppNotification | null {
     createdAt: fields.createdAt * 1000,
     href,
     ...(actor ? { actor } : {}),
-    ...(media
-      ? {
-          media: {
-            id: media.id,
-            title: nonEmpty(media.title?.romaji),
-            coverUrl: httpsImage(media.coverImage?.medium),
-            isAdult: media.isAdult ?? false,
-          },
-        }
-      : {}),
+    ...(media ? { media: toFeedMedia(media) } : {}),
     ...(isId(fields.episode) ? { episode: fields.episode } : {}),
     ...(subject ? { subject } : {}),
     ...(status ? { status } : {}),
@@ -1662,10 +1680,7 @@ export async function getNotifications(
         }
       }
     }
-    fragment notificationMedia on Media {
-      id type title { romaji } coverImage { medium } isAdult
-    }
-    fragment notificationUser on User { id name avatar { large } }`,
+    ${FEED_FRAGMENTS}`,
     { page, markRead },
     token,
     { priority: 'optional' }
@@ -1678,6 +1693,89 @@ export async function getNotifications(
     }),
     hasNextPage: data.Page.pageInfo.hasNextPage ?? false,
     ...(markRead ? { unread: Math.max(0, data.Viewer?.unreadNotificationCount ?? 0) } : {}),
+  };
+}
+
+const ACTIVITY_PAGE_SIZE = 20;
+
+/** One update to an anime list, as AniList sends it */
+type ListActivityFields = {
+  id?: number;
+  status?: string | null;
+  progress?: string | null;
+  createdAt?: number | null;
+  likeCount?: number | null;
+  replyCount?: number | null;
+  user?: FeedUserFields | null;
+  media?: NotificationMediaFields | null;
+};
+
+function count(value: unknown): number {
+  return Number.isSafeInteger(value) && (value as number) > 0 ? (value as number) : 0;
+}
+
+/**
+ * Trims an update to what the dropdown shows, linking it from its id alone; null without the
+ * person, the anime, what happened, or a time to place it by
+ */
+function toActivity(fields: ListActivityFields): FriendActivity | null {
+  const status = nonEmpty(fields.status);
+  const { user, media } = fields;
+  if (!isId(fields.id) || !isId(fields.createdAt) || !status) return null;
+  if (!user || !isId(user.id) || !nonEmpty(user.name) || !media || !isId(media.id)) return null;
+  return {
+    id: fields.id,
+    createdAt: fields.createdAt * 1000,
+    href: `${ANILIST_SITE}/activity/${fields.id}`,
+    user: toFeedUser(user),
+    media: toFeedMedia(media),
+    status,
+    progress: nonEmpty(fields.progress),
+    likes: count(fields.likeCount),
+    replies: count(fields.replyCount),
+  };
+}
+
+/**
+ * A page of the updates the people the viewer follows made to their anime lists, newest first.
+ * AniList's following feed also has the viewer's own, which are left out by id
+ */
+export async function getFriendActivity(
+  token: string,
+  { page, viewerId }: { page: number; viewerId: number }
+): Promise<ActivityPage> {
+  // Without a token AniList ignores `isFollowing`, and sends everyone's activity instead
+  if (!token) throw new AniListTokenError("An access token is required to see friends' activity");
+  const data = await query<{
+    Page: {
+      pageInfo: { hasNextPage: boolean | null };
+      activities: (ListActivityFields | null)[];
+    };
+  }>(
+    `query ($page: Int, $viewerId: Int) {
+      Page(page: $page, perPage: ${ACTIVITY_PAGE_SIZE}) {
+        pageInfo { hasNextPage }
+        activities(isFollowing: true, type: ANIME_LIST, userId_not: $viewerId, sort: ID_DESC) {
+          ... on ListActivity {
+            id status progress createdAt likeCount replyCount
+            user { ...notificationUser }
+            media { ...notificationMedia }
+          }
+        }
+      }
+    }
+    ${FEED_FRAGMENTS}`,
+    { page, viewerId },
+    token,
+    { priority: 'optional' }
+  );
+
+  return {
+    activities: data.Page.activities.flatMap((fields) => {
+      const activity = fields && toActivity(fields);
+      return activity ? [activity] : [];
+    }),
+    hasNextPage: data.Page.pageInfo.hasNextPage ?? false,
   };
 }
 

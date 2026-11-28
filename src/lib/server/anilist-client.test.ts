@@ -9,6 +9,7 @@ import {
   getAllListEntries,
   getAnimeYear,
   getFollowing,
+  getFriendActivity,
   getLatestAirings,
   getListEntry,
   getListStatus,
@@ -1090,7 +1091,7 @@ describe('AniList notifications', () => {
   const user = (id: number, name: string, avatar: string | null = null) => ({
     id,
     name,
-    avatar: { large: avatar },
+    avatar: { medium: avatar },
   });
   const media = (id: number, type: 'ANIME' | 'MANGA' = 'ANIME') => ({
     id,
@@ -1282,6 +1283,137 @@ describe('AniList notifications', () => {
       Response.json({ data: null, errors: [{ message: 'Invalid token' }] })
     );
     await expect(getNotifications('token', { page: 1, markRead: true })).rejects.toBeInstanceOf(
+      AniListTokenError
+    );
+  });
+});
+
+describe("friends' activity", () => {
+  const user = (id: number, name: string, avatar: string | null = null) => ({
+    id,
+    name,
+    avatar: { medium: avatar },
+  });
+  const media = (id: number) => ({
+    id,
+    type: 'ANIME',
+    title: { romaji: `Title ${id}` },
+    coverImage: { medium: `https://s4.anilist.co/cover/${id}.jpg` },
+    isAdult: false,
+  });
+
+  function respond(activities: unknown[]) {
+    vi.mocked(fetch).mockResolvedValue(
+      Response.json({ data: { Page: { pageInfo: { hasNextPage: true }, activities } } })
+    );
+  }
+  function sent() {
+    return JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string);
+  }
+
+  it("reads anime list updates from the people the viewer follows, leaving out the viewer's own", async () => {
+    respond([]);
+    expect(await getFriendActivity('token', { page: 2, viewerId: 10 })).toEqual({
+      activities: [],
+      hasNextPage: true,
+    });
+    expect(sent().variables).toEqual({ page: 2, viewerId: 10 });
+    expect(sent().query).toContain('isFollowing: true');
+    expect(sent().query).toContain('type: ANIME_LIST');
+    expect(sent().query).toContain('userId_not: $viewerId');
+    // Avatars are drawn small, so the smallest size, not the large one lists use
+    expect(sent().query).toContain('avatar { medium }');
+    expect(vi.mocked(fetch).mock.calls[0][1]!.headers).toHaveProperty(
+      'Authorization',
+      'Bearer token'
+    );
+    expect(takeAniListRequest).toHaveBeenCalledWith('optional');
+  });
+
+  it("never asks without a token, as AniList would send everyone's activity", async () => {
+    await expect(getFriendActivity('', { page: 1, viewerId: 10 })).rejects.toBeInstanceOf(
+      AniListTokenError
+    );
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('trims each update and links it from its id alone', async () => {
+    respond([
+      {
+        id: 30,
+        status: 'watched episode',
+        progress: '3 - 5',
+        createdAt: 1_700_000_000,
+        likeCount: 2,
+        replyCount: null,
+        user: user(5, 'Alice', 'http://insecure/a.png'),
+        media: media(1),
+      },
+      {
+        id: 29,
+        status: ' completed ',
+        progress: ' ',
+        createdAt: 1,
+        likeCount: -1,
+        replyCount: 1,
+        user: user(6, 'Bob', 'https://s4.anilist.co/avatar/6.png'),
+        media: { ...media(2), title: null, coverImage: null, isAdult: true },
+      },
+    ]);
+    expect((await getFriendActivity('token', { page: 1, viewerId: 10 })).activities).toEqual([
+      {
+        id: 30,
+        createdAt: 1_700_000_000_000,
+        href: 'https://anilist.co/activity/30',
+        user: { id: 5, name: 'Alice', avatarUrl: null },
+        media: {
+          id: 1,
+          title: 'Title 1',
+          coverUrl: 'https://s4.anilist.co/cover/1.jpg',
+          isAdult: false,
+        },
+        status: 'watched episode',
+        progress: '3 - 5',
+        likes: 2,
+        replies: 0,
+      },
+      {
+        id: 29,
+        createdAt: 1000,
+        href: 'https://anilist.co/activity/29',
+        user: { id: 6, name: 'Bob', avatarUrl: 'https://s4.anilist.co/avatar/6.png' },
+        media: { id: 2, title: null, coverUrl: null, isAdult: true },
+        status: 'completed',
+        progress: null,
+        likes: 0,
+        replies: 1,
+      },
+    ]);
+  });
+
+  it("leaves out updates it can't show", async () => {
+    const valid = { status: 'completed', createdAt: 1, user: user(5, 'Alice'), media: media(1) };
+    respond([
+      null,
+      {},
+      { ...valid, id: 0 },
+      { ...valid, id: 1, createdAt: null },
+      { ...valid, id: 2, status: ' ' },
+      { ...valid, id: 3, user: null },
+      { ...valid, id: 4, user: user(5, ' ') },
+      { ...valid, id: 5, media: null },
+      { ...valid, id: 6, media: { ...media(0) } },
+      { ...valid, id: 7 },
+    ]);
+    const { activities } = await getFriendActivity('token', { page: 1, viewerId: 10 });
+    expect(activities.map(({ id }) => id)).toEqual([7]);
+  });
+
+  it('passes on a rejected token', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      Response.json({ data: null, errors: [{ message: 'Invalid token' }] })
+    );
+    await expect(getFriendActivity('token', { page: 1, viewerId: 10 })).rejects.toBeInstanceOf(
       AniListTokenError
     );
   });
